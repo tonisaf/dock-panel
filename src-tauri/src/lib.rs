@@ -2,6 +2,7 @@ mod ai_limits;
 mod alerts;
 mod apps;
 mod calendar;
+mod home;
 mod claude_web;
 mod media;
 mod net;
@@ -99,8 +100,19 @@ pub fn run() {
             spotify::spotify_logout,
             spotify::spotify_library,
             spotify::spotify_play,
+            spotify::spotify_current,
+            spotify::spotify_set_liked,
+            spotify::spotify_devices,
+            spotify::spotify_transfer,
+            spotify::spotify_search,
+            spotify::spotify_queue,
             weather::weather_forecast,
             weather::weather_geocode,
+            home::home_state,
+            home::home_lamp_set,
+            home::home_speaker_control,
+            home::home_rename,
+            home::home_forget,
             vpn::vpn_status,
             vpn::vpn_toggle,
             vpn::vpn_open,

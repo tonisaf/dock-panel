@@ -8,6 +8,7 @@ import { CalendarWidget } from "./calendar/CalendarWidget";
 import { PlaylistsWidget } from "./spotify/PlaylistsWidget";
 import { VpnWidget } from "./vpn/VpnWidget";
 import { PinnedWidget } from "./pinned/PinnedWidget";
+import { HomeWidget } from "./home/HomeWidget";
 
 export interface WidgetDef {
   id: string;
@@ -28,5 +29,6 @@ export const WIDGETS: WidgetDef[] = [
   { id: "tasks", title: "Задачи", component: TasksWidget },
   { id: "ai", title: "Лимиты AI", component: AiLimitsWidget },
   { id: "vpn", title: "VPN", component: VpnWidget },
+  { id: "home", title: "Дом", component: HomeWidget },
   { id: "system", title: "Система", component: SystemWidget },
 ];

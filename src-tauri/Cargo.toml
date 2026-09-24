@@ -31,6 +31,10 @@ reqwest = { version = "0.13.5", default-features = false, features = ["json", "f
 sha2 = "0.11.0"
 getrandom = "0.4.3"
 tauri-plugin-updater = "2.12.0"
+mdns-sd = "0.21.4"
+if-addrs = "0.15.0"
+native-tls = "0.2"
+socket2 = "0.6"
 
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.8.1"
