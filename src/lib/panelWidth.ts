@@ -18,10 +18,12 @@ export interface PanelSettings {
   edge: Edge;
   /** Accelerator string, e.g. "Ctrl+Space". */
   shortcut: string;
+  /** Dock Panel button at the left end of the taskbar. */
+  taskbarButton: boolean;
 }
 
 const KEY = ["panel-settings"];
-const DEFAULTS: PanelSettings = { width: 440, edge: "left", shortcut: "Ctrl+Space" };
+const DEFAULTS: PanelSettings = { width: 440, edge: "left", shortcut: "Ctrl+Space", taskbarButton: true };
 
 export function usePanelSettings() {
   const queryClient = useQueryClient();
@@ -37,6 +39,8 @@ export function usePanelSettings() {
     setEdge: async (edge: Edge) => update(await invoke<PanelSettings>("panel_set_edge", { edge })),
     /** Throws the backend's message if the combination is taken. */
     setShortcut: async (shortcut: string) => update(await invoke<PanelSettings>("panel_set_shortcut", { shortcut })),
+    setTaskbarButton: async (on: boolean) =>
+      update(await invoke<PanelSettings>("panel_set_taskbar_button", { on })),
     suspendShortcut: (suspend: boolean) => invoke("panel_suspend_shortcut", { suspend }),
   };
 }

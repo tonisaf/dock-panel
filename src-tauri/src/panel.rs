@@ -67,6 +67,7 @@ pub fn init(app: &AppHandle) -> String {
     if let Some(s) = saved["shortcut"].as_str() {
         *SHORTCUT.lock().unwrap_or_else(|e| e.into_inner()) = s.to_string();
     }
+    crate::taskbar::set_enabled(saved["taskbarButton"].as_bool().unwrap_or(true));
     let shortcut = shortcut_text();
 
     let Some(win) = window(app) else { return shortcut };
@@ -202,6 +203,9 @@ pub struct PanelSettings {
     width: u32,
     edge: &'static str,
     shortcut: String,
+    /// Show the Dock Panel button on the taskbar.
+    #[serde(rename = "taskbarButton")]
+    taskbar_button: bool,
 }
 
 fn current_settings() -> PanelSettings {
@@ -209,6 +213,7 @@ fn current_settings() -> PanelSettings {
         width: WIDTH.load(Ordering::SeqCst),
         edge: if RIGHT.load(Ordering::SeqCst) { "right" } else { "left" },
         shortcut: shortcut_text(),
+        taskbar_button: crate::taskbar::enabled(),
     }
 }
 
@@ -230,6 +235,13 @@ pub fn panel_set_edge(app: AppHandle, edge: String) -> PanelSettings {
     if let Some(win) = window(&app) {
         place_on_cursor_monitor(&app, &win);
     }
+    current_settings()
+}
+
+#[tauri::command]
+pub fn panel_set_taskbar_button(app: AppHandle, on: bool) -> PanelSettings {
+    crate::taskbar::set_enabled(on);
+    save_settings(&app);
     current_settings()
 }
 

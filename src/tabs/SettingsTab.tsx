@@ -192,6 +192,15 @@ function EdgeRow() {
   );
 }
 
+function TaskbarButtonRow() {
+  const { taskbarButton, setTaskbarButton } = usePanelSettings();
+  return (
+    <Row label="Кнопка на панели задач" hint="Слева на панели задач, когда значки по центру">
+      <Toggle on={taskbarButton} onChange={setTaskbarButton} />
+    </Row>
+  );
+}
+
 function AppearanceSection() {
   const { theme, setTheme, systemAccent, setSystemAccent } = usePrefs();
   return (
@@ -235,6 +244,7 @@ export function SettingsTab() {
         </Row>
         <ShortcutRow />
         <EdgeRow />
+        <TaskbarButtonRow />
         <WidthRow />
       </div>
       <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Оформление</h3>

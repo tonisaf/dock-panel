@@ -11,6 +11,7 @@ mod panel;
 mod secrets;
 mod spotify;
 mod system;
+mod taskbar;
 mod tray;
 mod updater;
 mod vpn;
@@ -48,6 +49,7 @@ pub fn run() {
             let handle = app.handle();
             let shortcut = panel::init(handle);
             tray::init(handle, &shortcut)?;
+            taskbar::start(handle);
             claude_web::init(handle);
             alerts::init(handle);
             updater::init(handle);
@@ -68,6 +70,7 @@ pub fn run() {
             panel::panel_set_shortcut,
             panel::panel_suspend_shortcut,
             panel::panel_set_width,
+            panel::panel_set_taskbar_button,
             apps::list_apps,
             apps::launch_app,
             apps::pick_files,
