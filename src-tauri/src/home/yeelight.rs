@@ -31,9 +31,30 @@ pub struct Known {
     pub support: Vec<String>,
 }
 
+impl Known {
+    pub fn supports(&self, method: &str) -> bool {
+        self.support.iter().any(|s| s == method)
+    }
+
+    /// Lamps like the Monitor Light Bar Pro have a second, RGB "background"
+    /// light driven by the same commands with a `bg_` prefix.
+    pub fn has_background(&self) -> bool {
+        self.supports("bg_set_power")
+    }
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct LampState {
+    #[serde(flatten)]
+    pub main: Light,
+    /// The background light, on lamps that have one.
+    pub bg: Option<Light>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Light {
     pub power: bool,
     /// 1–100.
     pub bright: u8,
@@ -126,16 +147,27 @@ pub fn call(lamp: &Known, method: &str, params: Value) -> Result<Value, String> 
     }
 }
 
+const MAIN_PROPS: [&str; 5] = ["power", "bright", "ct", "rgb", "color_mode"];
+const BG_PROPS: [&str; 5] = ["bg_power", "bg_bright", "bg_ct", "bg_rgb", "bg_lmode"];
+
 pub fn state(lamp: &Known) -> Result<LampState, String> {
-    let r = call(lamp, "get_prop", json!(["power", "bright", "ct", "rgb", "color_mode"]))?;
-    let num = |i: usize| r[i].as_str().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
-    Ok(LampState {
-        power: r[0] == "on",
-        bright: num(1).clamp(1, 100) as u8,
-        ct: num(2) as u16,
-        rgb: num(3),
-        color_mode: num(4) as u8,
-    })
+    let has_bg = lamp.has_background();
+    let mut props = MAIN_PROPS.to_vec();
+    if has_bg {
+        props.extend(BG_PROPS);
+    }
+    let r = call(lamp, "get_prop", json!(props))?;
+    let light = |at: usize| {
+        let num = |i: usize| r[at + i].as_str().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+        Light {
+            power: r[at] == "on",
+            bright: num(1).clamp(1, 100) as u8,
+            ct: num(2) as u16,
+            rgb: num(3),
+            color_mode: num(4) as u8,
+        }
+    };
+    Ok(LampState { main: light(0), bg: has_bg.then(|| light(MAIN_PROPS.len())) })
 }
 
 /// Changes requested from the UI; unset fields stay as they are.
@@ -145,30 +177,31 @@ pub struct Change {
     pub bright: Option<u8>,
     pub ct: Option<u16>,
     pub rgb: Option<u32>,
+    /// Applies to the background light instead of the main one.
+    #[serde(default)]
+    pub background: bool,
 }
 
-/// Brightness and colour are accepted only while the lamp is on, so moving a
-/// slider on a lamp that is off turns it on first.
+/// Brightness and colour are accepted only while the light is on, so moving a
+/// slider on a light that is off turns it on first.
 pub fn apply(lamp: &Known, change: &Change) -> Result<(), String> {
+    let prefix = if change.background { "bg_" } else { "" };
+    let send = |method: &str, params: Value| call(lamp, &format!("{prefix}{method}"), params).map(drop);
     let adjusts = change.bright.is_some() || change.ct.is_some() || change.rgb.is_some();
     match change.power {
-        Some(false) => return call(lamp, "set_power", json!(["off", "smooth", FADE])).map(drop),
-        Some(true) => {
-            call(lamp, "set_power", json!(["on", "smooth", FADE]))?;
-        }
-        None if adjusts => {
-            call(lamp, "set_power", json!(["on", "smooth", FADE]))?;
-        }
+        Some(false) => return send("set_power", json!(["off", "smooth", FADE])),
+        Some(true) => send("set_power", json!(["on", "smooth", FADE]))?,
+        None if adjusts => send("set_power", json!(["on", "smooth", FADE]))?,
         None => {}
     }
     if let Some(b) = change.bright {
-        call(lamp, "set_bright", json!([b.clamp(1, 100), "smooth", FADE]))?;
+        send("set_bright", json!([b.clamp(1, 100), "smooth", FADE]))?;
     }
     if let Some(ct) = change.ct {
-        call(lamp, "set_ct_abx", json!([ct.clamp(CT_MIN, CT_MAX), "smooth", FADE]))?;
+        send("set_ct_abx", json!([ct.clamp(CT_MIN, CT_MAX), "smooth", FADE]))?;
     }
     if let Some(rgb) = change.rgb {
-        call(lamp, "set_rgb", json!([rgb.clamp(1, 0xFF_FF_FF), "smooth", FADE]))?;
+        send("set_rgb", json!([rgb.clamp(1, 0xFF_FF_FF), "smooth", FADE]))?;
     }
     Ok(())
 }

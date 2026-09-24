@@ -86,6 +86,9 @@ pub struct Lamp {
     model: String,
     supports_ct: bool,
     supports_rgb: bool,
+    /// Colour controls of the background light (see `LampState::bg`).
+    bg_supports_ct: bool,
+    bg_supports_rgb: bool,
     ct_min: u16,
     ct_max: u16,
     /// `None` when the lamp didn't answer.
@@ -115,13 +118,14 @@ fn lamp_name(saved: &Saved, id: &str, known: &yeelight::Known) -> String {
 }
 
 fn lamp(saved: &Saved, id: &str, known: &yeelight::Known, state: Option<yeelight::LampState>) -> Lamp {
-    let supports = |m: &str| known.support.iter().any(|s| s == m);
     Lamp {
         id: id.to_string(),
         name: lamp_name(saved, id, known),
         model: known.model.clone(),
-        supports_ct: supports("set_ct_abx"),
-        supports_rgb: supports("set_rgb"),
+        supports_ct: known.supports("set_ct_abx"),
+        supports_rgb: known.supports("set_rgb"),
+        bg_supports_ct: known.supports("bg_set_ct_abx"),
+        bg_supports_rgb: known.supports("bg_set_rgb"),
         ct_min: yeelight::CT_MIN,
         ct_max: yeelight::CT_MAX,
         state,

@@ -18,7 +18,16 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { Card } from "../../components/Card";
-import { kelvinToRgb, lampColor, useHome, useHomeActions, type Lamp, type Speaker } from "./api";
+import {
+  kelvinToRgb,
+  lampColor,
+  useHome,
+  useHomeActions,
+  type Lamp,
+  type LampChange,
+  type Light,
+  type Speaker,
+} from "./api";
 
 /** Colours offered for RGB lamps, plus the warm white they usually run at. */
 const SWATCHES = [0xff3b30, 0xff9500, 0xffcc00, 0x34c759, 0x00c7be, 0x007aff, 0xaf52de, 0xff2d55];
@@ -142,6 +151,62 @@ function RowTools({ id, name, offline, onRename }: { id: string; name: string; o
   );
 }
 
+/** Brightness, colour temperature and colour swatches for one light of a lamp. */
+function LightControls({
+  lamp,
+  light,
+  supportsCt,
+  supportsRgb,
+  onChange,
+}: {
+  lamp: Lamp;
+  light: Light;
+  supportsCt: boolean;
+  supportsRgb: boolean;
+  onChange: (c: LampChange) => void;
+}) {
+  const warm = kelvinToRgb(lamp.ctMin).join(" ");
+  const cold = kelvinToRgb(lamp.ctMax).join(" ");
+  return (
+    <>
+      <label className="flex flex-col gap-1.5 text-[11.5px] text-fg-subtle">
+        Яркость
+        <Slider label="Яркость" value={light.bright} min={1} max={100} onCommit={(bright) => onChange({ bright })} />
+      </label>
+      {supportsCt && (
+        <label className="flex flex-col gap-1.5 text-[11.5px] text-fg-subtle">
+          Температура · {light.ct} K
+          <Slider
+            label="Температура"
+            value={Math.min(lamp.ctMax, Math.max(lamp.ctMin, light.ct))}
+            min={lamp.ctMin}
+            max={lamp.ctMax}
+            step={100}
+            track={`linear-gradient(to right, rgb(${warm}), rgb(${cold}))`}
+            onCommit={(ct) => onChange({ ct })}
+          />
+        </label>
+      )}
+      {supportsRgb && (
+        <div className="flex flex-wrap gap-1.5">
+          {SWATCHES.map((rgb) => (
+            <button
+              key={rgb}
+              onClick={() => onChange({ rgb })}
+              title="Цвет"
+              className={clsx(
+                "size-6 rounded-full ring-offset-2 ring-offset-popover transition-transform hover:scale-110",
+                light.colorMode === 1 && light.rgb === rgb && "ring-2 ring-fg/60",
+              )}
+              style={{ background: `#${rgb.toString(16).padStart(6, "0")}` }}
+            />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 function LampRow({ lamp }: { lamp: Lamp }) {
   const { setLamp } = useHomeActions();
   const [open, setOpen] = useState(false);
@@ -149,13 +214,12 @@ function LampRow({ lamp }: { lamp: Lamp }) {
   const [error, setError] = useState<string | null>(null);
   const s = lamp.state;
   const on = !!s?.power;
-  const change = (c: Parameters<typeof setLamp>[1]) => {
+  const bg = s?.bg;
+  const change = (c: LampChange) => {
     setError(null);
     setLamp(lamp, c).catch((e) => setError(String(e)));
   };
-
-  const warm = kelvinToRgb(lamp.ctMin).join(" ");
-  const cold = kelvinToRgb(lamp.ctMax).join(" ");
+  const status = !s ? "не отвечает" : [on ? `${s.bright}%` : "выключена", bg?.power && "подсветка"].filter(Boolean).join(" · ");
 
   return (
     <div className={clsx("rounded-xl transition-colors", open && "bg-ink/5")}>
@@ -181,7 +245,7 @@ function LampRow({ lamp }: { lamp: Lamp }) {
             <div className="truncate text-[13.5px]">{lamp.name}</div>
           )}
           <div className={clsx("text-[11.5px]", error ? "text-warn" : "text-fg-subtle")}>
-            {error ?? (!s ? "не отвечает" : on ? `${s.bright}%` : "выключена")}
+            {error ?? status}
           </div>
         </div>
         {s && <ChevronDown className={clsx("size-3.5 text-fg-subtle transition-transform", open && "rotate-180")} />}
@@ -190,38 +254,30 @@ function LampRow({ lamp }: { lamp: Lamp }) {
 
       {open && s && (
         <div className="flex flex-col gap-3 px-3 pt-1 pb-3">
-          <label className="flex flex-col gap-1.5 text-[11.5px] text-fg-subtle">
-            Яркость
-            <Slider label="Яркость" value={s.bright} min={1} max={100} onCommit={(bright) => change({ bright })} />
-          </label>
-          {lamp.supportsCt && (
-            <label className="flex flex-col gap-1.5 text-[11.5px] text-fg-subtle">
-              Температура · {s.ct} K
-              <Slider
-                label="Температура"
-                value={Math.min(lamp.ctMax, Math.max(lamp.ctMin, s.ct))}
-                min={lamp.ctMin}
-                max={lamp.ctMax}
-                step={100}
-                track={`linear-gradient(to right, rgb(${warm}), rgb(${cold}))`}
-                onCommit={(ct) => change({ ct })}
-              />
-            </label>
-          )}
-          {lamp.supportsRgb && (
-            <div className="flex flex-wrap gap-1.5">
-              {SWATCHES.map((rgb) => (
-                <button
-                  key={rgb}
-                  onClick={() => change({ rgb })}
-                  title="Цвет"
-                  className={clsx(
-                    "size-6 rounded-full ring-offset-2 ring-offset-popover transition-transform hover:scale-110",
-                    s.colorMode === 1 && s.rgb === rgb && "ring-2 ring-fg/60",
-                  )}
-                  style={{ background: `#${rgb.toString(16).padStart(6, "0")}` }}
+          <LightControls
+            lamp={lamp}
+            light={s}
+            supportsCt={lamp.supportsCt}
+            supportsRgb={lamp.supportsRgb}
+            onChange={change}
+          />
+          {bg && (
+            <div className="flex flex-col gap-3 border-t border-stroke pt-3">
+              <div className="flex items-center gap-2 text-[12px]">
+                <span
+                  className="size-2.5 rounded-full bg-ink/15"
+                  style={bg.power ? { background: lampColor(bg) } : undefined}
                 />
-              ))}
+                <span className="flex-1">Подсветка</span>
+                <Toggle on={bg.power} onChange={(power) => change({ power, background: true })} />
+              </div>
+              <LightControls
+                lamp={lamp}
+                light={bg}
+                supportsCt={lamp.bgSupportsCt}
+                supportsRgb={lamp.bgSupportsRgb}
+                onChange={(c) => change({ ...c, background: true })}
+              />
             </div>
           )}
           <RowTools id={lamp.id} name={lamp.name} offline={false} onRename={() => setRenaming(true)} />

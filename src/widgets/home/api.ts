@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-export interface LampState {
+export interface Light {
   power: boolean;
   /** 1–100. */
   bright: number;
@@ -13,12 +13,19 @@ export interface LampState {
   colorMode: number;
 }
 
+export interface LampState extends Light {
+  /** The background light, on lamps that have one (e.g. Monitor Light Bar Pro). */
+  bg: Light | null;
+}
+
 export interface Lamp {
   id: string;
   name: string;
   model: string;
   supportsCt: boolean;
   supportsRgb: boolean;
+  bgSupportsCt: boolean;
+  bgSupportsRgb: boolean;
   ctMin: number;
   ctMax: number;
   /** null when the lamp didn't answer. */
@@ -55,6 +62,8 @@ export interface LampChange {
   bright?: number;
   ct?: number;
   rgb?: number;
+  /** Applies to the background light instead of the main one. */
+  background?: boolean;
 }
 
 export type SpeakerControl =
@@ -85,11 +94,13 @@ export function useHomeActions() {
     rescan: async () => queryClient.setQueryData(KEY, await invoke<HomeState>("home_state", { rescan: true })),
 
     setLamp: async (lamp: Lamp, change: LampChange) => {
-      if (lamp.state) {
-        const optimistic = { ...lamp.state, ...change, power: change.power ?? true };
-        if (change.rgb != null) optimistic.colorMode = 1;
-        if (change.ct != null) optimistic.colorMode = 2;
-        putLamp({ ...lamp, state: optimistic });
+      const { background, ...fields } = change;
+      const target = background ? lamp.state?.bg : lamp.state;
+      if (lamp.state && target) {
+        const next: Light = { ...target, ...fields, power: fields.power ?? true };
+        if (fields.rgb != null) next.colorMode = 1;
+        if (fields.ct != null) next.colorMode = 2;
+        putLamp({ ...lamp, state: background ? { ...lamp.state, bg: next } : { ...lamp.state, ...next } });
       }
       try {
         putLamp(await invoke<Lamp>("home_lamp_set", { id: lamp.id, change }));
@@ -139,7 +150,7 @@ export function kelvinToRgb(kelvin: number): [number, number, number] {
 }
 
 /** CSS colour the lamp is shining with right now. */
-export function lampColor(s: LampState) {
+export function lampColor(s: Light) {
   if (s.colorMode === 1) return `#${s.rgb.toString(16).padStart(6, "0")}`;
   const [r, g, b] = kelvinToRgb(s.ct || 4000);
   return `rgb(${r} ${g} ${b})`;
