@@ -71,6 +71,9 @@ export function SpotifySettings() {
           <div className={clsx("text-[12px] leading-relaxed", status.error ? "text-warn" : "text-ok")}>
             {status.error ?? "Подключено"}
           </div>
+          {!status.error && !status.canLike && (
+            <div className="text-[12px] leading-relaxed text-warn">Чтобы ставить лайки, выйдите и войдите снова</div>
+          )}
         </div>
         <button className={button} onClick={logout}>
           Выйти
@@ -96,8 +99,8 @@ export function SpotifySettings() {
         <li>Нажмите «Войти»: откроется браузер, разрешите доступ.</li>
       </ol>
       <p className="text-[11.5px] text-fg-subtle">
-        Spotify пускает приложения в режиме разработки, только если у их владельца Premium. Панель читает плейлисты и
-        может запускать их; пароль и токены хранятся в Windows, не в панели.
+        Spotify пускает приложения в режиме разработки, только если у их владельца Premium. Панель читает плейлисты,
+        запускает музыку, ставит лайки и переключает устройства; пароль и токены хранятся в Windows, не в панели.
       </p>
       <div className="flex gap-2">
         <input

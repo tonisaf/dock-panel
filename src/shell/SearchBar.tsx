@@ -2,20 +2,26 @@ import { forwardRef, type KeyboardEvent } from "react";
 import { Search } from "lucide-react";
 import { launchApp, useSearchResults } from "../lib/apps";
 import { usePanelStore } from "../store";
+import { activateSpotifyItem, useSpotifySearch } from "../widgets/spotify/SpotifySearch";
 
 export const SearchBar = forwardRef<HTMLInputElement>(function SearchBar(_, ref) {
   const { query, setQuery, tab, setTab, selected, setSelected } = usePanelStore();
-  const results = useSearchResults();
+  const apps = useSearchResults();
+  const spotify = useSpotifySearch();
+  // "sp <query>" searches Spotify instead of apps.
+  const count = spotify.term ? spotify.results.length : apps.length;
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (!results.length) return;
+    if (!count) return;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       const step = e.key === "ArrowDown" ? 1 : -1;
-      setSelected((selected + step + results.length) % results.length);
+      setSelected((selected + step + count) % count);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      launchApp(results[Math.min(selected, results.length - 1)].id);
+      const i = Math.min(selected, count - 1);
+      if (spotify.term) activateSpotifyItem(spotify.results[i], e.shiftKey);
+      else launchApp(apps[i].id);
     }
   };
 
@@ -31,7 +37,7 @@ export const SearchBar = forwardRef<HTMLInputElement>(function SearchBar(_, ref)
           if (e.target.value && tab !== "apps") setTab("apps");
         }}
         onKeyDown={onKeyDown}
-        placeholder="Поиск приложений"
+        placeholder="Приложения и файлы · sp … — Spotify"
         spellCheck={false}
         className="h-full flex-1 bg-transparent text-[15px] outline-none placeholder:text-fg-subtle"
       />

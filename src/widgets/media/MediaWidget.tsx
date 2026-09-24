@@ -6,6 +6,7 @@ import clsx from "clsx";
 import { Card } from "../../components/Card";
 import { AppIcon } from "../../components/AppIcon";
 import { useAppsById } from "../../lib/apps";
+import { SpotifyActions } from "./SpotifyActions";
 
 interface NowPlaying {
   title: string;
@@ -83,6 +84,7 @@ export function MediaWidget() {
   }
 
   const sourceApp = apps.get(np.source);
+  const isSpotify = np.source.toLowerCase().includes("spotify");
   const btn = "grid place-items-center rounded-full transition-colors hover:bg-ink/10 disabled:opacity-30";
 
   return (
@@ -123,15 +125,22 @@ export function MediaWidget() {
         </div>
       </div>
 
-      {position != null && np.durationMs && (
+      {(position != null && np.durationMs) || (isSpotify && trackKey) ? (
         <div className="relative mt-3 flex items-center gap-2 text-[11px] text-fg-subtle tabular-nums">
-          <span>{fmt(position)}</span>
-          <div className="h-1 flex-1 overflow-hidden rounded-full bg-ink/10">
-            <div className="h-full rounded-full bg-fg/80" style={{ width: `${(position / np.durationMs) * 100}%` }} />
-          </div>
-          <span>{fmt(np.durationMs)}</span>
+          {position != null && np.durationMs ? (
+            <>
+              <span>{fmt(position)}</span>
+              <div className="h-1 flex-1 overflow-hidden rounded-full bg-ink/10">
+                <div className="h-full rounded-full bg-fg/80" style={{ width: `${(position / np.durationMs) * 100}%` }} />
+              </div>
+              <span>{fmt(np.durationMs)}</span>
+            </>
+          ) : (
+            <div className="flex-1" />
+          )}
+          {isSpotify && trackKey && <SpotifyActions trackKey={trackKey} />}
         </div>
-      )}
+      ) : null}
     </Card>
   );
 }

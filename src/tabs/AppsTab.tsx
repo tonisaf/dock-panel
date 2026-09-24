@@ -6,6 +6,8 @@ import { usePanelStore } from "../store";
 import { AppGrid, AppRow } from "../components/AppTile";
 import { EmptyState } from "../components/Card";
 import { PinFromDisk } from "../components/PinFromDisk";
+import { spotifyTerm } from "../widgets/spotify/api";
+import { SpotifyResults } from "../widgets/spotify/SpotifySearch";
 
 const RECENT_COUNT = 8;
 
@@ -81,6 +83,7 @@ export function AppsTab() {
     [usage, byId, pinnedIds],
   );
 
+  if (spotifyTerm(query)) return <SpotifyResults />;
   if (query.trim()) return <SearchResults />;
   if (isPending) return <Skeleton />;
   if (isError || !apps) {

@@ -4,6 +4,7 @@ import { Heart, ListMusic, Loader2, Play } from "lucide-react";
 import { Card } from "../../components/Card";
 import { usePanelStore } from "../../store";
 import { playUri, useLibrary, useSpotifyStatus } from "./api";
+import { DevicePicker } from "./DevicePicker";
 
 const COLLAPSED = 7;
 
@@ -76,7 +77,7 @@ export function PlaylistsWidget() {
   const tracks = (n: number | null) => (n == null ? undefined : `${n} треков`);
 
   return (
-    <Card title="Плейлисты" icon={ListMusic}>
+    <Card title="Плейлисты" icon={ListMusic} action={<DevicePicker className="size-6" />}>
       {isError ? (
         <p className="text-[12px] leading-relaxed text-warn">{String(error)}</p>
       ) : isPending ? (
