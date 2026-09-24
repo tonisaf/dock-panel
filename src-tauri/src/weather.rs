@@ -110,7 +110,7 @@ pub async fn weather_geocode(query: String) -> Result<Sourced, String> {
         *last = Some(next);
         next - now
     };
-    pause(wait).await;
+    net::sleep(wait).await;
 
     let nominatim = [
         ("q", query),
@@ -122,10 +122,4 @@ pub async fn weather_geocode(query: String) -> Result<Sourced, String> {
     ];
     let body = get_json("https://nominatim.openstreetmap.org/search", &nominatim, None).await?;
     Ok(Sourced { source: "nominatim", body })
-}
-
-async fn pause(d: Duration) {
-    if !d.is_zero() {
-        let _ = tauri::async_runtime::spawn_blocking(move || std::thread::sleep(d)).await;
-    }
 }

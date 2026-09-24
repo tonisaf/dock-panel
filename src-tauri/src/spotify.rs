@@ -30,6 +30,9 @@ const LOGIN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const REDIRECT_PORT: u16 = 43821;
 /// Opens Liked Songs in the desktop app.
 const LIKED_URI: &str = "spotify:collection:tracks";
+/// How long to wait for a just-launched Spotify app to show up as a device.
+const DEVICE_WAIT: Duration = Duration::from_secs(15);
+const DEVICE_POLL: Duration = Duration::from_millis(750);
 
 #[derive(Serialize, Deserialize)]
 struct Stored {
@@ -316,25 +319,101 @@ pub async fn spotify_library() -> Result<Library, String> {
 #[derive(Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PlayOutcome {
-    /// Started playback through the API (Premium, active device).
+    /// Started through the API on a running Spotify.
     Played,
-    /// Opened in the Spotify app instead.
+    /// Spotify was closed: launched it, then started through the API.
+    Launched,
+    /// Opened in the Spotify app without playing (no Premium, or it never showed up).
     Opened,
 }
 
-/// Starts a playlist (or Liked Songs) on the active device; if the API can't
-/// (no Premium, no active device), opens it in the Spotify app instead.
+enum Start {
+    Played,
+    /// 404: no active device (or the given one is gone).
+    NoDevice,
+    Failed,
+}
+
+async fn start(context: &str, device: Option<&str>) -> Start {
+    let path = match device {
+        Some(id) => format!("/me/player/play?device_id={id}"),
+        None => "/me/player/play".into(),
+    };
+    match api(Method::PUT, &path, Some(json!({ "context_uri": context }))).await {
+        Ok((status, _)) if status.is_success() => Start::Played,
+        Ok((StatusCode::NOT_FOUND, _)) => Start::NoDevice,
+        _ => Start::Failed,
+    }
+}
+
+/// This PC's Spotify to wake when nothing is active. The desktop app names its
+/// device after the computer; any other computer is the next best. A phone that
+/// happens to be online is never picked: the click came from this PC.
+async fn pick_device() -> Option<String> {
+    let v = api_get("/me/player/devices").await.ok()?;
+    let this_pc = std::env::var("COMPUTERNAME").unwrap_or_default().to_lowercase();
+    v["devices"]
+        .as_array()?
+        .iter()
+        .filter(|d| d["is_restricted"] != true && d["type"] == "Computer")
+        .min_by_key(|d| d["name"].as_str().unwrap_or_default().to_lowercase() != this_pc)?["id"]
+        .as_str()
+        .map(str::to_string)
+}
+
+/// Liked Songs can't be a `context_uri` as `spotify:collection:tracks`, only per user.
+async fn playable_context(uri: &str) -> Option<String> {
+    if uri != LIKED_URI {
+        return Some(uri.to_string());
+    }
+    let me = api_get("/me").await.ok()?;
+    Some(format!("spotify:user:{}:collection", me["id"].as_str()?))
+}
+
+fn open_in_app(app: &tauri::AppHandle, uri: &str) -> Result<(), String> {
+    tauri_plugin_opener::OpenerExt::opener(app)
+        .open_url(uri, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+/// Starts a playlist (or Liked Songs) with Premium: on the active device; else
+/// on this PC's idle Spotify; else launches Spotify and starts it once the app
+/// registers as a device. Without Premium it only opens the playlist in the app.
 #[tauri::command]
 pub async fn spotify_play(app: tauri::AppHandle, uri: String) -> Result<PlayOutcome, String> {
-    if uri != LIKED_URI {
-        if let Ok((status, _)) = api(Method::PUT, "/me/player/play", Some(json!({ "context_uri": uri }))).await {
-            if status.is_success() {
-                return Ok(PlayOutcome::Played);
+    let Some(context) = playable_context(&uri).await else {
+        open_in_app(&app, &uri)?;
+        return Ok(PlayOutcome::Opened);
+    };
+
+    match start(&context, None).await {
+        Start::Played => return Ok(PlayOutcome::Played),
+        Start::Failed => {
+            open_in_app(&app, &uri)?;
+            return Ok(PlayOutcome::Opened);
+        }
+        Start::NoDevice => {}
+    }
+
+    // Spotify is running but idle: wake it with an explicit device.
+    if let Some(device) = pick_device().await {
+        if let Start::Played = start(&context, Some(&device)).await {
+            return Ok(PlayOutcome::Played);
+        }
+        open_in_app(&app, &uri)?;
+        return Ok(PlayOutcome::Opened);
+    }
+
+    // Spotify is closed: opening the URI launches it; start once it registers.
+    open_in_app(&app, &uri)?;
+    let deadline = Instant::now() + DEVICE_WAIT;
+    while Instant::now() < deadline {
+        net::sleep(DEVICE_POLL).await;
+        if let Some(device) = pick_device().await {
+            if let Start::Played = start(&context, Some(&device)).await {
+                return Ok(PlayOutcome::Launched);
             }
         }
     }
-    tauri_plugin_opener::OpenerExt::opener(&app)
-        .open_url(&uri, None::<&str>)
-        .map_err(|e| e.to_string())?;
     Ok(PlayOutcome::Opened)
 }

@@ -61,7 +61,8 @@ export function PlaylistsWidget() {
     setBusyUri(uri);
     try {
       const outcome = await playUri(uri);
-      if (outcome === "opened") usePanelStore.getState().setOpen(false);
+      // Spotify came to the front either way; get out of its way.
+      if (outcome !== "played") usePanelStore.getState().setOpen(false);
       setTimeout(() => queryClient.invalidateQueries({ queryKey: ["media"] }), 800);
     } catch (e) {
       console.error(e);

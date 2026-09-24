@@ -39,5 +39,8 @@ export function useLibrary(enabled: boolean) {
   });
 }
 
-/** "played" when playback started via the API, "opened" when handed to the app. */
-export const playUri = (uri: string) => invoke<"played" | "opened">("spotify_play", { uri });
+/**
+ * "played": started on a running Spotify; "launched": Spotify was closed, so
+ * it was started and then told to play; "opened": only shown in the app.
+ */
+export const playUri = (uri: string) => invoke<"played" | "launched" | "opened">("spotify_play", { uri });
