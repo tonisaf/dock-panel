@@ -34,13 +34,18 @@ interface PrefsState {
   /** Home widget ids in display order; unknown/new widgets go last. */
   widgetOrder: string[];
   hiddenWidgets: string[];
+  /** Hand-arranged widget columns, keyed by column count; none means auto (masonry). */
+  widgetColumns: Record<string, string[][]>;
   togglePin: (id: string) => void;
+  /** Pins ids that are not pinned yet, keeping their order. */
+  pinMany: (ids: string[]) => void;
   recordLaunch: (id: string) => void;
   setLocation: (location: WeatherLocation | null) => void;
   setNotionSource: (source: NotionSource | null) => void;
   setTheme: (theme: ThemeMode) => void;
   setSystemAccent: (on: boolean) => void;
-  setWidgetLayout: (order: string[], hidden: string[]) => void;
+  /** `columns` saves an arrangement for that many columns; null drops all of them (back to auto). */
+  setWidgetLayout: (order: string[], hidden: string[], columns: string[][] | null) => void;
 }
 
 /** User preferences, persisted to `prefs.json` in the app data dir. */
@@ -59,9 +64,18 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   systemAccent: true,
   widgetOrder: [],
   hiddenWidgets: [],
+  widgetColumns: {},
   togglePin: (id) => {
     const current = get().pinned;
     const pinned = current.includes(id) ? current.filter((p) => p !== id) : [...current, id];
+    set({ pinned });
+    persist("pinned", pinned);
+  },
+  pinMany: (ids) => {
+    const current = get().pinned;
+    const added = ids.filter((id, i) => !current.includes(id) && ids.indexOf(id) === i);
+    if (added.length === 0) return;
+    const pinned = [...current, ...added];
     set({ pinned });
     persist("pinned", pinned);
   },
@@ -87,10 +101,12 @@ export const usePrefs = create<PrefsState>((set, get) => ({
     set({ systemAccent });
     persist("systemAccent", systemAccent);
   },
-  setWidgetLayout: (widgetOrder, hiddenWidgets) => {
-    set({ widgetOrder, hiddenWidgets });
+  setWidgetLayout: (widgetOrder, hiddenWidgets, columns) => {
+    const widgetColumns = columns ? { ...get().widgetColumns, [columns.length]: columns } : {};
+    set({ widgetOrder, hiddenWidgets, widgetColumns });
     persist("widgetOrder", widgetOrder);
     persist("hiddenWidgets", hiddenWidgets);
+    persist("widgetColumns", widgetColumns);
   },
 }));
 
@@ -106,6 +122,7 @@ load("prefs.json", { defaults: {}, autoSave: 300 })
       systemAccent: (await s.get<boolean>("systemAccent")) ?? true,
       widgetOrder: (await s.get<string[]>("widgetOrder")) ?? [],
       hiddenWidgets: (await s.get<string[]>("hiddenWidgets")) ?? [],
+      widgetColumns: (await s.get<Record<string, string[][]>>("widgetColumns")) ?? {},
     });
   })
   .catch((e) => console.error("prefs load failed", e));

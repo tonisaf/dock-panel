@@ -31,6 +31,42 @@ export async function launchApp(id: string) {
   usePanelStore.getState().setOpen(false);
 }
 
+// ---- pinned files ------------------------------------------------------------
+
+/** Pinned files and folders use `file:<absolute path>` as their id. */
+export const FILE_PREFIX = "file:";
+export const isFileId = (id: string) => id.startsWith(FILE_PREFIX);
+
+/** "C:\Tools\Far.lnk" → "Far"; documents keep their extension. */
+export function fileEntry(id: string): AppEntry {
+  const path = id.slice(FILE_PREFIX.length).replace(/[\\/]+$/, "");
+  const base = path.split(/[\\/]/).pop() || path;
+  return { id, name: base.replace(/\.(lnk|exe|url|appref-ms)$/i, "") };
+}
+
+/** Opens the system picker and pins what the user chose. */
+export async function pinFromDisk(folders: boolean) {
+  try {
+    const ids = await invoke<string[]>("pick_files", { folders });
+    usePrefs.getState().pinMany(ids);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+/** Pinned apps and files in the user's order; apps that were uninstalled drop out. */
+export function usePinnedEntries() {
+  const byId = useAppsById();
+  const pinnedIds = usePrefs((s) => s.pinned);
+  return useMemo(
+    () =>
+      pinnedIds
+        .map((id) => (isFileId(id) ? fileEntry(id) : byId.get(id)))
+        .filter((a): a is AppEntry => !!a),
+    [pinnedIds, byId],
+  );
+}
+
 export function useAppsById() {
   const { data } = useApps();
   return useMemo(() => new Map((data ?? []).map((a) => [a.id, a])), [data]);
@@ -38,9 +74,12 @@ export function useAppsById() {
 
 export function useSearchResults() {
   const { data: apps } = useApps();
+  const pinned = usePinnedEntries();
   const query = usePanelStore((s) => s.query);
   const usage = usePrefs((s) => s.usage);
-  return useMemo(() => searchApps(apps ?? [], query, usage), [apps, query, usage]);
+  // Pinned files are searchable next to the installed apps.
+  const all = useMemo(() => [...(apps ?? []), ...pinned.filter((a) => isFileId(a.id))], [apps, pinned]);
+  return useMemo(() => searchApps(all, query, usage), [all, query, usage]);
 }
 
 // ---- search ------------------------------------------------------------------

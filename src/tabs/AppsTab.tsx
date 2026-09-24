@@ -1,17 +1,21 @@
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { SearchX } from "lucide-react";
-import { useApps, useAppsById, useSearchResults, type AppEntry } from "../lib/apps";
+import { useApps, useAppsById, usePinnedEntries, useSearchResults, type AppEntry } from "../lib/apps";
 import { usePrefs } from "../lib/prefs";
 import { usePanelStore } from "../store";
 import { AppGrid, AppRow } from "../components/AppTile";
 import { EmptyState } from "../components/Card";
+import { PinFromDisk } from "../components/PinFromDisk";
 
 const RECENT_COUNT = 8;
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-1">
-      <h3 className="px-1 text-[12px] font-medium text-fg-subtle">{title}</h3>
+      <h3 className="flex items-center px-1 text-[12px] font-medium text-fg-subtle">
+        {title}
+        {action && <span className="ml-auto flex items-center gap-0.5">{action}</span>}
+      </h3>
       {children}
     </section>
   );
@@ -66,10 +70,7 @@ export function AppsTab() {
   const pinnedIds = usePrefs((s) => s.pinned);
   const usage = usePrefs((s) => s.usage);
 
-  const pinned = useMemo(
-    () => pinnedIds.map((id) => byId.get(id)).filter((a): a is AppEntry => !!a),
-    [pinnedIds, byId],
-  );
+  const pinned = usePinnedEntries();
   const recent = useMemo(
     () =>
       Object.entries(usage)
@@ -88,11 +89,15 @@ export function AppsTab() {
 
   return (
     <div className="flex flex-col gap-4 pb-2">
-      {pinned.length > 0 && (
-        <Section title="Закреплённые">
+      <Section title="Закреплённые" action={<PinFromDisk />}>
+        {pinned.length > 0 ? (
           <AppGrid apps={pinned} />
-        </Section>
-      )}
+        ) : (
+          <p className="px-1 text-[12px] text-fg-subtle">
+            Правый клик по приложению → «Закрепить». Файлы и папки — кнопками справа или перетаскиванием на панель.
+          </p>
+        )}
+      </Section>
       {recent.length > 0 && (
         <Section title="Недавние">
           <AppGrid apps={recent} />

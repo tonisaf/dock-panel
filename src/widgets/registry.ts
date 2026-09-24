@@ -7,6 +7,7 @@ import { TasksWidget } from "./tasks/TasksWidget";
 import { CalendarWidget } from "./calendar/CalendarWidget";
 import { PlaylistsWidget } from "./spotify/PlaylistsWidget";
 import { VpnWidget } from "./vpn/VpnWidget";
+import { PinnedWidget } from "./pinned/PinnedWidget";
 
 export interface WidgetDef {
   id: string;
@@ -19,6 +20,7 @@ export interface WidgetDef {
  * `src/widgets/` plus one entry here.
  */
 export const WIDGETS: WidgetDef[] = [
+  { id: "pinned", title: "Закреплённые", component: PinnedWidget },
   { id: "weather", title: "Погода", component: WeatherWidget },
   { id: "calendar", title: "Календарь", component: CalendarWidget },
   { id: "media", title: "Сейчас играет", component: MediaWidget },

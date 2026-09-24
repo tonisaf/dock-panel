@@ -68,6 +68,7 @@ pub fn run() {
             panel::panel_set_width,
             apps::list_apps,
             apps::launch_app,
+            apps::pick_files,
             media::media_now_playing,
             media::media_thumbnail,
             media::media_control,

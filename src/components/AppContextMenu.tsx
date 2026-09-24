@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
-import { Pin, PinOff, Play } from "lucide-react";
-import { launchApp, useAppsById } from "../lib/apps";
+import { FolderOpen, Pin, PinOff, Play } from "lucide-react";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { FILE_PREFIX, fileEntry, isFileId, launchApp, useAppsById } from "../lib/apps";
 import { usePrefs } from "../lib/prefs";
 import { usePanelStore } from "../store";
 
@@ -38,7 +39,8 @@ export function AppContextMenu() {
   }, [menu, setMenu]);
 
   if (!menu) return null;
-  const app = apps.get(menu.appId);
+  const isFile = isFileId(menu.appId);
+  const app = isFile ? fileEntry(menu.appId) : apps.get(menu.appId);
 
   const item = "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[13px] hover:bg-ink/10";
   return (
@@ -54,6 +56,17 @@ export function AppContextMenu() {
       <button className={item} onClick={() => launchApp(menu.appId)}>
         <Play className="size-4 text-fg-muted" /> Открыть
       </button>
+      {isFile && (
+        <button
+          className={item}
+          onClick={() => {
+            revealItemInDir(menu.appId.slice(FILE_PREFIX.length)).catch(console.error);
+            setMenu(null);
+          }}
+        >
+          <FolderOpen className="size-4 text-fg-muted" /> Показать в папке
+        </button>
+      )}
       <button
         className={item}
         onClick={() => {

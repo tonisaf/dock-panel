@@ -34,6 +34,8 @@ static WIDTH: AtomicU32 = AtomicU32::new(DEFAULT_WIDTH);
 /// Dock to the right screen edge instead of the left.
 static RIGHT: AtomicBool = AtomicBool::new(false);
 static SHORTCUT: Mutex<String> = Mutex::new(String::new());
+/// Set while a modal dialog owned by the panel is open: its focus steal must not hide us.
+static KEEP_OPEN: AtomicBool = AtomicBool::new(false);
 
 fn shortcut_text() -> String {
     let s = SHORTCUT.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -82,7 +84,9 @@ pub fn init(app: &AppHandle) -> String {
     let handle = app.clone();
     win.on_window_event(move |event| {
         if let tauri::WindowEvent::Focused(false) = event {
-            request_hide(&handle);
+            if !KEEP_OPEN.load(Ordering::SeqCst) {
+                request_hide(&handle);
+            }
         }
     });
     shortcut
@@ -108,6 +112,30 @@ pub fn show(app: &AppHandle) {
     let _ = win.show();
     let _ = win.set_focus();
     let _ = app.emit_to(LABEL, "panel:show", ());
+}
+
+/// Runs `f` (a modal dialog) with hide-on-blur off, then gives focus back to the panel.
+pub fn keep_open_while<R>(app: &AppHandle, f: impl FnOnce() -> R) -> R {
+    KEEP_OPEN.store(true, Ordering::SeqCst);
+    let result = f();
+    KEEP_OPEN.store(false, Ordering::SeqCst);
+    if let Some(win) = window(app) {
+        let _ = win.set_focus();
+    }
+    result
+}
+
+/// Raw handle of the panel window, to own modal dialogs.
+pub fn hwnd(app: &AppHandle) -> Option<isize> {
+    #[cfg(windows)]
+    {
+        window(app)?.hwnd().ok().map(|h| h.0 as isize)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        None
+    }
 }
 
 /// Ask the frontend to animate out; it calls `hide_panel` when done.
