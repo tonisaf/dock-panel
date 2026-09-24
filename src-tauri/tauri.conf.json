@@ -55,6 +55,16 @@
         ],
         "displayLanguageSelector": false
       }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDExQjJENUJDQUQ5MTcxOTYKUldTV2NaR3R2Tld5RWQ3bGJKbW1idUYyN01acFZFSmdHV0JIbWZQM1VRMVhCQkdKMTR3OHF3TEgK",
+      "endpoints": [],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

@@ -6,6 +6,7 @@ import { CityPicker } from "../components/CityPicker";
 import { NotionSettings } from "../components/NotionSettings";
 import { CalendarSettings } from "../components/CalendarSettings";
 import { SpotifySettings } from "../components/SpotifySettings";
+import { UpdateSettings } from "../components/UpdateSettings";
 import { MAX_WIDTH, MIN_WIDTH, WIDTH_PRESETS, usePanelSettings, usePanelWidth, type Edge } from "../lib/panelWidth";
 import { usePrefs, type ThemeMode } from "../lib/prefs";
 
@@ -254,7 +255,10 @@ export function SettingsTab() {
       <div className="rounded-2xl border border-stroke bg-surface">
         <CityPicker />
       </div>
-      <p className="px-1 text-[12px] text-fg-subtle">Dock Panel 0.1.0</p>
+      <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Обновления</h3>
+      <div className="rounded-2xl border border-stroke bg-surface">
+        <UpdateSettings />
+      </div>
     </div>
   );
 }

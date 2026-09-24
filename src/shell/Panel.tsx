@@ -10,6 +10,7 @@ import { usePanelSettings } from "../lib/panelWidth";
 import { SearchBar } from "./SearchBar";
 import { TabBar } from "./TabBar";
 import { ResizeHandle } from "./ResizeHandle";
+import { UpdateBanner } from "./UpdateBanner";
 import { AppContextMenu } from "../components/AppContextMenu";
 import { HomeTab } from "../tabs/HomeTab";
 import { AppsTab } from "../tabs/AppsTab";
@@ -83,6 +84,7 @@ export function Panel() {
           transition={{ type: "spring", stiffness: 480, damping: 36, mass: 0.8 }}
           onAnimationStart={() => searchRef.current?.focus()}
         >
+          <UpdateBanner />
           <SearchBar ref={searchRef} />
           <TabBar />
           <AnimatePresence mode="wait" initial={false}>

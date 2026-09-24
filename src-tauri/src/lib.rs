@@ -11,6 +11,7 @@ mod secrets;
 mod spotify;
 mod system;
 mod tray;
+mod updater;
 mod vpn;
 
 use tauri::Manager;
@@ -26,6 +27,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -46,6 +48,7 @@ pub fn run() {
             tray::init(handle, &shortcut)?;
             claude_web::init(handle);
             alerts::init(handle);
+            updater::init(handle);
             apps::start_icon_worker(app.path().app_cache_dir()?.join("icons"));
             let registered = shortcut
                 .parse::<Shortcut>()
@@ -97,6 +100,11 @@ pub fn run() {
             vpn::vpn_status,
             vpn::vpn_toggle,
             vpn::vpn_open,
+            updater::update_status,
+            updater::update_check,
+            updater::update_install,
+            updater::update_set_token,
+            updater::update_clear_token,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
