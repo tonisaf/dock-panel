@@ -25,6 +25,7 @@ pnpm tauri dev
 
 - `src-tauri/src/panel.rs` — окно панели: позиция на мониторе с курсором, Acrylic, скругления, двухфазное скрытие (анимация во фронтенде, затем `hide_panel`).
 - `src-tauri/src/tray.rs` — иконка в трее.
+- `src-tauri/src/weather.rs` — погода и поиск города: Open-Meteo, а если он недоступен (в России без VPN), — MET Norway и OpenStreetMap Nominatim; ответы запасных сервисов переводятся в формат Open-Meteo в `src/widgets/weather/fallback.ts`.
 - `src/shell/` — оболочка: анимация выезда, поиск, вкладки.
 - `src/tabs/` — содержимое вкладок.
 
