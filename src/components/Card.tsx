@@ -6,11 +6,14 @@ export function Card({
   title,
   icon: Icon,
   className,
+  action,
   children,
 }: {
   title?: string;
   icon?: LucideIcon;
   className?: string;
+  /** Small controls at the right end of the header. */
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -24,6 +27,7 @@ export function Card({
         <header className="mb-2 flex items-center gap-1.5 text-[12px] font-medium text-fg-muted">
           {Icon && <Icon className="size-3.5" strokeWidth={2.2} />}
           {title}
+          {action && <div className="-my-1 ml-auto flex items-center gap-0.5">{action}</div>}
         </header>
       )}
       {children}

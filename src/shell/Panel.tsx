@@ -11,6 +11,7 @@ import { SearchBar } from "./SearchBar";
 import { TabBar } from "./TabBar";
 import { ResizeHandle } from "./ResizeHandle";
 import { UpdateBanner } from "./UpdateBanner";
+import { DropToPin } from "./DropToPin";
 import { AppContextMenu } from "../components/AppContextMenu";
 import { HomeTab } from "../tabs/HomeTab";
 import { AppsTab } from "../tabs/AppsTab";
@@ -100,6 +101,7 @@ export function Panel() {
             </motion.main>
           </AnimatePresence>
           <AppContextMenu />
+          <DropToPin />
           <ResizeHandle />
         </motion.div>
       )}

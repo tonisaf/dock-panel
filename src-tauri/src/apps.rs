@@ -2,6 +2,10 @@
 //! source the Start menu uses: Win32 apps and Store apps alike), icon
 //! extraction and launching.
 //!
+//! Besides AppsFolder entries, any file or folder can be pinned: its id is
+//! `file:` followed by the absolute path, and it launches and gets its icon
+//! through the same shell calls.
+//!
 //! Icons are served lazily through the `appicon` URI scheme so the list
 //! itself stays small; a single STA worker renders them and caches PNGs on disk.
 
@@ -12,9 +16,19 @@ use std::sync::OnceLock;
 use percent_encoding::percent_decode_str;
 use serde::Serialize;
 use tauri::http::{header, Request, Response};
-use tauri::UriSchemeResponder;
+use tauri::{AppHandle, UriSchemeResponder};
 
 const ICON_SIZE: i32 = 64;
+/// Id prefix of pinned files and folders; the rest is an absolute path.
+const FILE_PREFIX: &str = "file:";
+
+/// Shell parsing name for an app id or a pinned `file:` path.
+fn shell_target(id: &str) -> String {
+    match id.strip_prefix(FILE_PREFIX) {
+        Some(path) => path.to_string(),
+        None => format!("shell:AppsFolder\\{id}"),
+    }
+}
 
 #[derive(Serialize, Clone)]
 pub struct AppEntry {
@@ -44,6 +58,15 @@ pub async fn launch_app(id: String) -> Result<(), String> {
     } else {
         Err("не удалось запустить приложение".into())
     }
+}
+
+/// Native picker for files (or folders) to pin. Returns `file:` ids; empty if cancelled.
+#[tauri::command]
+pub async fn pick_files(app: AppHandle, folders: bool) -> Result<Vec<String>, String> {
+    let owner = crate::panel::hwnd(&app);
+    let paths = crate::panel::keep_open_while(&app, || on_sta(move || win::pick(owner, folders)))
+        .map_err(|e| e.to_string())?;
+    Ok(paths.into_iter().map(|p| format!("{FILE_PREFIX}{p}")).collect())
 }
 
 /// AppsFolder also lists uninstallers, readmes and web links next to real apps.
@@ -159,17 +182,20 @@ mod win {
     use std::mem::size_of;
 
     use windows::core::{w, Result, HSTRING, PCWSTR};
-    use windows::Win32::Foundation::SIZE;
+    use windows::Win32::Foundation::{ERROR_CANCELLED, HWND, SIZE};
     use windows::Win32::Graphics::Gdi::{
         DeleteObject, GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO, BITMAPINFOHEADER,
         BI_RGB, DIB_RGB_COLORS, HBITMAP, HGDIOBJ,
     };
     use windows::Win32::System::Com::{
-        CoInitializeEx, CoTaskMemFree, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
+        CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
     };
     use windows::Win32::UI::Shell::{
-        BHID_EnumItems, IEnumShellItems, IShellItem, IShellItemImageFactory, SHCreateItemFromParsingName,
-        ShellExecuteW, SIGDN, SIGDN_NORMALDISPLAY, SIGDN_PARENTRELATIVEPARSING, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY,
+        BHID_EnumItems, FileOpenDialog, IEnumShellItems, IFileOpenDialog, IShellItem, IShellItemImageFactory,
+        SHCreateItemFromParsingName, ShellExecuteW, FOS_ALLOWMULTISELECT, FOS_FORCEFILESYSTEM, FOS_NODEREFERENCELINKS,
+        FOS_PICKFOLDERS, SIGDN, SIGDN_FILESYSPATH, SIGDN_NORMALDISPLAY, SIGDN_PARENTRELATIVEPARSING,
+        SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY,
     };
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
@@ -223,17 +249,21 @@ mod win {
     }
 
     pub fn launch(id: &str) -> bool {
-        let target = HSTRING::from(format!("shell:AppsFolder\\{id}"));
-        let result = unsafe {
-            ShellExecuteW(None, w!("open"), &target, PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL)
-        };
+        let target = HSTRING::from(super::shell_target(id));
+        // A pinned program runs from its own folder, as its shortcut would.
+        let dir = id
+            .strip_prefix(super::FILE_PREFIX)
+            .and_then(|p| std::path::Path::new(p).parent())
+            .map(|d| HSTRING::from(d.as_os_str()));
+        let dir = dir.as_ref().map_or(PCWSTR::null(), |d| PCWSTR(d.as_ptr()));
+        let result = unsafe { ShellExecuteW(None, w!("open"), &target, PCWSTR::null(), dir, SW_SHOWNORMAL) };
         // ShellExecute reports success as a value greater than 32.
         result.0 as isize > 32
     }
 
     pub fn icon_png(id: &str, size: i32) -> Option<Vec<u8>> {
         unsafe {
-            let path = HSTRING::from(format!("shell:AppsFolder\\{id}"));
+            let path = HSTRING::from(super::shell_target(id));
             let factory: IShellItemImageFactory = SHCreateItemFromParsingName(&path, None).ok()?;
             let hbmp = factory
                 .GetImage(SIZE { cx: size, cy: size }, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK)
@@ -244,6 +274,32 @@ mod win {
             let (width, height, mut px) = pixels?;
             super::bgra_premul_to_rgba(&mut px);
             super::encode_png(width, height, &px)
+        }
+    }
+
+    /// Multi-select open dialog owned by `owner`; filesystem paths of the picked items.
+    pub fn pick(owner: Option<isize>, folders: bool) -> Result<Vec<String>> {
+        unsafe {
+            let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
+            // Keep .lnk files as they are: a pinned shortcut should stay a shortcut.
+            let mut options = dialog.GetOptions()? | FOS_ALLOWMULTISELECT | FOS_FORCEFILESYSTEM | FOS_NODEREFERENCELINKS;
+            if folders {
+                options |= FOS_PICKFOLDERS;
+            }
+            dialog.SetOptions(options)?;
+            dialog.SetTitle(if folders { w!("Закрепить папки") } else { w!("Закрепить файлы") })?;
+
+            if let Err(e) = dialog.Show(owner.map(|h| HWND(h as _))) {
+                return if e.code() == ERROR_CANCELLED.to_hresult() { Ok(Vec::new()) } else { Err(e) };
+            }
+            let items = dialog.GetResults()?;
+            let mut out = Vec::new();
+            for i in 0..items.GetCount()? {
+                if let Ok(path) = display_name(&items.GetItemAt(i)?, SIGDN_FILESYSPATH) {
+                    out.push(path);
+                }
+            }
+            Ok(out)
         }
     }
 
