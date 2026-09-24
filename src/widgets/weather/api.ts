@@ -12,11 +12,18 @@ import {
   Sun,
   type LucideIcon,
 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { usePrefs, type WeatherLocation } from "../../lib/prefs";
+import { fromMetNo, fromNominatim, type MetForecast, type NominatimPlace } from "./fallback";
 
-/** Open-Meteo: free, no API key. https://open-meteo.com/en/docs */
-const FORECAST_URL = "https://api.open-meteo.com/v1/forecast";
-const GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search";
+/**
+ * Open-Meteo (free, no key), fetched by Rust, which falls back to MET Norway
+ * and Nominatim where Open-Meteo is blocked. `source` says which one answered.
+ */
+interface Sourced {
+  source: "open-meteo" | "met.no" | "nominatim";
+  body: unknown;
+}
 
 export interface Weather {
   current: {
@@ -32,12 +39,6 @@ export interface Weather {
   daily: { temperature_2m_max: number[]; temperature_2m_min: number[] };
 }
 
-async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  return res.json();
-}
-
 export function useWeather() {
   const location = usePrefs((s) => s.location);
   return useQuery({
@@ -45,18 +46,10 @@ export function useWeather() {
     enabled: !!location,
     staleTime: 10 * 60_000,
     refetchInterval: 15 * 60_000,
-    queryFn: () => {
-      const params = new URLSearchParams({
-        latitude: String(location!.latitude),
-        longitude: String(location!.longitude),
-        current: "temperature_2m,apparent_temperature,weather_code,is_day,wind_speed_10m,relative_humidity_2m",
-        hourly: "temperature_2m,weather_code,is_day",
-        daily: "temperature_2m_max,temperature_2m_min",
-        timezone: "auto",
-        forecast_days: "2",
-        wind_speed_unit: "ms",
-      });
-      return getJson<Weather>(`${FORECAST_URL}?${params}`);
+    queryFn: async () => {
+      const { latitude, longitude } = location!;
+      const { source, body } = await invoke<Sourced>("weather_forecast", { latitude, longitude });
+      return source === "met.no" ? fromMetNo(body as MetForecast, latitude, longitude) : (body as Weather);
     },
   });
 }
@@ -70,9 +63,9 @@ interface GeoResult {
 }
 
 export async function searchCities(query: string): Promise<WeatherLocation[]> {
-  const params = new URLSearchParams({ name: query, count: "6", language: "ru", format: "json" });
-  const data = await getJson<{ results?: GeoResult[] }>(`${GEOCODE_URL}?${params}`);
-  return (data.results ?? []).map((r) => ({
+  const { source, body } = await invoke<Sourced>("weather_geocode", { query });
+  if (source === "nominatim") return fromNominatim(body as NominatimPlace[]);
+  return ((body as { results?: GeoResult[] }).results ?? []).map((r) => ({
     name: r.name,
     detail: [r.admin1, r.country].filter(Boolean).join(", "),
     latitude: r.latitude,

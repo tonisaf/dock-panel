@@ -13,6 +13,7 @@ mod system;
 mod tray;
 mod updater;
 mod vpn;
+mod weather;
 
 use tauri::Manager;
 use tauri_plugin_autostart::MacosLauncher;
@@ -98,6 +99,8 @@ pub fn run() {
             spotify::spotify_logout,
             spotify::spotify_library,
             spotify::spotify_play,
+            weather::weather_forecast,
+            weather::weather_geocode,
             vpn::vpn_status,
             vpn::vpn_toggle,
             vpn::vpn_open,
