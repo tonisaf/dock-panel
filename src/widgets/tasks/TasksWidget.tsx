@@ -1,0 +1,64 @@
+import { AnimatePresence } from "motion/react";
+import { CheckSquare, ChevronRight } from "lucide-react";
+import { Card } from "../../components/Card";
+import { usePrefs } from "../../lib/prefs";
+import { usePanelStore } from "../../store";
+import { useNotionStatus, useTasks } from "./api";
+import { TaskRow } from "./TaskRow";
+import { UndoBar } from "./UndoBar";
+import { useUndoableComplete } from "./useUndoableComplete";
+
+const HOME_TASKS = 5;
+
+export function TasksWidget() {
+  const setTab = usePanelStore((s) => s.setTab);
+  const source = usePrefs((s) => s.notionSource);
+  const status = useNotionStatus();
+  const { data, isError } = useTasks();
+  const { onComplete, last, undo } = useUndoableComplete();
+
+  if (!status.data?.connected || !source) {
+    return (
+      <Card title="Задачи" icon={CheckSquare}>
+        <button onClick={() => setTab("settings")} className="text-left text-[12px] text-fg-subtle hover:text-fg">
+          Подключите Notion в настройках →
+        </button>
+      </Card>
+    );
+  }
+
+  const tasks = data?.tasks ?? [];
+
+  return (
+    <Card>
+      <button
+        onClick={() => setTab("tasks")}
+        className="mb-1.5 flex w-full items-center gap-1.5 text-[12px] font-medium text-fg-muted hover:text-fg"
+      >
+        <CheckSquare className="size-3.5" strokeWidth={2.2} />
+        <span className="truncate">{source.title}</span>
+        {data && <span className="text-fg-subtle">· {tasks.length}</span>}
+        <ChevronRight className="ml-auto size-3.5" />
+      </button>
+
+      {isError ? (
+        <p className="text-[12px] text-warn">Не удалось загрузить задачи</p>
+      ) : data && tasks.length === 0 ? (
+        <p className="text-[12px] text-fg-subtle">Все задачи выполнены 🎉</p>
+      ) : (
+        <div className="-mx-2 flex flex-col">
+          <AnimatePresence initial={false}>
+            {tasks.slice(0, HOME_TASKS).map((task) => (
+              <TaskRow key={task.id} task={task} canComplete={!!data?.canComplete} onComplete={onComplete} compact />
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
+      {last && (
+        <div className="mt-2">
+          <UndoBar task={last} onUndo={undo} />
+        </div>
+      )}
+    </Card>
+  );
+}

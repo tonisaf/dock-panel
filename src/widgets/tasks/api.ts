@@ -1,0 +1,123 @@
+import { invoke } from "@tauri-apps/api/core";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { usePrefs } from "../../lib/prefs";
+
+export interface Badge {
+  name: string;
+  /** Notion color name: default, gray, brown, orange, yellow, green, blue, purple, pink, red. */
+  color: string;
+}
+
+export interface Task {
+  id: string;
+  url: string;
+  title: string;
+  status: Badge | null;
+  inProgress: boolean;
+  due: string | null;
+  priority: Badge | null;
+  tag: Badge | null;
+}
+
+export interface TaskList {
+  tasks: Task[];
+  canComplete: boolean;
+}
+
+export interface NotionStatus {
+  connected: boolean;
+  workspace: string | null;
+  error: string | null;
+}
+
+export function useNotionStatus() {
+  return useQuery({
+    queryKey: ["notion-status"],
+    queryFn: () => invoke<NotionStatus>("notion_status"),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useTasks() {
+  const source = usePrefs((s) => s.notionSource);
+  return useQuery({
+    queryKey: ["notion-tasks", source?.id],
+    queryFn: () => invoke<TaskList>("notion_tasks", { sourceId: source!.id }),
+    enabled: !!source,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+}
+
+/** Optimistically drops the task; `onDone` gets the previous status for undo. */
+export function useCompleteTask() {
+  const queryClient = useQueryClient();
+  const source = usePrefs((s) => s.notionSource);
+  const key = ["notion-tasks", source?.id];
+
+  return useMutation({
+    mutationFn: (task: Task) => invoke("notion_complete", { sourceId: source!.id, pageId: task.id }),
+    onMutate: async (task) => {
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<TaskList>(key);
+      if (previous) {
+        queryClient.setQueryData<TaskList>(key, { ...previous, tasks: previous.tasks.filter((t) => t.id !== task.id) });
+      }
+      return { previous };
+    },
+    onError: (_e, _task, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(key, ctx.previous);
+    },
+  });
+}
+
+export async function restoreTask(sourceId: string, task: Task) {
+  await invoke("notion_restore", { sourceId, pageId: task.id, status: task.status?.name ?? null });
+}
+
+export function useCreateTask() {
+  const queryClient = useQueryClient();
+  const source = usePrefs((s) => s.notionSource);
+  const key = ["notion-tasks", source?.id];
+
+  return useMutation({
+    mutationFn: (title: string) => invoke<Task>("notion_create", { sourceId: source!.id, title }),
+    onSuccess: (task) => {
+      queryClient.setQueryData<TaskList>(key, (prev) => (prev ? { ...prev, tasks: [task, ...prev.tasks] } : prev));
+      queryClient.invalidateQueries({ queryKey: key });
+    },
+  });
+}
+
+const NOTION_COLORS: Record<string, string> = {
+  default: "rgb(255 255 255 / 0.55)",
+  gray: "#9b9a97",
+  brown: "#ba856f",
+  orange: "#f5a55b",
+  yellow: "#e9c46a",
+  green: "#6fcf97",
+  blue: "#6ea8fe",
+  purple: "#b794f4",
+  pink: "#f28fb5",
+  red: "#ff7b72",
+};
+
+export const notionColor = (color: string) => NOTION_COLORS[color] ?? NOTION_COLORS.default;
+
+/** "Сегодня", "Завтра", "25 сен", with overdue flagged. */
+export function describeDue(due: string, now = new Date()) {
+  const hasTime = due.length > 10;
+  const date = new Date(hasTime ? due : `${due}T00:00:00`);
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((startOfDay(date) - startOfDay(now)) / 86_400_000);
+  const time = hasTime ? " " + date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "";
+
+  let label: string;
+  if (days === 0) label = "Сегодня";
+  else if (days === 1) label = "Завтра";
+  else if (days === -1) label = "Вчера";
+  else label = date.toLocaleDateString("ru-RU", { day: "numeric", month: "short" }).replace(".", "");
+
+  const overdue = hasTime ? date.getTime() < now.getTime() : days < 0;
+  return { label: label + time, overdue, soon: !overdue && days <= 1 };
+}

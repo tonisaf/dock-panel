@@ -1,0 +1,63 @@
+[package]
+name = "dock-panel"
+version = "0.1.0"
+description = "Slide-out launcher panel with widgets"
+authors = ["tonis"]
+edition = "2021"
+
+[lib]
+# The `_lib` suffix avoids a bin/lib name clash on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "dock_panel_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-store = "2"
+percent-encoding = "2"
+png = "0.17"
+window-vibrancy = "0.6"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sysinfo = "0.39.6"
+base64 = "0.23.1"
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "form", "query", "native-tls", "charset", "http2"] }
+sha2 = "0.11.0"
+getrandom = "0.4.3"
+
+[target.'cfg(windows)'.dependencies]
+tauri-winrt-notification = "0.8.1"
+windows = { version = "0.62", features = [
+  "Foundation",
+  "Media_Control",
+  "Storage_Streams",
+  "UI",
+  "UI_ViewManagement",
+  "Win32_Foundation",
+  "Win32_System_Power",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
+  "Win32_Media_Audio",
+  "Win32_Security_Credentials",
+  "Win32_NetworkManagement_IpHelper",
+  "Win32_NetworkManagement_Ndis",
+  "Win32_Networking_WinSock",
+  "Win32_System_Services",
+  "Win32_System_Threading",
+  "Win32_System_Com",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

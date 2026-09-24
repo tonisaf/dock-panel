@@ -1,0 +1,5 @@
+# Keep LF everywhere; the sources are written with LF.
+* text=auto eol=lf
+*.ico binary
+*.icns binary
+*.png binary

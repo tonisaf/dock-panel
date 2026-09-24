@@ -1,0 +1,106 @@
+import { useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { AnimatePresence, motion } from "motion/react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { TABS, usePanelStore } from "../store";
+import { useApps } from "../lib/apps";
+import { useAppearance } from "../lib/appearance";
+import { usePanelSettings } from "../lib/panelWidth";
+import { SearchBar } from "./SearchBar";
+import { TabBar } from "./TabBar";
+import { ResizeHandle } from "./ResizeHandle";
+import { AppContextMenu } from "../components/AppContextMenu";
+import { HomeTab } from "../tabs/HomeTab";
+import { AppsTab } from "../tabs/AppsTab";
+import { TasksTab } from "../tabs/TasksTab";
+import { AiTab } from "../tabs/AiTab";
+import { SettingsTab } from "../tabs/SettingsTab";
+
+const TAB_VIEWS = {
+  home: HomeTab,
+  apps: AppsTab,
+  tasks: TasksTab,
+  ai: AiTab,
+  settings: SettingsTab,
+};
+
+/**
+ * Rust shows the window and emits `panel:show`; content then slides in.
+ * On `panel:hide` (or Esc) content slides out, and only once the exit
+ * animation completes do we ask Rust to actually hide the window.
+ */
+export function Panel() {
+  const searchRef = useRef<HTMLInputElement>(null);
+  const { open, setOpen, tab, setTab, setQuery } = usePanelStore();
+  const queryClient = useQueryClient();
+  // Keep the app list warm so the Apps tab and search are instant.
+  useApps();
+  useAppearance();
+  // Slide in from the docked edge.
+  const dir = usePanelSettings().edge === "right" ? 1 : -1;
+
+  useEffect(() => {
+    const unlisten = [
+      listen("panel:show", () => {
+        setQuery("");
+        setOpen(true);
+      }),
+      listen("panel:hide", () => setOpen(false)),
+      listen("ai-limits:changed", () => queryClient.invalidateQueries({ queryKey: ["ai-limits"] })),
+    ];
+    return () => unlisten.forEach((p) => p.then((fn) => fn()));
+  }, [setOpen, setQuery, queryClient]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const state = usePanelStore.getState();
+      if (e.key === "Escape") {
+        // Peel back one layer at a time: menu, then query, then the panel.
+        if (state.menu) state.setMenu(null);
+        else if (state.query) state.setQuery("");
+        else setOpen(false);
+      } else if (e.ctrlKey && e.key >= "1" && e.key <= String(TABS.length)) {
+        e.preventDefault();
+        setTab(TABS[Number(e.key) - 1].id);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [setOpen, setTab]);
+
+  const View = TAB_VIEWS[tab];
+
+  return (
+    <AnimatePresence onExitComplete={() => invoke("hide_panel")}>
+      {open && (
+        <motion.div
+          key="panel"
+          className="relative flex h-full flex-col gap-3 p-4"
+          initial={{ x: 32 * dir, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          exit={{ x: 24 * dir, opacity: 0, transition: { duration: 0.14, ease: "easeIn" } }}
+          transition={{ type: "spring", stiffness: 480, damping: 36, mass: 0.8 }}
+          onAnimationStart={() => searchRef.current?.focus()}
+        >
+          <SearchBar ref={searchRef} />
+          <TabBar />
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.main
+              key={tab}
+              className="scroll-area -mx-1 min-h-0 flex-1 px-1"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.15 }}
+            >
+              <View />
+            </motion.main>
+          </AnimatePresence>
+          <AppContextMenu />
+          <ResizeHandle />
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
