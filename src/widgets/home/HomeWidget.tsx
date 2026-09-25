@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   ChevronDown,
   House,
@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { Card } from "../../components/Card";
+import { Slider } from "../../components/Slider";
 import {
   kelvinToRgb,
   lampColor,
@@ -33,58 +34,6 @@ import {
 const SWATCHES = [0xff3b30, 0xff9500, 0xffcc00, 0x34c759, 0x00c7be, 0x007aff, 0xaf52de, 0xff2d55];
 
 const report = (e: unknown) => console.error(e);
-
-/**
- * Range input that shows the value while dragging and sends it once on
- * release: lamps accept about one command per second.
- */
-function Slider({
-  value,
-  min,
-  max,
-  step = 1,
-  onCommit,
-  track,
-  label,
-}: {
-  value: number;
-  min: number;
-  max: number;
-  step?: number;
-  onCommit: (v: number) => void;
-  track?: string;
-  label: string;
-}) {
-  const [draft, setDraft] = useState<number | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const commit = () => {
-    clearTimeout(timer.current);
-    if (draft != null && draft !== value) onCommit(draft);
-    setDraft(null);
-  };
-  // Arrow-key presses in a row become one command.
-  const commitSoon = () => {
-    clearTimeout(timer.current);
-    timer.current = setTimeout(commit, 400);
-  };
-  useEffect(() => () => clearTimeout(timer.current), []);
-  return (
-    <input
-      type="range"
-      aria-label={label}
-      min={min}
-      max={max}
-      step={step}
-      value={draft ?? value}
-      onChange={(e) => setDraft(Number(e.target.value))}
-      onPointerUp={commit}
-      onKeyUp={commitSoon}
-      onBlur={commit}
-      className="h-1.5 w-full cursor-pointer appearance-none rounded-full accent-accent"
-      style={{ background: track ?? "color-mix(in srgb, var(--color-ink) 12%, transparent)" }}
-    />
-  );
-}
 
 function Toggle({ on, onChange, disabled }: { on: boolean; onChange: (on: boolean) => void; disabled?: boolean }) {
   return (

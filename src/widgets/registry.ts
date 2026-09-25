@@ -9,6 +9,7 @@ import { PlaylistsWidget } from "./spotify/PlaylistsWidget";
 import { VpnWidget } from "./vpn/VpnWidget";
 import { PinnedWidget } from "./pinned/PinnedWidget";
 import { HomeWidget } from "./home/HomeWidget";
+import { MonitorsWidget } from "./monitors/MonitorsWidget";
 
 export interface WidgetDef {
   id: string;
@@ -30,5 +31,6 @@ export const WIDGETS: WidgetDef[] = [
   { id: "ai", title: "Лимиты AI", component: AiLimitsWidget },
   { id: "vpn", title: "VPN", component: VpnWidget },
   { id: "home", title: "Дом", component: HomeWidget },
+  { id: "monitors", title: "Мониторы", component: MonitorsWidget },
   { id: "system", title: "Система", component: SystemWidget },
 ];

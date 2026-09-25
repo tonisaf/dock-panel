@@ -5,6 +5,7 @@ mod calendar;
 mod home;
 mod claude_web;
 mod media;
+mod monitors;
 mod net;
 mod notion;
 mod panel;
@@ -50,6 +51,7 @@ pub fn run() {
             let shortcut = panel::init(handle);
             tray::init(handle, &shortcut)?;
             taskbar::start(handle);
+            monitors::warm_up();
             claude_web::init(handle);
             alerts::init(handle);
             updater::init(handle);
@@ -117,6 +119,8 @@ pub fn run() {
             home::home_speaker_control,
             home::home_rename,
             home::home_forget,
+            monitors::monitors_list,
+            monitors::monitor_set,
             vpn::vpn_status,
             vpn::vpn_toggle,
             vpn::vpn_open,
