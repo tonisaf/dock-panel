@@ -44,18 +44,22 @@ pub async fn media_control(action: String) -> Result<(), String> {
     blocking(move || win::control(&action)).await
 }
 
-mod win {
+pub mod win {
     use std::sync::OnceLock;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use base64::prelude::{Engine, BASE64_STANDARD};
-    use windows::core::{Error, Result};
+    use windows::core::{Error, Interface, Result};
+    use windows::Graphics::Imaging::{
+        BitmapAlphaMode, BitmapBounds, BitmapDecoder, BitmapInterpolationMode, BitmapPixelFormat, BitmapTransform,
+        ColorManagementMode, ExifOrientationMode,
+    };
     use windows::Media::Control::{
         GlobalSystemMediaTransportControlsSession as Session,
         GlobalSystemMediaTransportControlsSessionManager as Manager,
         GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status,
     };
-    use windows::Storage::Streams::DataReader;
+    use windows::Storage::Streams::{DataReader, IRandomAccessStream};
     use windows::Win32::Foundation::E_INVALIDARG;
 
     use super::NowPlaying;
@@ -134,6 +138,35 @@ mod win {
         let mime = stream.ContentType().map(|m| m.to_string()).unwrap_or_default();
         let mime = if mime.is_empty() { "image/png".to_string() } else { mime };
         Ok(Some(format!("data:{mime};base64,{}", BASE64_STANDARD.encode(bytes))))
+    }
+
+    /// Album art centre-cropped to a `size`×`size` square, as premultiplied BGRA.
+    pub fn cover_pixels(size: u32) -> Result<Option<Vec<u8>>> {
+        let Some(s) = session()? else { return Ok(None) };
+        let Ok(reference) = s.TryGetMediaPropertiesAsync()?.join()?.Thumbnail() else {
+            return Ok(None);
+        };
+        let stream: IRandomAccessStream = reference.OpenReadAsync()?.join()?.cast()?;
+        let decoder = BitmapDecoder::CreateAsync(&stream)?.join()?;
+        let (w, h) = (decoder.OrientedPixelWidth()?.max(1), decoder.OrientedPixelHeight()?.max(1));
+        // Scale the short side to `size`, then crop the middle.
+        let short = w.min(h);
+        let (sw, sh) = ((w * size).div_ceil(short), (h * size).div_ceil(short));
+        let transform = BitmapTransform::new()?;
+        transform.SetInterpolationMode(BitmapInterpolationMode::Fant)?;
+        transform.SetScaledWidth(sw)?;
+        transform.SetScaledHeight(sh)?;
+        transform.SetBounds(BitmapBounds { X: (sw - size) / 2, Y: (sh - size) / 2, Width: size, Height: size })?;
+        let data = decoder
+            .GetPixelDataTransformedAsync(
+                BitmapPixelFormat::Bgra8,
+                BitmapAlphaMode::Premultiplied,
+                &transform,
+                ExifOrientationMode::RespectExifOrientation,
+                ColorManagementMode::DoNotColorManage,
+            )?
+            .join()?;
+        Ok(Some(data.DetachPixelData()?.to_vec()))
     }
 
     pub fn control(action: &str) -> Result<()> {

@@ -193,11 +193,18 @@ function EdgeRow() {
 }
 
 function TaskbarButtonRow() {
-  const { taskbarButton, setTaskbarButton } = usePanelSettings();
+  const { taskbarButton, setTaskbarButton, taskbarPlayer, setTaskbarPlayer } = usePanelSettings();
   return (
-    <Row label="Кнопка на панели задач" hint="Слева на панели задач, когда значки по центру">
-      <Toggle on={taskbarButton} onChange={setTaskbarButton} />
-    </Row>
+    <>
+      <Row label="Кнопка на панели задач" hint="Слева на панели задач, когда значки по центру">
+        <Toggle on={taskbarButton} onChange={setTaskbarButton} />
+      </Row>
+      {taskbarButton && (
+        <Row label="Плеер на кнопке" hint="Трек и управление, пока что-то играет">
+          <Toggle on={taskbarPlayer} onChange={setTaskbarPlayer} />
+        </Row>
+      )}
+    </>
   );
 }
 

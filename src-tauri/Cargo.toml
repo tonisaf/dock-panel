@@ -40,6 +40,8 @@ socket2 = "0.6"
 tauri-winrt-notification = "0.8.1"
 windows = { version = "0.62", features = [
   "Foundation",
+  "Graphics",
+  "Graphics_Imaging",
   "Media_Control",
   "Storage_Streams",
   "UI",

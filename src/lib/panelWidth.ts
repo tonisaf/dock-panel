@@ -20,10 +20,12 @@ export interface PanelSettings {
   shortcut: string;
   /** Dock Panel button at the left end of the taskbar. */
   taskbarButton: boolean;
+  /** Mini player next to that button. */
+  taskbarPlayer: boolean;
 }
 
 const KEY = ["panel-settings"];
-const DEFAULTS: PanelSettings = { width: 440, edge: "left", shortcut: "Ctrl+Space", taskbarButton: true };
+const DEFAULTS: PanelSettings = { width: 440, edge: "left", shortcut: "Ctrl+Space", taskbarButton: true, taskbarPlayer: true };
 
 export function usePanelSettings() {
   const queryClient = useQueryClient();
@@ -41,6 +43,8 @@ export function usePanelSettings() {
     setShortcut: async (shortcut: string) => update(await invoke<PanelSettings>("panel_set_shortcut", { shortcut })),
     setTaskbarButton: async (on: boolean) =>
       update(await invoke<PanelSettings>("panel_set_taskbar_button", { on })),
+    setTaskbarPlayer: async (on: boolean) =>
+      update(await invoke<PanelSettings>("panel_set_taskbar_player", { on })),
     suspendShortcut: (suspend: boolean) => invoke("panel_suspend_shortcut", { suspend }),
   };
 }

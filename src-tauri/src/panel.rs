@@ -68,6 +68,7 @@ pub fn init(app: &AppHandle) -> String {
         *SHORTCUT.lock().unwrap_or_else(|e| e.into_inner()) = s.to_string();
     }
     crate::taskbar::set_enabled(saved["taskbarButton"].as_bool().unwrap_or(true));
+    crate::taskbar::set_player_enabled(saved["taskbarPlayer"].as_bool().unwrap_or(true));
     let shortcut = shortcut_text();
 
     let Some(win) = window(app) else { return shortcut };
@@ -206,6 +207,9 @@ pub struct PanelSettings {
     /// Show the Dock Panel button on the taskbar.
     #[serde(rename = "taskbarButton")]
     taskbar_button: bool,
+    /// Show the mini player next to that button.
+    #[serde(rename = "taskbarPlayer")]
+    taskbar_player: bool,
 }
 
 fn current_settings() -> PanelSettings {
@@ -214,6 +218,7 @@ fn current_settings() -> PanelSettings {
         edge: if RIGHT.load(Ordering::SeqCst) { "right" } else { "left" },
         shortcut: shortcut_text(),
         taskbar_button: crate::taskbar::enabled(),
+        taskbar_player: crate::taskbar::player_enabled(),
     }
 }
 
@@ -241,6 +246,13 @@ pub fn panel_set_edge(app: AppHandle, edge: String) -> PanelSettings {
 #[tauri::command]
 pub fn panel_set_taskbar_button(app: AppHandle, on: bool) -> PanelSettings {
     crate::taskbar::set_enabled(on);
+    save_settings(&app);
+    current_settings()
+}
+
+#[tauri::command]
+pub fn panel_set_taskbar_player(app: AppHandle, on: bool) -> PanelSettings {
+    crate::taskbar::set_player_enabled(on);
     save_settings(&app);
     current_settings()
 }

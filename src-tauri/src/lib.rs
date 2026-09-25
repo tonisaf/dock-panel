@@ -71,6 +71,7 @@ pub fn run() {
             panel::panel_suspend_shortcut,
             panel::panel_set_width,
             panel::panel_set_taskbar_button,
+            panel::panel_set_taskbar_player,
             apps::list_apps,
             apps::launch_app,
             apps::pick_files,
