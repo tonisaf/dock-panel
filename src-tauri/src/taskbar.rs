@@ -68,7 +68,8 @@ mod native {
         ReleaseCapture, SetCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowW, GetMessageW, GetWindowRect,
+        CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowW, GetMessageW, GetWindow, GetWindowRect,
+        SetWindowPos, GW_HWNDPREV, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
         IsWindowVisible, LoadCursorW, PostQuitMessage, RegisterClassW, SetTimer, ShowWindow, TranslateMessage,
         UpdateLayeredWindow, IDC_ARROW, MA_NOACTIVATE, MSG, SW_HIDE, SW_SHOWNOACTIVATE, ULW_ALPHA, WM_DESTROY,
         WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_TIMER, WNDCLASSW, WS_EX_LAYERED,
@@ -528,7 +529,36 @@ mod native {
                 }
                 s.shown = true;
             }
+            keep_above(hwnd, s.taskbar);
         });
+    }
+
+    /// Owned windows are meant to stay above their owner, but across processes
+    /// Windows doesn't always keep that: after a fullscreen overlay (the
+    /// Snipping Tool, for one) the taskbar can come back on top of the button.
+    /// Puts the button right above the taskbar again — not at the very top, so
+    /// it doesn't float over fullscreen apps the taskbar is below.
+    fn keep_above(hwnd: HWND, taskbar: HWND) {
+        unsafe {
+            // Walk up from the button: meeting the taskbar means it covers us.
+            let mut above = GetWindow(hwnd, GW_HWNDPREV).ok();
+            while let Some(w) = above {
+                if w == taskbar {
+                    let insert_after = GetWindow(taskbar, GW_HWNDPREV).ok().unwrap_or(HWND_TOPMOST);
+                    let _ = SetWindowPos(
+                        hwnd,
+                        Some(insert_after),
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+                    );
+                    return;
+                }
+                above = GetWindow(w, GW_HWNDPREV).ok();
+            }
+        }
     }
 
     // ---- drawing ----------------------------------------------------------------
