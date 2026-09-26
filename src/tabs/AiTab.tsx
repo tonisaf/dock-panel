@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useQueryClient } from "@tanstack/react-query";
-import { Bell, BellOff, Clock, LogIn, LogOut, RefreshCw, Sparkle, Unlink } from "lucide-react";
+import { Bell, BellOff, Clock, LogIn, LogOut, MessageCircleQuestion, RefreshCw, Sparkle, Unlink } from "lucide-react";
+import { AskBox } from "../ask/AskBox";
 import clsx from "clsx";
 import { Card } from "../components/Card";
 import { AgentsList, AgentsNotifyToggle } from "../agents/AgentsList";
@@ -166,6 +167,10 @@ export function AiTab() {
 
   return (
     <div className="flex flex-col gap-3 pb-2">
+      <Card title="Спросить Claude" icon={MessageCircleQuestion}>
+        <AskBox />
+      </Card>
+
       <Card title="Сессии" icon={Sparkle} action={<AgentsNotifyToggle />}>
         <AgentsList />
       </Card>

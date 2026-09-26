@@ -104,6 +104,8 @@ fn claude_sessions() -> Vec<Agent> {
     dir.flatten()
         .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
         .filter_map(|e| serde_json::from_str::<Value>(&std::fs::read_to_string(e.path()).ok()?).ok())
+        // Only sessions a person works in; `claude -p` runs (like the panel's quick questions) aren't.
+        .filter(|v| v["kind"].as_str().is_none_or(|k| k == "interactive"))
         .filter_map(|v| {
             let pid = v["pid"].as_u64()? as u32;
             if !process::alive(pid) {

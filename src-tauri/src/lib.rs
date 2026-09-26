@@ -1,5 +1,6 @@
 mod agents;
 mod ai_limits;
+mod ask;
 mod alerts;
 mod apps;
 mod calendar;
@@ -160,6 +161,9 @@ pub fn run() {
             monitors::monitor_set,
             monitors::monitors_blackout,
             agents::agents_list,
+            ask::ask_start,
+            ask::ask_cancel,
+            ask::clipboard_text,
             agents::agents_dismiss,
             agents::agents_set_notify,
             agents::agents_focus,

@@ -13,6 +13,7 @@ import { YoutubeWidget } from "./youtube/YoutubeWidget";
 import { HomeWidget } from "./home/HomeWidget";
 import { MonitorsWidget } from "./monitors/MonitorsWidget";
 import { AgentsWidget } from "./agents/AgentsWidget";
+import { AskWidget } from "./ask/AskWidget";
 
 export interface WidgetDef {
   id: string;
@@ -35,6 +36,7 @@ export const WIDGETS: WidgetDef[] = [
   { id: "tasks", title: "Задачи", component: TasksWidget },
   { id: "ai", title: "Лимиты AI", component: AiLimitsWidget },
   { id: "agents", title: "Агенты", component: AgentsWidget },
+  { id: "ask", title: "Спросить Claude", component: AskWidget },
   { id: "vpn", title: "VPN", component: VpnWidget },
   { id: "home", title: "Дом", component: HomeWidget },
   { id: "monitors", title: "Мониторы", component: MonitorsWidget },
