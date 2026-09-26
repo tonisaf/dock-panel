@@ -208,6 +208,8 @@ function TaskbarButtonRow() {
     setTaskbarMail,
     taskbarTasks,
     setTaskbarTasks,
+    taskbarAgents,
+    setTaskbarAgents,
   } = usePanelSettings();
   return (
     <>
@@ -227,6 +229,11 @@ function TaskbarButtonRow() {
       {taskbarButton && (
         <Row label="Задачи на кнопке" hint="Счётчик невыполненных задач Google на сегодня и просроченных">
           <Toggle on={taskbarTasks} onChange={setTaskbarTasks} />
+        </Row>
+      )}
+      {taskbarButton && (
+        <Row label="Агенты на кнопке" hint="Сколько сессий Claude и Codex закончили работу и ждут вас">
+          <Toggle on={taskbarAgents} onChange={setTaskbarAgents} />
         </Row>
       )}
     </>

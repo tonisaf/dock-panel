@@ -23,6 +23,15 @@ static ENABLED: AtomicBool = AtomicBool::new(true);
 static PLAYER: AtomicBool = AtomicBool::new(true);
 static MAIL: AtomicBool = AtomicBool::new(true);
 static TASKS: AtomicBool = AtomicBool::new(true);
+static AGENTS: AtomicBool = AtomicBool::new(true);
+
+pub fn agents_enabled() -> bool {
+    AGENTS.load(Ordering::SeqCst)
+}
+
+pub fn set_agents_enabled(on: bool) {
+    AGENTS.store(on, Ordering::SeqCst);
+}
 
 pub fn enabled() -> bool {
     ENABLED.load(Ordering::SeqCst)
@@ -94,7 +103,7 @@ mod native {
         WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
     };
 
-    use crate::{gcal, mail, media, panel};
+    use crate::{agents, gcal, mail, media, panel};
 
     /// winuser.h; the windows crate only exports it with the Controls feature.
     const WM_MOUSELEAVE: u32 = 0x02A3;
@@ -170,6 +179,7 @@ mod native {
         Panel,
         Mail,
         Tasks,
+        Agents,
         Info,
         Prev,
         Toggle,
@@ -188,6 +198,7 @@ mod native {
         panel: Zone,
         mail: Option<Zone>,
         tasks: Option<Zone>,
+        agents: Option<Zone>,
         info: Option<Zone>,
         prev: Option<Zone>,
         toggle: Option<Zone>,
@@ -202,6 +213,7 @@ mod native {
                 (Some(self.panel), Hit::Panel),
                 (self.mail, Hit::Mail),
                 (self.tasks, Hit::Tasks),
+                (self.agents, Hit::Agents),
                 (self.info, Hit::Info),
                 (self.prev, Hit::Prev),
                 (self.toggle, Hit::Toggle),
@@ -212,7 +224,7 @@ mod native {
         }
 
         fn width(&self) -> i32 {
-            [Some(self.panel), self.mail, self.tasks, self.info, self.prev, self.toggle, self.next]
+            [Some(self.panel), self.mail, self.tasks, self.agents, self.info, self.prev, self.toggle, self.next]
                 .into_iter()
                 .flatten()
                 .map(|z| z.x + z.w)
@@ -235,6 +247,8 @@ mod native {
         unread: usize,
         /// Google tasks due today or overdue; that counter shows while above zero.
         due: usize,
+        /// Claude / Codex sessions that finished and wait for the user.
+        waiting: usize,
         layout: Layout,
     }
 
@@ -452,6 +466,11 @@ mod native {
                                 panel::show_tab(app, "calendar");
                             }
                         }
+                        Some(Hit::Agents) => {
+                            if let Some(app) = APP.get() {
+                                panel::show_tab(app, "ai");
+                            }
+                        }
                         Some(Hit::Prev) => control("prev"),
                         Some(Hit::Toggle) => control("toggle"),
                         Some(Hit::Next) => control("next"),
@@ -528,7 +547,7 @@ mod native {
         px(COUNTER_PAD + GLYPH + COUNTER_GAP + COUNTER_PAD, scale) + number
     }
 
-    fn layout(scale: f64, media: Option<&Media>, unread: usize, due: usize) -> Layout {
+    fn layout(scale: f64, media: Option<&Media>, unread: usize, due: usize, waiting: usize) -> Layout {
         let mut l = Layout { panel: Zone { x: 0, w: px(BUTTON_W, scale) }, ..Default::default() };
         let gap = px(GAP, scale);
         let mut x = l.panel.w + gap;
@@ -540,6 +559,11 @@ mod native {
         if due > 0 {
             let w = counter_w(due, scale);
             l.tasks = Some(Zone { x, w });
+            x += w + gap;
+        }
+        if waiting > 0 {
+            let w = counter_w(waiting, scale);
+            l.agents = Some(Zone { x, w });
             x += w + gap;
         }
         let Some(m) = media else { return l };
@@ -583,20 +607,23 @@ mod native {
             let media = if super::player_enabled() { media_now() } else { None };
             let unread = if super::mail_enabled() { mail::unread_total() } else { 0 };
             let due = if super::tasks_enabled() { gcal::due_today() } else { 0 };
+            let waiting = if super::agents_enabled() { agents::waiting_count() } else { 0 };
             // Text is measured only when the track (or a counter's label) changes.
             let same_track = s.drawn.as_ref().is_some_and(|d| {
                 d.scale == scale
                     && badge_label(d.unread) == badge_label(unread)
                     && badge_label(d.due) == badge_label(due)
+                    && badge_label(d.waiting) == badge_label(waiting)
                     && d.media.as_ref().map(|m| (&m.title, &m.artist, m.can_prev, m.can_next))
                         == media.as_ref().map(|m| (&m.title, &m.artist, m.can_prev, m.can_next))
             });
             let layout = match &s.drawn {
                 Some(d) if same_track => d.layout.clone(),
-                _ => layout(scale, media.as_ref(), unread, due),
+                _ => layout(scale, media.as_ref(), unread, due, waiting),
             };
             s.layout = layout.clone();
-            let look = Look { x, y, h, scale, light, hover: s.hover, pressed: s.pressed, media, unread, due, layout };
+            let look =
+                Look { x, y, h, scale, light, hover: s.hover, pressed: s.pressed, media, unread, due, waiting, layout };
             if s.drawn.as_ref() != Some(&look) && draw(hwnd, &look, s.icon.as_ref()).is_some() {
                 s.drawn = Some(look);
             }
@@ -1025,6 +1052,7 @@ mod native {
             (Some(l.panel), Hit::Panel),
             (l.mail, Hit::Mail),
             (l.tasks, Hit::Tasks),
+            (l.agents, Hit::Agents),
             (l.info, Hit::Info),
             (l.prev, Hit::Prev),
             (l.toggle, Hit::Toggle),
@@ -1080,6 +1108,19 @@ mod native {
                 c.ring((cx, cy), (GLYPH * s - stroke) / 2.0, stroke, fg, INK);
                 let at = |x: f64, y: f64| (cx + x * s, cy + y * s);
                 c.polyline(&[at(-3.6, 0.2), at(-1.0, 2.8), at(3.9, -2.4)], stroke, fg, INK);
+            });
+        }
+        if let Some(z) = l.agents {
+            counter(&mut c, z, Hit::Agents, look.waiting, &|c, (cx, cy)| {
+                // A four-pointed sparkle, the usual mark for AI assistants.
+                let at = |x: f64, y: f64| (cx + x * s, cy + y * s);
+                let (r, k) = (8.25, 2.1);
+                c.polyline(
+                    &[at(0.0, -r), at(k, -k), at(r, 0.0), at(k, k), at(0.0, r), at(-k, k), at(-r, 0.0), at(-k, -k), at(0.0, -r)],
+                    stroke,
+                    fg,
+                    INK,
+                );
             });
         }
 
@@ -1204,8 +1245,8 @@ mod native {
                 can_next: true,
                 cover: Some(cover()),
             };
-            let (unread, due) = (73, 7);
-            let layout = layout(scale, Some(&media), unread, due);
+            let (unread, due, waiting) = (73, 7, 2);
+            let layout = layout(scale, Some(&media), unread, due, waiting);
             Look {
                 x: 0,
                 y: 0,
@@ -1217,6 +1258,7 @@ mod native {
                 media: Some(media),
                 unread,
                 due,
+                waiting,
                 layout,
             }
         }

@@ -126,6 +126,7 @@ pub fn init(app: &AppHandle) -> String {
     crate::taskbar::set_player_enabled(saved["taskbarPlayer"].as_bool().unwrap_or(true));
     crate::taskbar::set_mail_enabled(saved["taskbarMail"].as_bool().unwrap_or(true));
     crate::taskbar::set_tasks_enabled(saved["taskbarTasks"].as_bool().unwrap_or(true));
+    crate::taskbar::set_agents_enabled(saved["taskbarAgents"].as_bool().unwrap_or(true));
     let shortcut = shortcut_text();
 
     let Some(win) = window(app) else { return shortcut };
@@ -350,6 +351,9 @@ pub struct PanelSettings {
     /// Show the count of Google tasks due today next to that button.
     #[serde(rename = "taskbarTasks")]
     taskbar_tasks: bool,
+    /// Show the count of Claude / Codex sessions waiting for the user.
+    #[serde(rename = "taskbarAgents")]
+    taskbar_agents: bool,
 }
 
 fn current_settings() -> PanelSettings {
@@ -361,6 +365,7 @@ fn current_settings() -> PanelSettings {
         taskbar_player: crate::taskbar::player_enabled(),
         taskbar_mail: crate::taskbar::mail_enabled(),
         taskbar_tasks: crate::taskbar::tasks_enabled(),
+        taskbar_agents: crate::taskbar::agents_enabled(),
     }
 }
 
@@ -402,6 +407,13 @@ pub fn panel_set_taskbar_player(app: AppHandle, on: bool) -> PanelSettings {
 #[tauri::command]
 pub fn panel_set_taskbar_mail(app: AppHandle, on: bool) -> PanelSettings {
     crate::taskbar::set_mail_enabled(on);
+    save_settings(&app);
+    current_settings()
+}
+
+#[tauri::command]
+pub fn panel_set_taskbar_agents(app: AppHandle, on: bool) -> PanelSettings {
+    crate::taskbar::set_agents_enabled(on);
     save_settings(&app);
     current_settings()
 }

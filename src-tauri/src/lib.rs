@@ -1,3 +1,4 @@
+mod agents;
 mod ai_limits;
 mod alerts;
 mod apps;
@@ -60,6 +61,7 @@ pub fn run() {
             alerts::init(handle);
             mail::init(handle);
             gcal::init();
+            agents::init(handle);
             youtube::init(handle);
             updater::init(handle);
             apps::start_icon_worker(app.path().app_cache_dir()?.join("icons"));
@@ -85,6 +87,7 @@ pub fn run() {
             panel::panel_set_taskbar_player,
             panel::panel_set_taskbar_mail,
             panel::panel_set_taskbar_tasks,
+            panel::panel_set_taskbar_agents,
             apps::list_apps,
             apps::launch_app,
             apps::pick_files,
@@ -156,6 +159,10 @@ pub fn run() {
             monitors::monitors_list,
             monitors::monitor_set,
             monitors::monitors_blackout,
+            agents::agents_list,
+            agents::agents_dismiss,
+            agents::agents_set_notify,
+            agents::agents_focus,
             monitors::monitors_blackout_end,
             monitors::monitors_blackout_active,
             mail::mail_settings,
