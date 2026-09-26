@@ -26,7 +26,7 @@ export const SearchBar = forwardRef<HTMLInputElement>(function SearchBar(_, ref)
   };
 
   return (
-    <label className="flex h-11 shrink-0 items-center gap-2.5 rounded-xl border border-stroke bg-surface px-3.5 transition-colors focus-within:border-accent/50 focus-within:bg-surface-hover">
+    <label className="flex h-11 min-w-0 flex-1 items-center gap-2.5 rounded-xl border border-stroke bg-surface px-3.5 transition-colors focus-within:border-accent/50 focus-within:bg-surface-hover">
       <Search className="size-4 text-fg-subtle" strokeWidth={2.2} />
       <input
         ref={ref}

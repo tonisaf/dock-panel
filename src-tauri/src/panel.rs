@@ -56,6 +56,9 @@ static RIGHT: AtomicBool = AtomicBool::new(false);
 static SHORTCUT: Mutex<String> = Mutex::new(String::new());
 /// Set while a modal dialog owned by the panel is open: its focus steal must not hide us.
 static KEEP_OPEN: AtomicBool = AtomicBool::new(false);
+/// Pinned by the user: clicking elsewhere doesn't hide the panel. The hotkey,
+/// the tray and taskbar buttons and the panel's own hide button still do.
+static PINNED: AtomicBool = AtomicBool::new(false);
 
 fn shortcut_text() -> String {
     let s = SHORTCUT.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -107,7 +110,7 @@ pub fn init(app: &AppHandle) -> String {
     let handle = app.clone();
     win.on_window_event(move |event| {
         if let tauri::WindowEvent::Focused(false) = event {
-            if !KEEP_OPEN.load(Ordering::SeqCst) {
+            if !KEEP_OPEN.load(Ordering::SeqCst) && !PINNED.load(Ordering::SeqCst) {
                 request_hide(&handle);
             }
         }
@@ -157,6 +160,13 @@ pub fn panel_set_extra_width(app: AppHandle, extra: u32) -> u32 {
         apply_width(&win);
     }
     extra
+}
+
+/// Pins the panel open (or unpins it); returns the new state.
+#[tauri::command]
+pub fn panel_set_pinned(on: bool) -> bool {
+    PINNED.store(on, Ordering::SeqCst);
+    on
 }
 
 /// Shows the panel (if hidden) on the given tab, e.g. from a taskbar or toast click.

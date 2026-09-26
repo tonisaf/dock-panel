@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { invoke } from "@tauri-apps/api/core";
 import { AppWindow, CheckSquare, LayoutGrid, Mail, Settings, Sparkles, type LucideIcon } from "lucide-react";
 
 export type TabId = "home" | "apps" | "tasks" | "mail" | "ai" | "settings";
@@ -40,22 +41,40 @@ interface PanelState {
   menu: ContextMenuState | null;
   /** A letter to open in the mail tab, e.g. from a clicked notification. */
   mailToOpen: MailToOpen | null;
+  /** Pinned: the panel stays open until hidden explicitly. */
+  pinned: boolean;
+  /**
+   * Opening always works; closing is the panel's own "done here" (Esc, after
+   * launching something) and is ignored while pinned. Use `hide` to force it.
+   */
   setOpen: (open: boolean) => void;
   setTab: (tab: TabId) => void;
   setQuery: (query: string) => void;
   setSelected: (selected: number) => void;
   setMenu: (menu: ContextMenuState | null) => void;
   setMailToOpen: (letter: MailToOpen | null) => void;
+  /** Closes the panel even when pinned: the hide button, the hotkey, the tray. */
+  hide: () => void;
+  setPinned: (pinned: boolean) => void;
 }
 
-export const usePanelStore = create<PanelState>((set) => ({
+export const usePanelStore = create<PanelState>((set, get) => ({
   open: false,
   tab: "home",
   query: "",
   selected: 0,
   menu: null,
   mailToOpen: null,
-  setOpen: (open) => set(open ? { open } : { open, menu: null }),
+  pinned: false,
+  setOpen: (open) => {
+    if (!open && get().pinned) return;
+    set(open ? { open } : { open, menu: null });
+  },
+  hide: () => set({ open: false, menu: null }),
+  setPinned: (pinned) => {
+    set({ pinned });
+    invoke("panel_set_pinned", { on: pinned }).catch(console.error);
+  },
   setTab: (tab) => set({ tab }),
   setQuery: (query) => set({ query, selected: 0 }),
   setSelected: (selected) => set({ selected }),

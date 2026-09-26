@@ -8,6 +8,7 @@ import { useApps } from "../lib/apps";
 import { useAppearance } from "../lib/appearance";
 import { usePanelSettings } from "../lib/panelWidth";
 import { SearchBar } from "./SearchBar";
+import { WindowButtons } from "./WindowButtons";
 import { TabBar } from "./TabBar";
 import { ResizeHandle } from "./ResizeHandle";
 import { UpdateBanner } from "./UpdateBanner";
@@ -59,7 +60,8 @@ export function Panel() {
       // Taskbar counter and notification clicks open a tab (and maybe a letter).
       listen<TabId>("panel:tab", ({ payload }) => setTab(payload)),
       listen<MailToOpen>("mail:open", ({ payload }) => usePanelStore.getState().setMailToOpen(payload)),
-      listen("panel:hide", () => setOpen(false)),
+      // Rust decided (hotkey, tray, click elsewhere when not pinned): hide even if pinned.
+      listen("panel:hide", () => usePanelStore.getState().hide()),
       listen("ai-limits:changed", () => queryClient.invalidateQueries({ queryKey: ["ai-limits"] })),
     ];
     return () => unlisten.forEach((p) => p.then((fn) => fn()));
@@ -97,7 +99,10 @@ export function Panel() {
           onAnimationStart={() => searchRef.current?.focus()}
         >
           <UpdateBanner />
-          <SearchBar ref={searchRef} />
+          <div className="flex shrink-0 gap-2">
+            <SearchBar ref={searchRef} />
+            <WindowButtons />
+          </div>
           <TabBar />
           <AnimatePresence mode="wait" initial={false}>
             <motion.main
