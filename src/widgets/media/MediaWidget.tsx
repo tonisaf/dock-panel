@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Music2, Pause, Play, SkipBack, SkipForward } from "lucide-react";
@@ -7,6 +7,7 @@ import { Card } from "../../components/Card";
 import { AppIcon } from "../../components/AppIcon";
 import { useAppsById } from "../../lib/apps";
 import { SpotifyActions } from "./SpotifyActions";
+import { seekSpotify, useSpotifyStatus } from "../spotify/api";
 
 interface NowPlaying {
   title: string;
@@ -16,11 +17,14 @@ interface NowPlaying {
   playing: boolean;
   canPrev: boolean;
   canNext: boolean;
+  canSeek: boolean;
   positionMs: number | null;
   durationMs: number | null;
 }
 
 const POLL_MS = 1500;
+/** How long a seek's target is shown before trusting the player's position again. */
+const SEEK_HOLD_MS = 2500;
 
 /** Friendly player name from its AppUserModelID when it isn't in the app list. */
 function playerName(source: string) {
@@ -62,17 +66,39 @@ export function MediaWidget() {
     staleTime: 0,
   });
   const trackKey = np ? `${np.source}|${np.title}|${np.artist}` : null;
+  const isSpotify = !!np?.source.toLowerCase().includes("spotify");
   const { data: art } = useQuery({
     queryKey: ["media-art", trackKey],
     queryFn: () => invoke<string | null>("media_thumbnail"),
     enabled: !!trackKey,
     staleTime: Infinity,
   });
-  const position = useLivePosition(np, dataUpdatedAt);
+  const livePosition = useLivePosition(np, dataUpdatedAt);
+  const [seekedTo, setSeekedTo] = useState<{ ms: number; at: number } | null>(null);
+  const { data: spotifyStatus } = useSpotifyStatus();
+  const spotifyConnected = !!spotifyStatus?.connected && !spotifyStatus.error;
+  // Players report the new position a little late; show the target meanwhile.
+  const position =
+    seekedTo && Date.now() - seekedTo.at < SEEK_HOLD_MS && np?.durationMs
+      ? Math.min(seekedTo.ms + (np.playing ? Date.now() - seekedTo.at : 0), np.durationMs)
+      : livePosition;
 
   const control = async (action: "toggle" | "next" | "prev") => {
     await invoke("media_control", { action }).catch(console.error);
     setTimeout(() => queryClient.invalidateQueries({ queryKey: ["media"] }), 250);
+  };
+
+  const seek = async (ms: number) => {
+    setSeekedTo({ ms, at: Date.now() });
+    try {
+      // Spotify's own API seeks reliably; its Windows media session may not.
+      if (isSpotify && spotifyConnected) await seekSpotify(ms);
+      else await invoke("media_seek", { positionMs: Math.round(ms) });
+    } catch (e) {
+      console.error(e);
+      setSeekedTo(null);
+    }
+    setTimeout(() => queryClient.invalidateQueries({ queryKey: ["media"] }), 400);
   };
 
   if (!np || !np.title) {
@@ -84,7 +110,6 @@ export function MediaWidget() {
   }
 
   const sourceApp = apps.get(np.source);
-  const isSpotify = np.source.toLowerCase().includes("spotify");
   const btn = "grid place-items-center rounded-full transition-colors hover:bg-ink/10 disabled:opacity-30";
 
   return (
@@ -125,22 +150,83 @@ export function MediaWidget() {
         </div>
       </div>
 
-      {(position != null && np.durationMs) || (isSpotify && trackKey) ? (
-        <div className="relative mt-3 flex items-center gap-2 text-[11px] text-fg-subtle tabular-nums">
-          {position != null && np.durationMs ? (
-            <>
-              <span>{fmt(position)}</span>
-              <div className="h-1 flex-1 overflow-hidden rounded-full bg-ink/10">
-                <div className="h-full rounded-full bg-fg/80" style={{ width: `${(position / np.durationMs) * 100}%` }} />
-              </div>
-              <span>{fmt(np.durationMs)}</span>
-            </>
-          ) : (
-            <div className="flex-1" />
-          )}
-          {isSpotify && trackKey && <SpotifyActions trackKey={trackKey} />}
-        </div>
+      {position != null && np.durationMs ? (
+        <SeekBar
+          position={position}
+          duration={np.durationMs}
+          canSeek={np.canSeek || (isSpotify && spotifyConnected)}
+          onSeek={seek}
+        />
       ) : null}
+      {isSpotify && trackKey && <SpotifyActions trackKey={trackKey} />}
     </Card>
+  );
+}
+
+/** Progress bar; click or drag to move through the track when the player allows it. */
+function SeekBar({
+  position,
+  duration,
+  canSeek,
+  onSeek,
+}: {
+  position: number;
+  duration: number;
+  canSeek: boolean;
+  onSeek: (ms: number) => void;
+}) {
+  const bar = useRef<HTMLDivElement>(null);
+  const [drag, setDrag] = useState<number | null>(null);
+  const at = (clientX: number) => {
+    const r = bar.current!.getBoundingClientRect();
+    return Math.min(1, Math.max(0, (clientX - r.left) / r.width)) * duration;
+  };
+  const shown = drag ?? position;
+  const pct = `${(shown / duration) * 100}%`;
+  const active = drag != null;
+
+  return (
+    <div className="relative mt-3 flex items-center gap-2 text-[11px] text-fg-subtle tabular-nums">
+      <span className="w-9">{fmt(shown)}</span>
+      <div
+        ref={bar}
+        className={clsx("group flex h-3 flex-1 items-center", canSeek && "cursor-pointer")}
+        onPointerDown={(e) => {
+          if (!canSeek || e.button !== 0) return;
+          e.currentTarget.setPointerCapture(e.pointerId);
+          setDrag(at(e.clientX));
+        }}
+        onPointerMove={(e) => active && setDrag(at(e.clientX))}
+        onPointerUp={(e) => {
+          if (!active) return;
+          onSeek(at(e.clientX));
+          setDrag(null);
+        }}
+        onPointerCancel={() => setDrag(null)}
+      >
+        <div
+          className={clsx(
+            "relative w-full rounded-full bg-ink/10 transition-[height]",
+            active ? "h-1.5" : "h-1",
+            canSeek && "group-hover:h-1.5",
+          )}
+        >
+          <div
+            className={clsx("h-full rounded-full", active ? "bg-accent" : "bg-fg/80", canSeek && "group-hover:bg-accent")}
+            style={{ width: pct }}
+          />
+          {canSeek && (
+            <div
+              className={clsx(
+                "absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-fg shadow transition-opacity",
+                active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+              )}
+              style={{ left: pct }}
+            />
+          )}
+        </div>
+      </div>
+      <span className="w-9 text-right">{fmt(duration)}</span>
+    </div>
   );
 }

@@ -20,9 +20,11 @@ const AUTH_URL: &str = "https://accounts.spotify.com/authorize";
 const TOKEN_URL: &str = "https://accounts.spotify.com/api/token";
 const API: &str = "https://api.spotify.com/v1";
 const SCOPES: &str = "playlist-read-private playlist-read-collaborative user-library-read \
-                      user-library-modify user-read-playback-state user-modify-playback-state";
-/// Added after the first release; older sign-ins lack it until the user signs in again.
+                      user-library-modify user-read-playback-state user-modify-playback-state \
+                      playlist-modify-public playlist-modify-private";
+/// Added after the first release; older sign-ins lack them until the user signs in again.
 const LIKE_SCOPE: &str = "user-library-modify";
+const PLAYLIST_SCOPE: &str = "playlist-modify-private";
 const SECRET: &str = "DockPanel/spotify";
 /// Must match the Redirect URI registered in the Spotify dashboard.
 const REDIRECT_PORT: u16 = 43821;
@@ -41,6 +43,8 @@ struct Stored {
 static ACCESS: Mutex<Option<(String, Instant)>> = Mutex::new(None);
 /// Scopes the current token was granted, as the token endpoint reported them.
 static GRANTED: Mutex<Option<String>> = Mutex::new(None);
+/// The signed-in user's id, once known.
+static ME: Mutex<Option<String>> = Mutex::new(None);
 
 fn stored() -> Option<Stored> {
     serde_json::from_str(&secrets::read(SECRET)?).ok()
@@ -104,9 +108,13 @@ async fn access_token() -> Result<String, String> {
 
 async fn api(method: Method, path: &str, body: Option<Value>) -> Result<(StatusCode, Value), String> {
     let token = access_token().await?;
+    let needs_length = method != Method::GET && method != Method::DELETE;
     let mut req = net::client().request(method, format!("{API}{path}")).bearer_auth(token);
     if let Some(b) = body {
         req = req.json(&b);
+    } else if needs_length {
+        // Spotify answers 411 to a PUT/POST without Content-Length.
+        req = req.header(reqwest::header::CONTENT_LENGTH, "0");
     }
     let res = req.send().await.map_err(|e| format!("Нет связи со Spotify: {e}"))?;
     let status = res.status();
@@ -184,6 +192,7 @@ pub async fn spotify_login(app: tauri::AppHandle, client_id: String) -> Result<S
     store(&Stored { client_id, refresh_token })?;
     remember_access(&v);
 
+    *ME.lock().unwrap_or_else(|e| e.into_inner()) = None;
     let me = api_get("/me").await?;
     Ok(me["display_name"].as_str().or(me["id"].as_str()).unwrap_or("Spotify").to_string())
 }
@@ -196,26 +205,35 @@ pub struct SpotifyStatus {
     error: Option<String>,
     /// False for sign-ins made before liking was added: they need to sign in again.
     can_like: bool,
+    /// Likewise for adding tracks to playlists.
+    can_edit_playlists: bool,
 }
 
-fn can_like() -> bool {
-    // A token response without `scope` tells nothing; let the like itself find out.
-    GRANTED.lock().unwrap_or_else(|e| e.into_inner()).as_deref().is_none_or(|s| s.split(' ').any(|x| x == LIKE_SCOPE))
+fn granted(scope: &str) -> bool {
+    // A token response without `scope` tells nothing; let the call itself find out.
+    GRANTED.lock().unwrap_or_else(|e| e.into_inner()).as_deref().is_none_or(|s| s.split(' ').any(|x| x == scope))
 }
 
 #[tauri::command]
 pub async fn spotify_status() -> SpotifyStatus {
     if stored().is_none() {
-        return SpotifyStatus { connected: false, user: None, error: None, can_like: false };
+        return SpotifyStatus { connected: false, user: None, error: None, can_like: false, can_edit_playlists: false };
     }
     match api_get("/me").await {
         Ok(me) => SpotifyStatus {
             connected: true,
             user: me["display_name"].as_str().or(me["id"].as_str()).map(str::to_string),
             error: None,
-            can_like: can_like(),
+            can_like: granted(LIKE_SCOPE),
+            can_edit_playlists: granted(PLAYLIST_SCOPE),
         },
-        Err(e) => SpotifyStatus { connected: true, user: None, error: Some(e), can_like: can_like() },
+        Err(e) => SpotifyStatus {
+            connected: true,
+            user: None,
+            error: Some(e),
+            can_like: granted(LIKE_SCOPE),
+            can_edit_playlists: granted(PLAYLIST_SCOPE),
+        },
     }
 }
 
@@ -224,6 +242,7 @@ pub fn spotify_logout() {
     secrets::delete(SECRET);
     *ACCESS.lock().unwrap_or_else(|e| e.into_inner()) = None;
     *GRANTED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    *ME.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 // ---- library ----------------------------------------------------------------------
@@ -237,6 +256,8 @@ pub struct Playlist {
     image: Option<String>,
     tracks: Option<u64>,
     owner: Option<String>,
+    /// The user's own or a collaborative playlist: tracks can be added to it.
+    editable: bool,
 }
 
 #[derive(Serialize)]
@@ -250,6 +271,7 @@ pub struct Library {
 #[tauri::command]
 pub async fn spotify_library() -> Result<Library, String> {
     let lists = api_get("/me/playlists?limit=50").await?;
+    let me = my_id().await;
     let liked = api_get("/me/tracks?limit=1").await;
     let playlists = lists["items"]
         .as_array()
@@ -265,6 +287,7 @@ pub async fn spotify_library() -> Result<Library, String> {
                 image: p["images"].as_array().and_then(|imgs| imgs.last()).and_then(|i| i["url"].as_str()).map(str::to_string),
                 tracks: p["items"]["total"].as_u64().or(p["tracks"]["total"].as_u64()),
                 owner: p["owner"]["display_name"].as_str().map(str::to_string),
+                editable: p["collaborative"] == true || (me.is_some() && p["owner"]["id"].as_str() == me.as_deref()),
             })
         })
         .collect();
@@ -325,8 +348,16 @@ async fn playable_context(uri: &str) -> Option<String> {
     if uri != LIKED_URI {
         return Some(uri.to_string());
     }
-    let me = api_get("/me").await.ok()?;
-    Some(format!("spotify:user:{}:collection", me["id"].as_str()?))
+    Some(format!("spotify:user:{}:collection", my_id().await?))
+}
+
+async fn my_id() -> Option<String> {
+    if let Some(id) = ME.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+        return Some(id);
+    }
+    let id = api_get("/me").await.ok()?["id"].as_str()?.to_string();
+    *ME.lock().unwrap_or_else(|e| e.into_inner()) = Some(id.clone());
+    Some(id)
 }
 
 fn open_in_app(app: &tauri::AppHandle, uri: &str) -> Result<(), String> {
@@ -567,6 +598,164 @@ pub async fn spotify_queue(uri: String) -> Result<(), String> {
     match status {
         s if s.is_success() => Ok(()),
         StatusCode::NOT_FOUND => Err("Сначала включите что-нибудь в Spotify".into()),
+        s => Err(format!("Spotify {}: {}", s.as_u16(), v["error"]["message"].as_str().unwrap_or(""))),
+    }
+}
+
+// ---- player: seek, volume, shuffle, repeat -----------------------------------------
+
+/// Turns a player call's answer into a user-facing error.
+fn player_result(status: StatusCode, v: &Value) -> Result<(), String> {
+    let msg = v["error"]["message"].as_str().unwrap_or("");
+    match status {
+        s if s.is_success() => Ok(()),
+        StatusCode::NOT_FOUND => Err("Сейчас в Spotify ничего не играет".into()),
+        StatusCode::FORBIDDEN if v["error"]["reason"] == "VOLUME_CONTROL_DISALLOW" => {
+            Err("Это устройство не даёт менять громкость".into())
+        }
+        StatusCode::FORBIDDEN if msg.to_lowercase().contains("premium") => Err("Нужен Spotify Premium".into()),
+        StatusCode::FORBIDDEN | StatusCode::UNAUTHORIZED => {
+            Err("Нет разрешения: выйдите из Spotify в настройках и войдите снова.".into())
+        }
+        s => Err(format!("Spotify {}: {msg}", s.as_u16())),
+    }
+}
+
+async fn player_call(method: Method, path: &str, body: Option<Value>) -> Result<(), String> {
+    let (status, v) = api(method, path, body).await?;
+    player_result(status, &v)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerState {
+    playing: bool,
+    /// `None` when the device doesn't let its volume be changed.
+    volume: Option<u8>,
+    shuffle: bool,
+    /// "off", "context" (the playlist or album) or "track".
+    repeat: String,
+    progress_ms: Option<u64>,
+    duration_ms: Option<u64>,
+}
+
+/// Spotify's playback state on whatever device is active; `None` when idle.
+#[tauri::command]
+pub async fn spotify_player() -> Result<Option<PlayerState>, String> {
+    let (status, v) = api(Method::GET, "/me/player", None).await?;
+    if status == StatusCode::NO_CONTENT || !status.is_success() || v.is_null() {
+        return Ok(None);
+    }
+    let device = &v["device"];
+    Ok(Some(PlayerState {
+        playing: v["is_playing"] == true,
+        volume: (device["supports_volume"] != false)
+            .then(|| device["volume_percent"].as_u64())
+            .flatten()
+            .map(|p| p.min(100) as u8),
+        shuffle: v["shuffle_state"] == true,
+        repeat: v["repeat_state"].as_str().unwrap_or("off").to_string(),
+        progress_ms: v["progress_ms"].as_u64(),
+        duration_ms: v["item"]["duration_ms"].as_u64(),
+    }))
+}
+
+#[tauri::command]
+pub async fn spotify_seek(position_ms: u64) -> Result<(), String> {
+    player_call(Method::PUT, &format!("/me/player/seek?position_ms={position_ms}"), None).await
+}
+
+#[tauri::command]
+pub async fn spotify_volume(percent: u8) -> Result<(), String> {
+    player_call(Method::PUT, &format!("/me/player/volume?volume_percent={}", percent.min(100)), None).await
+}
+
+#[tauri::command]
+pub async fn spotify_shuffle(on: bool) -> Result<(), String> {
+    player_call(Method::PUT, &format!("/me/player/shuffle?state={on}"), None).await
+}
+
+#[tauri::command]
+pub async fn spotify_repeat(mode: String) -> Result<(), String> {
+    if !matches!(mode.as_str(), "off" | "context" | "track") {
+        return Err("Неизвестный режим повтора".into());
+    }
+    player_call(Method::PUT, &format!("/me/player/repeat?state={mode}"), None).await
+}
+
+// ---- up next -----------------------------------------------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueItem {
+    uri: String,
+    name: String,
+    subtitle: String,
+    image: Option<String>,
+    duration_ms: Option<u64>,
+}
+
+/// How many upcoming tracks the panel lists (and can skip to).
+const UP_NEXT_MAX: usize = 15;
+
+/// What plays after the current track: the user's queue, then the context.
+#[tauri::command]
+pub async fn spotify_up_next() -> Result<Vec<QueueItem>, String> {
+    let (status, v) = api(Method::GET, "/me/player/queue", None).await?;
+    if status == StatusCode::NO_CONTENT || v.is_null() {
+        return Ok(Vec::new());
+    }
+    player_result(status, &v)?;
+    Ok(v["queue"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|i| !i.is_null())
+        .take(UP_NEXT_MAX)
+        .filter_map(|i| {
+            let episode = i["type"] == "episode";
+            Some(QueueItem {
+                uri: i["uri"].as_str()?.to_string(),
+                name: i["name"].as_str().unwrap_or_default().to_string(),
+                subtitle: if episode {
+                    i["show"]["name"].as_str().unwrap_or("Подкаст").to_string()
+                } else {
+                    artist_names(&i["artists"])
+                },
+                image: smallest_image(if episode { &i["images"] } else { &i["album"]["images"] }),
+                duration_ms: i["duration_ms"].as_u64(),
+            })
+        })
+        .collect())
+}
+
+/// Jumps `count` tracks ahead (to the `count`-th item of "up next").
+/// Spotify has no "play this queue entry", so it skips one by one.
+#[tauri::command]
+pub async fn spotify_skip(count: u32) -> Result<(), String> {
+    for _ in 0..count.clamp(1, UP_NEXT_MAX as u32) {
+        player_call(Method::POST, "/me/player/next", None).await?;
+    }
+    Ok(())
+}
+
+// ---- add to playlist ---------------------------------------------------------------
+
+/// Adds a track to one of the user's playlists: `/playlists/{id}/items`, or
+/// the older `/tracks` where the account's API doesn't have it yet.
+#[tauri::command]
+pub async fn spotify_add_to_playlist(playlist_id: String, uri: String) -> Result<(), String> {
+    let id = percent_encoding::utf8_percent_encode(&playlist_id, percent_encoding::NON_ALPHANUMERIC).to_string();
+    let body = json!({ "uris": [uri] });
+    let (mut status, mut v) = api(Method::POST, &format!("/playlists/{id}/items"), Some(body.clone())).await?;
+    if status == StatusCode::NOT_FOUND || status == StatusCode::GONE {
+        (status, v) = api(Method::POST, &format!("/playlists/{id}/tracks"), Some(body)).await?;
+    }
+    match status {
+        s if s.is_success() => Ok(()),
+        StatusCode::FORBIDDEN | StatusCode::UNAUTHORIZED => {
+            Err("Нет разрешения менять плейлисты: выйдите из Spotify в настройках и войдите снова.".into())
+        }
         s => Err(format!("Spotify {}: {}", s.as_u16(), v["error"]["message"].as_str().unwrap_or(""))),
     }
 }

@@ -1,10 +1,9 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { motion } from "motion/react";
+import { useCallback, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, Laptop, Loader2, MonitorSpeaker, Smartphone, Speaker, Tv, type LucideIcon } from "lucide-react";
 import clsx from "clsx";
 import { transferTo, useDevices } from "./api";
+import { AnchoredMenu, menuItem } from "./Menu";
 
 const ICONS: Record<string, LucideIcon> = {
   Computer: Laptop,
@@ -28,33 +27,7 @@ export function DevicePicker({ className }: { className?: string }) {
   const [error, setError] = useState<string | null>(null);
   const { data: devices, isPending } = useDevices(open);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ x: 0, y: 0 });
-
-  // Below the button, kept inside the window.
-  useLayoutEffect(() => {
-    if (!open || !buttonRef.current || !menuRef.current) return;
-    const b = buttonRef.current.getBoundingClientRect();
-    const { width, height } = menuRef.current.getBoundingClientRect();
-    setPos({
-      x: Math.max(8, Math.min(b.right - width, window.innerWidth - width - 8)),
-      y: b.bottom + height + 12 > window.innerHeight ? b.top - height - 4 : b.bottom + 4,
-    });
-  }, [open, devices, error]);
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: Event) => {
-      const t = e.target as Node;
-      if (!menuRef.current?.contains(t) && !buttonRef.current?.contains(t)) setOpen(false);
-    };
-    window.addEventListener("mousedown", close);
-    window.addEventListener("wheel", close);
-    return () => {
-      window.removeEventListener("mousedown", close);
-      window.removeEventListener("wheel", close);
-    };
-  }, [open]);
+  const close = useCallback(() => setOpen(false), []);
 
   const pick = async (id: string) => {
     setSwitching(id);
@@ -73,7 +46,6 @@ export function DevicePicker({ className }: { className?: string }) {
     }
   };
 
-  const item = "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[13px] hover:bg-ink/10";
   return (
     <>
       <button
@@ -91,41 +63,32 @@ export function DevicePicker({ className }: { className?: string }) {
       >
         <MonitorSpeaker className="size-4" />
       </button>
-      {open &&
-        createPortal(
-          <motion.div
-            ref={menuRef}
-            initial={{ opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.1 }}
-            style={{ left: pos.x, top: pos.y }}
-            className="fixed z-50 w-60 rounded-xl border border-ink/10 bg-popover p-1 text-fg shadow-2xl shadow-black/50"
-          >
-            <div className="px-2.5 pt-1 pb-1.5 text-[11px] text-fg-subtle">Играть на устройстве</div>
-            {isPending && <div className="px-2.5 py-1.5 text-[12px] text-fg-subtle">Ищу устройства…</div>}
-            {devices?.length === 0 && (
-              <div className="px-2.5 py-1.5 text-[12px] leading-relaxed text-fg-subtle">
-                Нет доступных устройств. Откройте Spotify на компьютере, телефоне или колонке.
-              </div>
-            )}
-            {devices?.map((d) => {
-              const Icon = ICONS[d.kind] ?? Speaker;
-              return (
-                <button key={d.id} className={item} disabled={!!switching} onClick={() => !d.active && pick(d.id)}>
-                  <Icon className={clsx("size-4", d.active ? "text-[#1ed760]" : "text-fg-muted")} />
-                  <span className={clsx("min-w-0 flex-1 truncate", d.active && "text-[#1ed760]")}>{d.name}</span>
-                  {switching === d.id ? (
-                    <Loader2 className="size-3.5 animate-spin text-fg-subtle" />
-                  ) : (
-                    d.active && <Check className="size-3.5 text-[#1ed760]" />
-                  )}
-                </button>
-              );
-            })}
-            {error && <div className="px-2.5 py-1.5 text-[12px] text-warn">{error}</div>}
-          </motion.div>,
-          document.body,
-        )}
+      {open && (
+        <AnchoredMenu anchor={buttonRef} onClose={close} className="w-60">
+          <div className="px-2.5 pt-1 pb-1.5 text-[11px] text-fg-subtle">Играть на устройстве</div>
+          {isPending && <div className="px-2.5 py-1.5 text-[12px] text-fg-subtle">Ищу устройства…</div>}
+          {devices?.length === 0 && (
+            <div className="px-2.5 py-1.5 text-[12px] leading-relaxed text-fg-subtle">
+              Нет доступных устройств. Откройте Spotify на компьютере, телефоне или колонке.
+            </div>
+          )}
+          {devices?.map((d) => {
+            const Icon = ICONS[d.kind] ?? Speaker;
+            return (
+              <button key={d.id} className={menuItem} disabled={!!switching} onClick={() => !d.active && pick(d.id)}>
+                <Icon className={clsx("size-4", d.active ? "text-[#1ed760]" : "text-fg-muted")} />
+                <span className={clsx("min-w-0 flex-1 truncate", d.active && "text-[#1ed760]")}>{d.name}</span>
+                {switching === d.id ? (
+                  <Loader2 className="size-3.5 animate-spin text-fg-subtle" />
+                ) : (
+                  d.active && <Check className="size-3.5 text-[#1ed760]" />
+                )}
+              </button>
+            );
+          })}
+          {error && <div className="px-2.5 py-1.5 text-[12px] text-warn">{error}</div>}
+        </AnchoredMenu>
+      )}
     </>
   );
 }

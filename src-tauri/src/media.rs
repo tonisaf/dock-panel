@@ -14,6 +14,8 @@ pub struct NowPlaying {
     pub playing: bool,
     pub can_prev: bool,
     pub can_next: bool,
+    /// The player accepts a new position (click on the progress bar).
+    pub can_seek: bool,
     /// Position extrapolated to "now"; `None` when the player reports no timeline.
     pub position_ms: Option<u64>,
     pub duration_ms: Option<u64>,
@@ -42,6 +44,12 @@ pub async fn media_thumbnail() -> Result<Option<String>, String> {
 #[tauri::command]
 pub async fn media_control(action: String) -> Result<(), String> {
     blocking(move || win::control(&action)).await
+}
+
+/// Moves the current player to `position_ms` from the start of the track.
+#[tauri::command]
+pub async fn media_seek(position_ms: u64) -> Result<(), String> {
+    blocking(move || win::seek(position_ms)).await
 }
 
 pub mod win {
@@ -115,6 +123,7 @@ pub mod win {
             playing,
             can_prev: controls.IsPreviousEnabled()?,
             can_next: controls.IsNextEnabled()?,
+            can_seek: controls.IsPlaybackPositionEnabled()? && duration > 0,
             position_ms,
             duration_ms,
         }))
@@ -167,6 +176,13 @@ pub mod win {
             )?
             .join()?;
         Ok(Some(data.DetachPixelData()?.to_vec()))
+    }
+
+    pub fn seek(position_ms: u64) -> Result<()> {
+        let Some(s) = session()? else { return Ok(()) };
+        let start = s.GetTimelineProperties()?.StartTime()?.Duration;
+        s.TryChangePlaybackPositionAsync(start + position_ms as i64 * 10_000)?.join()?;
+        Ok(())
     }
 
     pub fn control(action: &str) -> Result<()> {

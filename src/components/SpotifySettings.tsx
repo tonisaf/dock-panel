@@ -71,8 +71,10 @@ export function SpotifySettings() {
           <div className={clsx("text-[12px] leading-relaxed", status.error ? "text-warn" : "text-ok")}>
             {status.error ?? "Подключено"}
           </div>
-          {!status.error && !status.canLike && (
-            <div className="text-[12px] leading-relaxed text-warn">Чтобы ставить лайки, выйдите и войдите снова</div>
+          {!status.error && (!status.canLike || !status.canEditPlaylists) && (
+            <div className="text-[12px] leading-relaxed text-warn">
+              Чтобы ставить лайки и добавлять треки в плейлисты, выйдите и войдите снова
+            </div>
           )}
         </div>
         <button className={button} onClick={logout}>
