@@ -215,6 +215,7 @@ function Row({
   m,
   showAccount,
   active,
+  selected,
   onOpen,
   onError,
 }: {
@@ -222,31 +223,41 @@ function Row({
   showAccount: boolean;
   /** The letter open next to the list. */
   active: boolean;
+  /** The row the arrow keys are on. */
+  selected: boolean;
   onOpen: () => void;
   onError: (message: string) => void;
 }) {
   const { act } = useMailActions();
   // The row disappears at once (optimistic); a failure brings it back with a note.
   const run = (action: MailAction) => act(m, action).catch((e) => onError(String(e)));
-  const quick =
-    "grid size-7 place-items-center rounded-lg text-fg-muted transition-colors hover:bg-ink/10 hover:text-fg";
+  const quick = "grid size-7 place-items-center rounded-lg text-fg-subtle transition-colors hover:text-fg";
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (selected) ref.current?.scrollIntoView({ block: "nearest" });
+  }, [selected]);
 
   return (
     <div
+      ref={ref}
       className={clsx(
         "group relative rounded-xl transition-colors",
-        active ? "bg-accent/12 ring-1 ring-accent/30 ring-inset" : "hover:bg-surface-hover",
+        active
+          ? "bg-accent/12 ring-1 ring-accent/30 ring-inset"
+          : selected
+            ? "bg-ink/8"
+            : "hover:bg-surface-hover",
       )}
     >
       <button onClick={onOpen} className="flex w-full items-start gap-2.5 px-2.5 py-2 text-left">
         <span className={clsx("mt-1.5 size-2 shrink-0 rounded-full", m.unread ? "bg-accent" : "bg-transparent")} />
-        <div className="min-w-0 flex-1">
+        {/* On hover the text makes room for the quick actions. */}
+        <div className="min-w-0 flex-1 group-hover:pr-14">
           <div className="flex items-baseline gap-2">
             <span className={clsx("min-w-0 flex-1 truncate text-[13.5px]", m.unread ? "font-semibold" : "text-fg-muted")}>
               {m.fromName || m.fromEmail || "(без отправителя)"}
             </span>
-            {/* The quick actions take the date's place on hover. */}
-            <span className="shrink-0 text-[11.5px] text-fg-subtle tabular-nums group-hover:invisible">
+            <span className="shrink-0 text-[11.5px] text-fg-subtle tabular-nums group-hover:hidden">
               {shortDate(m.date)}
             </span>
           </div>
@@ -254,7 +265,7 @@ function Row({
           {showAccount && <div className="truncate text-[11px] text-fg-subtle">{m.account}</div>}
         </div>
       </button>
-      <div className="absolute top-1 right-1.5 hidden items-center gap-0.5 rounded-lg bg-popover/90 p-0.5 shadow-sm group-hover:flex">
+      <div className="absolute inset-y-0 right-1.5 hidden items-center group-hover:flex">
         <button title="В архив" onClick={() => run("archive")} className={quick}>
           <Archive className="size-4" />
         </button>
@@ -364,6 +375,38 @@ export function MailTab() {
   const { messages, errors, isPending, isFetching, isError, error, hasNextPage, fetchNextPage, isFetchingNextPage } =
     useMailList(account, unreadOnly, accounts.length > 0);
   const split = useSplit(!!reading, baseWidth);
+  const [cursor, setCursor] = useState(0);
+  // A new filter starts at the top.
+  useEffect(() => setCursor(0), [account, unreadOnly]);
+  // Clicking a letter (or a notification) moves the arrow-key cursor to it.
+  useEffect(() => {
+    if (!reading) return;
+    const i = messages.findIndex((m) => m.account === reading.account && m.uid === reading.uid);
+    if (i >= 0) setCursor(i);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the open letter changes
+  }, [reading]);
+
+  // ↑/↓ walk the list (and switch the open letter), Enter opens one.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (usePanelStore.getState().query || e.ctrlKey || e.altKey || e.metaKey) return;
+      if (e.target instanceof HTMLElement && e.target.closest("input:not([data-panel-search]), textarea")) return;
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && !(e.key === "Enter" && !reading)) return;
+      if (messages.length === 0) return;
+      e.preventDefault();
+      const at = Math.min(cursor, messages.length - 1);
+      if (e.key === "Enter") {
+        setReading(messages[at]);
+        return;
+      }
+      const next = e.key === "ArrowDown" ? Math.min(at + 1, messages.length - 1) : Math.max(at - 1, 0);
+      if (e.key === "ArrowDown" && next >= messages.length - 3 && hasNextPage && !isFetchingNextPage) fetchNextPage();
+      setCursor(next);
+      if (reading) setReading(messages[next]);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [messages, cursor, reading, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   // A clicked notification asks for a letter.
   useEffect(() => {
@@ -456,12 +499,13 @@ export function MailTab() {
         />
       ) : (
         <div className="flex flex-col">
-          {messages.map((m) => (
+          {messages.map((m, i) => (
             <Row
               key={`${m.account}/${m.uid}`}
               m={m}
               showAccount={multi && !account}
               active={!!reading && reading.account === m.account && reading.uid === m.uid}
+              selected={i === Math.min(cursor, messages.length - 1)}
               onOpen={() => setReading(m)}
               onError={setActionError}
             />

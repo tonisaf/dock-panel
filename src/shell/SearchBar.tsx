@@ -30,6 +30,7 @@ export const SearchBar = forwardRef<HTMLInputElement>(function SearchBar(_, ref)
       <Search className="size-4 text-fg-subtle" strokeWidth={2.2} />
       <input
         ref={ref}
+        data-panel-search
         value={query}
         onChange={(e) => {
           setQuery(e.target.value);
