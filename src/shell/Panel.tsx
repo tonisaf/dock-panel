@@ -18,11 +18,14 @@ import { AppsTab } from "../tabs/AppsTab";
 import { TasksTab } from "../tabs/TasksTab";
 import { AiTab } from "../tabs/AiTab";
 import { SettingsTab } from "../tabs/SettingsTab";
+import { MailTab } from "../tabs/MailTab";
+import { invalidateMail } from "../mail/api";
 
 const TAB_VIEWS = {
   home: HomeTab,
   apps: AppsTab,
   tasks: TasksTab,
+  mail: MailTab,
   ai: AiTab,
   settings: SettingsTab,
 };
@@ -47,7 +50,10 @@ export function Panel() {
       listen("panel:show", () => {
         setQuery("");
         setOpen(true);
+        // Fresh unread counts right away instead of at the next minute tick.
+        invoke("mail_refresh").catch(console.error);
       }),
+      listen("mail:changed", () => invalidateMail(queryClient)),
       listen("panel:hide", () => setOpen(false)),
       listen("ai-limits:changed", () => queryClient.invalidateQueries({ queryKey: ["ai-limits"] })),
     ];

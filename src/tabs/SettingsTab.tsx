@@ -1,6 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
-import { motion } from "motion/react";
 import clsx from "clsx";
 import { CityPicker } from "../components/CityPicker";
 import { NotionSettings } from "../components/NotionSettings";
@@ -9,6 +8,8 @@ import { SpotifySettings } from "../components/SpotifySettings";
 import { UpdateSettings } from "../components/UpdateSettings";
 import { MAX_WIDTH, MIN_WIDTH, WIDTH_PRESETS, usePanelSettings, usePanelWidth, type Edge } from "../lib/panelWidth";
 import { usePrefs, type ThemeMode } from "../lib/prefs";
+import { Toggle } from "../components/Toggle";
+import { MailSettings } from "../components/MailSettings";
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
@@ -19,22 +20,6 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
       </div>
       {children}
     </div>
-  );
-}
-
-function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      role="switch"
-      aria-checked={on}
-      onClick={() => onChange(!on)}
-      className={clsx(
-        "flex h-6 w-11 shrink-0 items-center rounded-full border px-0.5 transition-colors",
-        on ? "justify-end border-accent bg-accent" : "justify-start border-ink/25 bg-transparent",
-      )}
-    >
-      <motion.span layout className={clsx("size-4 rounded-full", on ? "bg-on-accent" : "bg-ink/70")} />
-    </button>
   );
 }
 
@@ -256,6 +241,10 @@ export function SettingsTab() {
       </div>
       <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Оформление</h3>
       <AppearanceSection />
+      <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Почта</h3>
+      <div className="rounded-2xl border border-stroke bg-surface">
+        <MailSettings />
+      </div>
       <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Notion</h3>
       <div className="rounded-2xl border border-stroke bg-surface">
         <NotionSettings />

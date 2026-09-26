@@ -192,7 +192,7 @@ pub async fn ai_alerts_set(app: AppHandle, provider: String, enabled: bool) -> R
 }
 
 #[cfg(windows)]
-fn notify(app: &AppHandle, title: &str, body: &str) {
+pub fn notify(app: &AppHandle, title: &str, body: &str) {
     use tauri_winrt_notification::{Duration as ToastDuration, Toast};
     use windows::core::w;
     use windows::Win32::Media::Audio::{PlaySoundW, SND_ALIAS, SND_ASYNC};
