@@ -112,13 +112,35 @@ pub async fn monitor_set(id: String, feature: String, value: u32) -> Result<(), 
     tauri::async_runtime::spawn_blocking(move || win::set(&id, code, value)).await.map_err(|e| e.to_string())?
 }
 
-/// Blacks out every screen and turns every monitor's brightness to its
-/// minimum; a click or any key brings both back. The panel hides first.
+/// Blacks out every screen and turns monitors' brightness to the minimum.
+///
+/// By default the panel hides and every monitor dims; a click or any key
+/// brings it all back. With `around_panel` the panel stays open on top of the
+/// black screens, its own monitor keeps its brightness, and a click on the
+/// black area (or `monitors_blackout_end`) ends it. The widget hears about
+/// both ends through the `monitors:blackout` event.
 #[tauri::command]
-pub fn monitors_blackout(app: tauri::AppHandle) {
-    crate::panel::request_hide(&app);
+pub fn monitors_blackout(app: tauri::AppHandle, around_panel: Option<bool>) {
+    let around_panel = around_panel.unwrap_or(false);
+    if !around_panel {
+        crate::panel::request_hide(&app);
+    }
     #[cfg(windows)]
-    blackout::start();
+    blackout::start(app, around_panel);
+}
+
+#[tauri::command]
+pub fn monitors_blackout_end() {
+    #[cfg(windows)]
+    blackout::end();
+}
+
+#[tauri::command]
+pub fn monitors_blackout_active() -> bool {
+    #[cfg(windows)]
+    return blackout::active();
+    #[cfg(not(windows))]
+    false
 }
 
 /// Black topmost windows over every screen, with the brightness to restore.
@@ -129,19 +151,22 @@ pub fn monitors_blackout(app: tauri::AppHandle) {
 /// click that started it must not end it.
 #[cfg(windows)]
 mod blackout {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
+    use tauri::{AppHandle, Emitter};
     use windows::core::w;
     use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows::Win32::Graphics::Gdi::{GetStockObject, HBRUSH, BLACK_BRUSH};
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::System::Threading::GetCurrentThreadId;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, PostQuitMessage,
-        RegisterClassW, SetCursor, SetForegroundWindow, TranslateMessage, MSG, WM_KEYDOWN, WM_LBUTTONDOWN,
-        WM_MBUTTONDOWN, WM_RBUTTONDOWN, WM_SETCURSOR, WM_SYSKEYDOWN, WNDCLASSW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-        WS_POPUP, WS_VISIBLE,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, LoadCursorW, PostQuitMessage,
+        PostThreadMessageW, RegisterClassW, SetCursor, SetForegroundWindow, SetWindowPos, TranslateMessage,
+        HWND_TOPMOST, IDC_ARROW, MSG, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WM_KEYDOWN, WM_LBUTTONDOWN,
+        WM_MBUTTONDOWN, WM_QUIT, WM_RBUTTONDOWN, WM_SETCURSOR, WM_SYSKEYDOWN, WNDCLASSW, WS_EX_TOOLWINDOW,
+        WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
     };
 
     use super::{win, BRIGHTNESS};
@@ -150,23 +175,56 @@ mod blackout {
     const GRACE: Duration = Duration::from_millis(700);
 
     static ACTIVE: AtomicBool = AtomicBool::new(false);
+    /// The blackout thread, so `end` can stop its message loop.
+    static THREAD: AtomicU32 = AtomicU32::new(0);
     static STARTED_AT: Mutex<Option<Instant>> = Mutex::new(None);
+    /// Around the panel the cursor stays: the panel is still in use.
+    static HIDE_CURSOR: AtomicBool = AtomicBool::new(true);
 
-    pub fn start() {
+    pub fn active() -> bool {
+        ACTIVE.load(Ordering::SeqCst)
+    }
+
+    pub fn end() {
+        let thread = THREAD.load(Ordering::SeqCst);
+        if thread != 0 {
+            let _ = unsafe { PostThreadMessageW(thread, WM_QUIT, WPARAM(0), LPARAM(0)) };
+        }
+    }
+
+    pub fn start(app: AppHandle, around_panel: bool) {
         if ACTIVE.swap(true, Ordering::SeqCst) {
             return;
         }
-        std::thread::spawn(|| {
-            // Let the panel's hide animation finish before the screens go black.
-            std::thread::sleep(Duration::from_millis(250));
-            let windows = cover();
+        let _ = app.emit("monitors:blackout", true);
+        std::thread::spawn(move || {
+            THREAD.store(unsafe { GetCurrentThreadId() }, Ordering::SeqCst);
+            HIDE_CURSOR.store(!around_panel, Ordering::SeqCst);
+            let panel = if around_panel {
+                crate::panel::hold_open(&app, true);
+                crate::panel::hwnd(&app).map(|h| HWND(h as _))
+            } else {
+                // Let the panel's hide animation finish before the screens go black.
+                std::thread::sleep(Duration::from_millis(250));
+                None
+            };
+            // The panel's own monitor keeps its brightness, or the panel would be unreadable.
+            let keep = panel.and_then(win::device_of).map(|device| format!("{device}#"));
+
+            let windows = cover(panel.is_none());
+            if let Some(panel) = panel {
+                // The black windows came later, so they're above the panel: put it back on top.
+                let _ = unsafe { SetWindowPos(panel, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
+                let _ = unsafe { SetForegroundWindow(panel) };
+            }
             *STARTED_AT.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
 
             // Remember each monitor's brightness, then dim it, off this thread's message loop.
-            let dimmer = std::thread::spawn(|| {
+            let dimmer = std::thread::spawn(move || {
                 let saved: Vec<(String, u32)> = win::list()
                     .unwrap_or_default()
                     .into_iter()
+                    .filter(|m| keep.as_ref().is_none_or(|k| !m.id.starts_with(k.as_str())))
                     .filter_map(|m| Some((m.id, m.brightness?.value)))
                     .collect();
                 for (id, _) in &saved {
@@ -185,16 +243,22 @@ mod blackout {
             for hwnd in windows {
                 let _ = unsafe { DestroyWindow(hwnd) };
             }
-            // Waits for the dimming if the user woke the screens before it finished.
+            if around_panel {
+                crate::panel::hold_open(&app, false);
+            }
+            THREAD.store(0, Ordering::SeqCst);
+            // Waits for the dimming if the screens were woken before it finished.
             for (id, value) in dimmer.join().unwrap_or_default() {
                 let _ = win::set(&id, BRIGHTNESS, value);
             }
             ACTIVE.store(false, Ordering::SeqCst);
+            let _ = app.emit("monitors:blackout", false);
         });
     }
 
-    /// One black window per screen, on this thread.
-    fn cover() -> Vec<HWND> {
+    /// One black window per screen, on this thread; `focus` takes the keyboard
+    /// so any key can end the blackout.
+    fn cover(focus: bool) -> Vec<HWND> {
         let Ok(module) = (unsafe { GetModuleHandleW(None) }) else { return Vec::new() };
         let class = WNDCLASSW {
             lpfnWndProc: Some(wndproc),
@@ -225,9 +289,10 @@ mod blackout {
                 .ok()
             })
             .collect();
-        // Keyboard input needs one of them in the foreground.
-        if let Some(&first) = windows.first() {
-            let _ = unsafe { SetForegroundWindow(first) };
+        if focus {
+            if let Some(&first) = windows.first() {
+                let _ = unsafe { SetForegroundWindow(first) };
+            }
         }
         windows
     }
@@ -235,7 +300,8 @@ mod blackout {
     unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         match msg {
             WM_SETCURSOR => {
-                unsafe { SetCursor(None) };
+                let cursor = if HIDE_CURSOR.load(Ordering::SeqCst) { None } else { unsafe { LoadCursorW(None, IDC_ARROW) }.ok() };
+                unsafe { SetCursor(cursor) };
                 return LRESULT(1);
             }
             WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_KEYDOWN | WM_SYSKEYDOWN => {
@@ -267,7 +333,9 @@ mod win {
     };
     use windows::core::BOOL;
     use windows::Win32::Foundation::{LPARAM, RECT};
-    use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFOEXW};
+    use windows::Win32::Graphics::Gdi::{
+        EnumDisplayMonitors, GetMonitorInfoW, MonitorFromWindow, HDC, HMONITOR, MONITORINFOEXW, MONITOR_DEFAULTTONEAREST,
+    };
 
     use super::{parse_vcp, Choice, Level, Monitor, BRIGHTNESS, CONTRAST, INPUT, POWER, VOLUME};
 
@@ -358,6 +426,16 @@ mod win {
     /// Desktop rectangles of every screen, for covering them all.
     pub fn screen_rects() -> Vec<RECT> {
         screens().into_iter().map(|s| s.rect).collect()
+    }
+
+    /// GDI device name (`\\.\DISPLAY1`) of the screen showing most of `window`,
+    /// the prefix of its monitors' ids.
+    pub fn device_of(window: windows::Win32::Foundation::HWND) -> Option<String> {
+        let screen = unsafe { MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST) };
+        let mut info = MONITORINFOEXW::default();
+        info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+        unsafe { GetMonitorInfoW(screen, &mut info.monitorInfo) }.ok().ok()?;
+        Some(wide(&info.szDevice))
     }
 
     /// A monitor handle to read from a worker thread; the bus lock keeps it exclusive.

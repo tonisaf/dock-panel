@@ -80,6 +80,17 @@ static KEEP_OPEN: AtomicBool = AtomicBool::new(false);
 /// Pinned by the user: clicking elsewhere doesn't hide the panel. The hotkey,
 /// the tray and taskbar buttons and the panel's own hide button still do.
 static PINNED: AtomicBool = AtomicBool::new(false);
+/// Held open by "blackout around the panel": the panel stays visible and on
+/// top of the black screens until the blackout ends.
+static HELD: AtomicBool = AtomicBool::new(false);
+
+/// Keeps the panel shown and above everything (or lets it go again).
+pub fn hold_open(app: &AppHandle, on: bool) {
+    HELD.store(on, Ordering::SeqCst);
+    if let Some(win) = window(app) {
+        let _ = win.set_always_on_top(on);
+    }
+}
 
 fn shortcut_text() -> String {
     let s = SHORTCUT.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -132,7 +143,7 @@ pub fn init(app: &AppHandle) -> String {
     let handle = app.clone();
     win.on_window_event(move |event| {
         if let tauri::WindowEvent::Focused(false) = event {
-            if !KEEP_OPEN.load(Ordering::SeqCst) && !PINNED.load(Ordering::SeqCst) {
+            if !KEEP_OPEN.load(Ordering::SeqCst) && !PINNED.load(Ordering::SeqCst) && !HELD.load(Ordering::SeqCst) {
                 request_hide(&handle);
             }
         }

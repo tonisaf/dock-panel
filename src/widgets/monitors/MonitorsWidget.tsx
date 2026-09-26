@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   ChevronDown,
   Contrast,
+  Focus,
   Loader2,
   Monitor as MonitorIcon,
   MonitorCog,
@@ -151,6 +153,19 @@ function AllBrightness({ monitors }: { monitors: Monitor[] }) {
   );
 }
 
+/** Whether a blackout is on, kept current by the backend's `monitors:blackout` event. */
+function useBlackout() {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    invoke<boolean>("monitors_blackout_active").then(setOn).catch(() => {});
+    const off = listen<boolean>("monitors:blackout", (e) => setOn(e.payload));
+    return () => {
+      off.then((f) => f());
+    };
+  }, []);
+  return on;
+}
+
 export function MonitorsWidget() {
   const { data, isPending, isError, error } = useMonitors();
   // Folded by default: it's reached for rarely and takes a lot of room.
@@ -161,14 +176,33 @@ export function MonitorsWidget() {
     ? `${levels.length} · ${Math.round(levels.reduce((a, b) => a + b, 0) / levels.length)}%`
     : undefined;
 
-  const blackout = (
+  const dark = useBlackout();
+  const headerButton = "grid size-6 place-items-center rounded-md text-fg-subtle hover:bg-ink/10 hover:text-fg";
+  const blackout = dark ? (
     <button
-      onClick={() => invoke("monitors_blackout").catch(console.error)}
-      title="Затемнить все мониторы: чёрный экран и минимальная яркость. Клик или любая клавиша — вернуть"
-      className="grid size-6 place-items-center rounded-md text-fg-subtle hover:bg-ink/10 hover:text-fg"
+      onClick={() => invoke("monitors_blackout_end").catch(console.error)}
+      title="Вернуть экраны и яркость"
+      className="flex h-6 items-center gap-1 rounded-md bg-accent/15 px-2 text-[11.5px] text-fg hover:bg-accent/25"
     >
-      <MoonStar className="size-3.5" />
+      <Sun className="size-3.5" /> Вернуть
     </button>
+  ) : (
+    <>
+      <button
+        onClick={() => invoke("monitors_blackout", { aroundPanel: true }).catch(console.error)}
+        title="Затемнить вокруг панели: всё, кроме панели, чёрное, остальные мониторы на минимальной яркости. Клик по чёрному или «Вернуть» — отменить"
+        className={headerButton}
+      >
+        <Focus className="size-3.5" />
+      </button>
+      <button
+        onClick={() => invoke("monitors_blackout").catch(console.error)}
+        title="Затемнить всё: чёрный экран и минимальная яркость на всех мониторах. Клик или любая клавиша — вернуть"
+        className={headerButton}
+      >
+        <MoonStar className="size-3.5" />
+      </button>
+    </>
   );
 
   return (
