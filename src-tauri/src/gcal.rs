@@ -12,6 +12,7 @@
 use std::collections::HashSet;
 use std::net::TcpListener;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -257,6 +258,7 @@ pub fn gcal_logout() {
     secrets::delete(SECRET);
     *ACCESS.lock().unwrap_or_else(|e| e.into_inner()) = None;
     *GRANTED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    DUE_TODAY.store(0, Ordering::SeqCst);
 }
 
 fn granted(scope: &str) -> bool {
@@ -559,6 +561,7 @@ pub async fn gcal_task_create(
     }
     let v = api(Method::POST, &format!("{TASKS_API}/lists/{}/tasks", enc(&list_id)), Some(body)).await?;
     let task = task_from(&v, &list_id, &list).ok_or("Google вернул непонятную задачу")?;
+    refresh_due_today();
     match &due {
         Some(d) if due_at.is_some() && task.due_at.is_none() && task.due.as_deref() != Some(d.as_str()) => {
             let url = format!("{TASKS_API}/lists/{}/tasks/{}", enc(&list_id), enc(&task.id));
@@ -583,6 +586,7 @@ pub async fn gcal_tasks() -> Result<Vec<Task>, String> {
         tasks.extend(r?["items"].as_array().into_iter().flatten().filter_map(|t| task_from(t, list_id, list)));
     }
     tasks.sort_by(|a, b| a.due.cmp(&b.due));
+    remember_due_today(&tasks);
     Ok(tasks)
 }
 
@@ -590,5 +594,110 @@ pub async fn gcal_tasks() -> Result<Vec<Task>, String> {
 pub async fn gcal_task_done(list_id: String, task_id: String, done: bool) -> Result<(), String> {
     let url = format!("{TASKS_API}/lists/{}/tasks/{}", enc(&list_id), enc(&task_id));
     let body = if done { json!({ "status": "completed" }) } else { json!({ "status": "needsAction", "completed": null }) };
-    api(Method::PATCH, &url, Some(body)).await.map(drop)
+    api(Method::PATCH, &url, Some(body)).await.map(drop)?;
+    refresh_due_today();
+    Ok(())
+}
+
+// ---- tasks due today, for the taskbar button --------------------------------------
+
+/// How often the count is refreshed in the background; the calendar tab's own
+/// task loads and every change made in the panel refresh it too.
+const DUE_POLL: Duration = Duration::from_secs(5 * 60);
+
+/// Unfinished tasks due today or earlier, as of the last task load.
+static DUE_TODAY: AtomicUsize = AtomicUsize::new(0);
+
+pub fn due_today() -> usize {
+    DUE_TODAY.load(Ordering::SeqCst)
+}
+
+/// Today's local date as YYYY-MM-DD, the form task dues come in.
+fn today() -> String {
+    #[cfg(windows)]
+    {
+        let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
+        format!("{:04}-{:02}-{:02}", t.wYear, t.wMonth, t.wDay)
+    }
+    #[cfg(not(windows))]
+    {
+        let days = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() / 86_400;
+        civil_from_days(days as i64)
+    }
+}
+
+#[cfg(not(windows))]
+fn civil_from_days(z: i64) -> String {
+    // Howard Hinnant's days-to-date.
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    format!("{:04}-{:02}-{:02}", yoe + era * 400 + i64::from(m <= 2), m, d)
+}
+
+/// Overdue tasks count too: Google Calendar also shows them on today.
+fn count_due(tasks: &[Task], today: &str) -> usize {
+    tasks.iter().filter(|t| t.due.as_deref().is_some_and(|d| d <= today)).count()
+}
+
+fn remember_due_today(tasks: &[Task]) {
+    DUE_TODAY.store(count_due(tasks, &today()), Ordering::SeqCst);
+}
+
+/// Reloads the count in the background, e.g. after a task was added or ticked off.
+fn refresh_due_today() {
+    tauri::async_runtime::spawn(async {
+        if stored().is_some() {
+            let _ = gcal_tasks().await;
+        }
+    });
+}
+
+/// Starts the background refresh of the due-today count.
+pub fn init() {
+    std::thread::spawn(|| loop {
+        if stored().is_some() {
+            let _ = tauri::async_runtime::block_on(gcal_tasks());
+        } else {
+            DUE_TODAY.store(0, Ordering::SeqCst);
+        }
+        std::thread::sleep(DUE_POLL);
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn task(due: Option<&str>) -> Task {
+        Task {
+            list_id: String::new(),
+            list: String::new(),
+            id: String::new(),
+            title: "t".into(),
+            due: due.map(str::to_string),
+            due_at: None,
+            notes: None,
+        }
+    }
+
+    #[test]
+    fn counts_tasks_due_today_and_overdue() {
+        let tasks = [task(Some("2026-09-25")), task(Some("2026-09-26")), task(Some("2026-09-27")), task(None)];
+        assert_eq!(count_due(&tasks, "2026-09-26"), 2);
+        assert_eq!(count_due(&tasks, "2026-09-24"), 0);
+    }
+
+    #[test]
+    fn today_is_an_iso_date() {
+        let t = today();
+        assert_eq!(t.len(), 10);
+        assert_eq!(&t[4..5], "-");
+        assert_eq!(&t[7..8], "-");
+    }
 }

@@ -24,10 +24,12 @@ export interface PanelSettings {
   taskbarPlayer: boolean;
   /** Unread-mail counter next to that button. */
   taskbarMail: boolean;
+  /** Counter of Google tasks due today next to that button. */
+  taskbarTasks: boolean;
 }
 
 const KEY = ["panel-settings"];
-const DEFAULTS: PanelSettings = { width: 440, edge: "left", shortcut: "Ctrl+Space", taskbarButton: true, taskbarPlayer: true, taskbarMail: true };
+const DEFAULTS: PanelSettings = { width: 440, edge: "left", shortcut: "Ctrl+Space", taskbarButton: true, taskbarPlayer: true, taskbarMail: true, taskbarTasks: true };
 
 export function usePanelSettings() {
   const queryClient = useQueryClient();
@@ -49,6 +51,8 @@ export function usePanelSettings() {
       update(await invoke<PanelSettings>("panel_set_taskbar_player", { on })),
     setTaskbarMail: async (on: boolean) =>
       update(await invoke<PanelSettings>("panel_set_taskbar_mail", { on })),
+    setTaskbarTasks: async (on: boolean) =>
+      update(await invoke<PanelSettings>("panel_set_taskbar_tasks", { on })),
     suspendShortcut: (suspend: boolean) => invoke("panel_suspend_shortcut", { suspend }),
   };
 }

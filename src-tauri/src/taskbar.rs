@@ -1,5 +1,6 @@
 //! A Dock Panel button at the left end of the Windows 11 taskbar, with an
-//! unread-mail counter next to it while there is unread mail, and a mini
+//! unread-mail counter next to it while there is unread mail, a counter of
+//! Google tasks due today (or overdue) while there are any, and a mini
 //! player while something is playing (or paused).
 //!
 //! Windows has no API for putting things on the taskbar any more (desk bands
@@ -21,6 +22,7 @@ use tauri::AppHandle;
 static ENABLED: AtomicBool = AtomicBool::new(true);
 static PLAYER: AtomicBool = AtomicBool::new(true);
 static MAIL: AtomicBool = AtomicBool::new(true);
+static TASKS: AtomicBool = AtomicBool::new(true);
 
 pub fn enabled() -> bool {
     ENABLED.load(Ordering::SeqCst)
@@ -45,6 +47,14 @@ pub fn set_player_enabled(on: bool) {
 
 pub fn set_mail_enabled(on: bool) {
     MAIL.store(on, Ordering::SeqCst);
+}
+
+pub fn tasks_enabled() -> bool {
+    TASKS.load(Ordering::SeqCst)
+}
+
+pub fn set_tasks_enabled(on: bool) {
+    TASKS.store(on, Ordering::SeqCst);
 }
 
 pub fn start(app: &AppHandle) {
@@ -86,7 +96,7 @@ mod native {
         WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
     };
 
-    use crate::{mail, media, panel};
+    use crate::{gcal, mail, media, panel};
 
     /// winuser.h; the windows crate only exports it with the Controls feature.
     const WM_MOUSELEAVE: u32 = 0x02A3;
@@ -157,6 +167,7 @@ mod native {
     enum Hit {
         Panel,
         Mail,
+        Tasks,
         Info,
         Prev,
         Toggle,
@@ -174,6 +185,7 @@ mod native {
     struct Layout {
         panel: Zone,
         mail: Option<Zone>,
+        tasks: Option<Zone>,
         info: Option<Zone>,
         prev: Option<Zone>,
         toggle: Option<Zone>,
@@ -187,6 +199,7 @@ mod native {
             [
                 (Some(self.panel), Hit::Panel),
                 (self.mail, Hit::Mail),
+                (self.tasks, Hit::Tasks),
                 (self.info, Hit::Info),
                 (self.prev, Hit::Prev),
                 (self.toggle, Hit::Toggle),
@@ -197,7 +210,7 @@ mod native {
         }
 
         fn width(&self) -> i32 {
-            [Some(self.panel), self.mail, self.info, self.prev, self.toggle, self.next]
+            [Some(self.panel), self.mail, self.tasks, self.info, self.prev, self.toggle, self.next]
                 .into_iter()
                 .flatten()
                 .map(|z| z.x + z.w)
@@ -218,6 +231,8 @@ mod native {
         media: Option<Media>,
         /// Unread letters; the counter shows while this is above zero.
         unread: usize,
+        /// Google tasks due today or overdue; that counter shows while above zero.
+        due: usize,
         /// Badge colour, from the Windows accent.
         accent: (u8, u8, u8),
         layout: Layout,
@@ -432,6 +447,11 @@ mod native {
                                 panel::show_tab(app, "mail");
                             }
                         }
+                        Some(Hit::Tasks) => {
+                            if let Some(app) = APP.get() {
+                                panel::show_tab(app, "calendar");
+                            }
+                        }
                         Some(Hit::Prev) => control("prev"),
                         Some(Hit::Toggle) => control("toggle"),
                         Some(Hit::Next) => control("next"),
@@ -515,13 +535,23 @@ mod native {
         (text + px(8.0, scale)).max(px(BADGE_H, scale))
     }
 
-    fn layout(scale: f64, media: Option<&Media>, unread: usize) -> Layout {
+    /// Width of an icon-with-badge zone (mail, tasks) for `count`.
+    fn counter_w(count: usize, scale: f64) -> i32 {
+        let needed = px(ENVELOPE_CX + BADGE_OFFSET + 4.0, scale) + badge_w(&badge_label(count), scale);
+        needed.max(px(MAIL_W, scale))
+    }
+
+    fn layout(scale: f64, media: Option<&Media>, unread: usize, due: usize) -> Layout {
         let mut l = Layout { panel: Zone { x: 0, w: px(BUTTON_W, scale) }, ..Default::default() };
         let mut x = l.panel.w;
         if unread > 0 {
-            let needed = px(ENVELOPE_CX + BADGE_OFFSET + 4.0, scale) + badge_w(&badge_label(unread), scale);
-            let w = needed.max(px(MAIL_W, scale));
+            let w = counter_w(unread, scale);
             l.mail = Some(Zone { x, w });
+            x += w;
+        }
+        if due > 0 {
+            let w = counter_w(due, scale);
+            l.tasks = Some(Zone { x, w });
             x += w;
         }
         let Some(m) = media else { return l };
@@ -564,20 +594,22 @@ mod native {
             ) == Some(1);
             let media = if super::player_enabled() { media_now() } else { None };
             let unread = if super::mail_enabled() { mail::unread_total() } else { 0 };
-            // Text is measured only when the track (or the mail counter's presence) changes.
+            let due = if super::tasks_enabled() { gcal::due_today() } else { 0 };
+            // Text is measured only when the track (or a counter's label) changes.
             let same_track = s.drawn.as_ref().is_some_and(|d| {
                 d.scale == scale
                     && badge_label(d.unread) == badge_label(unread)
+                    && badge_label(d.due) == badge_label(due)
                     && d.media.as_ref().map(|m| (&m.title, &m.artist, m.can_prev, m.can_next))
                         == media.as_ref().map(|m| (&m.title, &m.artist, m.can_prev, m.can_next))
             });
             let layout = match &s.drawn {
                 Some(d) if same_track => d.layout.clone(),
-                _ => layout(scale, media.as_ref(), unread),
+                _ => layout(scale, media.as_ref(), unread, due),
             };
             s.layout = layout.clone();
             let accent = accent_colour();
-            let look = Look { x, y, h, scale, light, hover: s.hover, pressed: s.pressed, media, unread, accent, layout };
+            let look = Look { x, y, h, scale, light, hover: s.hover, pressed: s.pressed, media, unread, due, accent, layout };
             if s.drawn.as_ref() != Some(&look) && draw(hwnd, &look, s.icon.as_ref()).is_some() {
                 s.drawn = Some(look);
             }
@@ -678,6 +710,22 @@ mod native {
                     let c = Self::round_cover(x as f64 + 0.5, y as f64 + 0.5, rect, r);
                     if c > 0.0 {
                         self.blend(x, y, (blue as f64 * c, green as f64 * c, red as f64 * c, 255.0 * c));
+                    }
+                }
+            }
+        }
+
+        /// A circle outline of radius `r` (to the stroke's middle), antialiased.
+        fn ring(&mut self, (cx, cy): (f64, f64), r: f64, stroke: f64, tone: f64, alpha: f64) {
+            let reach = r + stroke;
+            let (x0, y0) = ((cx - reach).floor().max(0.0) as usize, (cy - reach).floor().max(0.0) as usize);
+            let (x1, y1) = ((cx + reach).ceil() as usize, (cy + reach).ceil() as usize);
+            for y in y0..y1.min(self.h) {
+                for x in x0..x1.min(self.w) {
+                    let d = ((x as f64 + 0.5 - cx).powi(2) + (y as f64 + 0.5 - cy).powi(2)).sqrt();
+                    let cover = (stroke / 2.0 + 0.5 - (d - r).abs()).clamp(0.0, 1.0) * alpha;
+                    if cover > 0.0 {
+                        self.blend(x, y, (tone * cover, tone * cover, tone * cover, 255.0 * cover));
                     }
                 }
             }
@@ -899,6 +947,22 @@ mod native {
         s.bytes().chunks_exact(4).map(|p| p[1]).collect()
     }
 
+    /// The count on an accent pill at the top right of an icon centred at `(cx, cy)`.
+    fn badge(c: &mut Canvas, look: &Look, (cx, cy): (f64, f64), count: usize) {
+        let s = look.scale;
+        let label = badge_label(count);
+        let bh = BADGE_H * s;
+        let bw = badge_w(&label, s) as f64;
+        let (bx, by) = (cx + BADGE_OFFSET * s, cy - 13.0 * s);
+        // A ring in the taskbar's colour keeps the badge readable over the icon.
+        let ring = if look.light { 243.0 } else { 32.0 };
+        c.round_rect((bx - s, by - s, bw + 2.0 * s, bh + 2.0 * s), bh / 2.0 + s, ring, 1.0);
+        c.round_rect_rgb((bx, by, bw, bh), bh / 2.0, look.accent);
+        let (mw, mh) = (bw.ceil() as i32, bh.ceil() as i32);
+        let mask = text_mask_centered(&label, px(BADGE_PX, s), 700, w!("Segoe UI"), mw, mh);
+        c.mask(&mask, (bx.round() as usize, by.round() as usize, mw as usize, mh as usize), 255.0, 1.0);
+    }
+
     fn draw(hwnd: HWND, look: &Look, icon: Option<&Icon>) -> Option<()> {
         let s = look.scale;
         let l = &look.layout;
@@ -921,6 +985,7 @@ mod native {
         let zones = [
             (Some(l.panel), Hit::Panel),
             (l.mail, Hit::Mail),
+            (l.tasks, Hit::Tasks),
             (l.info, Hit::Info),
             (l.prev, Hit::Prev),
             (l.toggle, Hit::Toggle),
@@ -967,20 +1032,19 @@ mod native {
             }
             c.line(at(-8.0, -5.5), at(0.0, 1.0), stroke, fg, 0.9);
             c.line(at(0.0, 1.0), at(8.0, -5.5), stroke, fg, 0.9);
+            badge(&mut c, look, (cx, cy), look.unread);
+        }
 
-            let label = badge_label(look.unread);
-            let text_px = px(BADGE_PX, s);
-            let bh = BADGE_H * s;
-            let bw = badge_w(&label, s) as f64;
-            let (bx, by) = (cx + BADGE_OFFSET * s, cy - 13.0 * s);
-            let (r, g, b) = look.accent;
-            // A ring in the taskbar's colour keeps the badge readable over the envelope.
-            let ring = if look.light { 243.0 } else { 32.0 };
-            c.round_rect((bx - s, by - s, bw + 2.0 * s, bh + 2.0 * s), bh / 2.0 + s, ring, 1.0);
-            c.round_rect_rgb((bx, by, bw, bh), bh / 2.0, (r, g, b));
-            let (mw, mh) = (bw.ceil() as i32, bh.ceil() as i32);
-            let mask = text_mask_centered(&label, text_px, 700, w!("Segoe UI"), mw, mh);
-            c.mask(&mask, (bx.round() as usize, by.round() as usize, mw as usize, mh as usize), 255.0, 1.0);
+        // Tasks: a ticked circle, like Google Tasks' icon, with the count due today.
+        if let Some(z) = l.tasks {
+            let pressed = if look.pressed == Some(Hit::Tasks) { 1.0 } else { 0.0 };
+            let (cx, cy) = (z.x as f64 + ENVELOPE_CX * s, mid + pressed);
+            let at = |x: f64, y: f64| (cx + x * s, cy + y * s);
+            let stroke = 1.5 * s;
+            c.ring((cx, cy), 8.0 * s, stroke, fg, 0.9);
+            c.line(at(-3.8, 0.2), at(-1.0, 3.0), stroke, fg, 0.9);
+            c.line(at(-1.0, 3.0), at(4.2, -2.6), stroke, fg, 0.9);
+            badge(&mut c, look, (cx, cy), look.due);
         }
 
         // Player: cover, title and artist, controls.

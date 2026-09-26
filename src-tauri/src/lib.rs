@@ -59,6 +59,7 @@ pub fn run() {
             claude_web::init(handle);
             alerts::init(handle);
             mail::init(handle);
+            gcal::init();
             youtube::init(handle);
             updater::init(handle);
             apps::start_icon_worker(app.path().app_cache_dir()?.join("icons"));
@@ -83,6 +84,7 @@ pub fn run() {
             panel::panel_set_taskbar_button,
             panel::panel_set_taskbar_player,
             panel::panel_set_taskbar_mail,
+            panel::panel_set_taskbar_tasks,
             apps::list_apps,
             apps::launch_app,
             apps::pick_files,
