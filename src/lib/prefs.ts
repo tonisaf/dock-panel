@@ -38,7 +38,7 @@ interface PrefsState {
   widgetColumns: Record<string, string[][]>;
   /** Width of the mail list while a letter is open next to it; null for the default. */
   mailListWidth: number | null;
-  /** Collapsed state of collapsible widgets, by id; a widget picks its own default. */
+  /** Collapsed state of collapsible blocks (widgets, `settings.*` groups), by id; each picks its own default. */
   collapsedWidgets: Record<string, boolean>;
   togglePin: (id: string) => void;
   /** Pins ids that are not pinned yet, keeping their order. */

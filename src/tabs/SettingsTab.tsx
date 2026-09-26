@@ -12,6 +12,25 @@ import { Toggle } from "../components/Toggle";
 import { MailSettings } from "../components/MailSettings";
 import { GcalSettings } from "../components/GcalSettings";
 import { YoutubeSettings } from "../components/YoutubeSettings";
+import {
+  CalendarDays,
+  ChevronDown,
+  CloudSun,
+  Download,
+  Link2,
+  Mail,
+  Music,
+  NotebookPen,
+  TvMinimalPlay,
+  type LucideIcon,
+} from "lucide-react";
+import { useMailSettings } from "../mail/api";
+import { useGcalStatus } from "../gcal/api";
+import { useCalendars as useIcalCalendars } from "../widgets/calendar/api";
+import { useNotionStatus } from "../widgets/tasks/api";
+import { useSpotifyStatus } from "../widgets/spotify/api";
+import { useYoutubeSettings } from "../widgets/youtube/api";
+import { useUpdateStatus } from "../lib/updates";
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
@@ -214,6 +233,142 @@ function TaskbarButtonRow() {
   );
 }
 
+/** "1 ящик", "3 ящика", "5 ящиков". */
+function plural(n: number, [one, few, many]: [string, string, string]) {
+  const tens = n % 100;
+  const word = tens >= 11 && tens <= 14 ? many : n % 10 === 1 ? one : n % 10 >= 2 && n % 10 <= 4 ? few : many;
+  return `${n} ${word}`;
+}
+
+type Tone = "ok" | "off" | "warn" | "accent";
+
+/**
+ * An integration's settings behind a one-line header with its status.
+ * Folded by default; the open ones are remembered.
+ */
+function Group({
+  id,
+  icon: Icon,
+  title,
+  status,
+  tone = "off",
+  children,
+}: {
+  id: string;
+  icon: LucideIcon;
+  title: string;
+  status?: string;
+  tone?: Tone;
+  children: ReactNode;
+}) {
+  const key = `settings.${id}`;
+  const collapsed = usePrefs((s) => s.collapsedWidgets[key] ?? true);
+  const setCollapsed = usePrefs((s) => s.setWidgetCollapsed);
+  return (
+    <div className="rounded-2xl border border-stroke bg-surface">
+      <button
+        onClick={() => setCollapsed(key, !collapsed)}
+        aria-expanded={!collapsed}
+        className="flex w-full items-center gap-2.5 rounded-2xl px-3.5 py-3 text-left hover:bg-ink/5"
+      >
+        <Icon className="size-4 shrink-0 text-fg-muted" />
+        <span className="text-[14px]">{title}</span>
+        {status && (
+          <span
+            className={clsx(
+              "ml-auto flex min-w-0 items-center gap-1.5 truncate text-[12px]",
+              tone === "warn" ? "text-warn" : tone === "accent" ? "text-accent" : "text-fg-subtle",
+            )}
+          >
+            {tone === "ok" && <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />}
+            <span className="truncate">{status}</span>
+          </span>
+        )}
+        <ChevronDown
+          className={clsx("size-4 shrink-0 text-fg-subtle transition-transform", !status && "ml-auto", !collapsed && "rotate-180")}
+        />
+      </button>
+      {!collapsed && <div className="border-t border-stroke">{children}</div>}
+    </div>
+  );
+}
+
+function Integrations() {
+  const mail = useMailSettings().data;
+  const gcal = useGcalStatus().data;
+  const ical = useIcalCalendars().data ?? [];
+  const notion = useNotionStatus().data;
+  const spotify = useSpotifyStatus().data;
+  const youtube = useYoutubeSettings().data;
+  const location = usePrefs((s) => s.location);
+  const update = useUpdateStatus().data;
+
+  const connected = (s: { connected: boolean; error: string | null } | undefined, who: string | null | undefined) =>
+    !s ? {} : s.error ? { status: "ошибка входа", tone: "warn" as Tone } : s.connected ? { status: who || "подключено", tone: "ok" as Tone } : { status: "не подключено" };
+  const mailCount = mail?.accounts.length ?? 0;
+  const channels = youtube?.channels.length ?? 0;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Group
+        id="mail"
+        icon={Mail}
+        title="Почта"
+        {...(mail && (mailCount ? { status: plural(mailCount, ["ящик", "ящика", "ящиков"]), tone: "ok" as Tone } : { status: "не подключена" }))}
+      >
+        <MailSettings />
+      </Group>
+      <Group id="gcal" icon={CalendarDays} title="Google Календарь" {...connected(gcal, gcal?.email)}>
+        <GcalSettings />
+      </Group>
+      <Group
+        id="ical"
+        icon={Link2}
+        title="Календари по ссылке (iCal)"
+        {...(ical.length ? { status: plural(ical.length, ["календарь", "календаря", "календарей"]), tone: "ok" as Tone } : { status: "нет" })}
+      >
+        <CalendarSettings />
+      </Group>
+      <Group id="notion" icon={NotebookPen} title="Notion" {...connected(notion, notion?.workspace)}>
+        <NotionSettings />
+      </Group>
+      <Group id="spotify" icon={Music} title="Spotify" {...connected(spotify, spotify?.user)}>
+        <SpotifySettings />
+      </Group>
+      <Group
+        id="youtube"
+        icon={TvMinimalPlay}
+        title="YouTube"
+        {...(youtube?.googleError
+          ? { status: "ошибка синхронизации", tone: "warn" as Tone }
+          : channels
+            ? { status: plural(channels, ["канал", "канала", "каналов"]), tone: "ok" as Tone }
+            : { status: "нет каналов" })}
+      >
+        <YoutubeSettings />
+      </Group>
+      <Group
+        id="weather"
+        icon={CloudSun}
+        title="Погода"
+        {...(location ? { status: location.name, tone: "ok" as Tone } : { status: "город не выбран" })}
+      >
+        <CityPicker />
+      </Group>
+      <Group
+        id="updates"
+        icon={Download}
+        title="Обновления"
+        {...(update?.available
+          ? { status: `доступна ${update.available.version}`, tone: "accent" as Tone }
+          : update && { status: `версия ${update.current}` })}
+      >
+        <UpdateSettings />
+      </Group>
+    </div>
+  );
+}
+
 function AppearanceSection() {
   const { theme, setTheme, systemAccent, setSystemAccent } = usePrefs();
   return (
@@ -257,43 +412,16 @@ export function SettingsTab() {
         </Row>
         <ShortcutRow />
         <EdgeRow />
-        <TaskbarButtonRow />
         <WidthRow />
+      </div>
+      <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Кнопка на панели задач</h3>
+      <div className="divide-y divide-stroke rounded-2xl border border-stroke bg-surface">
+        <TaskbarButtonRow />
       </div>
       <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Оформление</h3>
       <AppearanceSection />
-      <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Почта</h3>
-      <div className="rounded-2xl border border-stroke bg-surface">
-        <MailSettings />
-      </div>
-      <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Notion</h3>
-      <div className="rounded-2xl border border-stroke bg-surface">
-        <NotionSettings />
-      </div>
-      <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Google Календарь</h3>
-      <div className="rounded-2xl border border-stroke bg-surface">
-        <GcalSettings />
-      </div>
-      <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Календари по ссылке (iCal)</h3>
-      <div className="rounded-2xl border border-stroke bg-surface">
-        <CalendarSettings />
-      </div>
-      <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Spotify</h3>
-      <div className="rounded-2xl border border-stroke bg-surface">
-        <SpotifySettings />
-      </div>
-      <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">YouTube</h3>
-      <div className="rounded-2xl border border-stroke bg-surface">
-        <YoutubeSettings />
-      </div>
-      <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Погода</h3>
-      <div className="rounded-2xl border border-stroke bg-surface">
-        <CityPicker />
-      </div>
-      <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Обновления</h3>
-      <div className="rounded-2xl border border-stroke bg-surface">
-        <UpdateSettings />
-      </div>
+      <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Интеграции</h3>
+      <Integrations />
     </div>
   );
 }
