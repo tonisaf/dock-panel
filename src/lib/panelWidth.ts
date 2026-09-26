@@ -22,10 +22,12 @@ export interface PanelSettings {
   taskbarButton: boolean;
   /** Mini player next to that button. */
   taskbarPlayer: boolean;
+  /** Unread-mail counter next to that button. */
+  taskbarMail: boolean;
 }
 
 const KEY = ["panel-settings"];
-const DEFAULTS: PanelSettings = { width: 440, edge: "left", shortcut: "Ctrl+Space", taskbarButton: true, taskbarPlayer: true };
+const DEFAULTS: PanelSettings = { width: 440, edge: "left", shortcut: "Ctrl+Space", taskbarButton: true, taskbarPlayer: true, taskbarMail: true };
 
 export function usePanelSettings() {
   const queryClient = useQueryClient();
@@ -45,6 +47,8 @@ export function usePanelSettings() {
       update(await invoke<PanelSettings>("panel_set_taskbar_button", { on })),
     setTaskbarPlayer: async (on: boolean) =>
       update(await invoke<PanelSettings>("panel_set_taskbar_player", { on })),
+    setTaskbarMail: async (on: boolean) =>
+      update(await invoke<PanelSettings>("panel_set_taskbar_mail", { on })),
     suspendShortcut: (suspend: boolean) => invoke("panel_suspend_shortcut", { suspend }),
   };
 }

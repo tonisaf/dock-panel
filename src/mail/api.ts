@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 
 export interface Account {
   id: string;
@@ -32,10 +32,15 @@ export interface Letter extends Summary {
   webUrl: string;
 }
 
+/** Where each account's next (older) page starts; null once it has no more. */
+export type Cursors = Record<string, number | null>;
+
 export interface MailList {
   messages: Summary[];
   /** [email, reason] for accounts that failed. */
   errors: [string, string][];
+  cursors: Cursors;
+  more: boolean;
 }
 
 export type MailAction = "read" | "unread" | "archive" | "delete";
@@ -48,8 +53,30 @@ export function useMailSettings() {
   return useQuery({ queryKey: SETTINGS, queryFn: () => invoke<MailSettings>("mail_settings"), staleTime: Infinity });
 }
 
-export function useMailList(enabled: boolean) {
-  return useQuery({ queryKey: LIST, queryFn: () => invoke<MailList>("mail_list", { account: null }), enabled, staleTime: 30_000 });
+/**
+ * The inbox page by page (40 letters per account each), newest first.
+ * `account` narrows it to one mailbox, `unread` to unread letters.
+ */
+export function useMailList(account: string | null, unread: boolean, enabled: boolean) {
+  const query = useInfiniteQuery({
+    queryKey: [...LIST, account, unread],
+    queryFn: ({ pageParam }) => invoke<MailList>("mail_list", { account, cursors: pageParam, unread }),
+    initialPageParam: null as Cursors | null,
+    getNextPageParam: (last) => (last.more ? last.cursors : undefined),
+    enabled,
+    staleTime: 30_000,
+  });
+  const pages = query.data?.pages ?? [];
+  // A letter can show up on two pages when the inbox shifts in between.
+  const seen = new Set<string>();
+  const messages = pages
+    .flatMap((p) => p.messages)
+    .filter((m) => {
+      const key = `${m.account}/${m.uid}`;
+      return !seen.has(key) && !!seen.add(key);
+    })
+    .sort((a, b) => b.date - a.date);
+  return { ...query, messages, errors: pages[0]?.errors ?? [] };
 }
 
 export function useUnread() {
@@ -63,8 +90,12 @@ export function useUnread() {
 /** Everything that changes mail state, keeping the cached list in step. */
 export function useMailActions() {
   const queryClient = useQueryClient();
+  // Every cached list (all filters), every loaded page.
   const patchList = (fn: (m: Summary[]) => Summary[]) =>
-    queryClient.setQueryData<MailList>(LIST, (l) => l && { ...l, messages: fn(l.messages) });
+    queryClient.setQueriesData<InfiniteData<MailList>>(
+      { queryKey: LIST },
+      (d) => d && { ...d, pages: d.pages.map((p) => ({ ...p, messages: fn(p.messages) })) },
+    );
   const same = (a: Summary, b: { account: string; uid: number }) => a.account === b.account && a.uid === b.uid;
   // The poller recounts unread mail and emits `mail:changed`.
   const recount = () => invoke("mail_refresh").catch(console.error);
@@ -81,7 +112,7 @@ export function useMailActions() {
     },
 
     act: async (m: Summary, action: MailAction) => {
-      const before = queryClient.getQueryData<MailList>(LIST);
+      const before = queryClient.getQueriesData<InfiniteData<MailList>>({ queryKey: LIST });
       patchList((list) =>
         action === "archive" || action === "delete"
           ? list.filter((x) => !same(x, m))
@@ -91,7 +122,7 @@ export function useMailActions() {
         await invoke("mail_action", { account: m.account, uid: m.uid, action });
         recount();
       } catch (e) {
-        queryClient.setQueryData(LIST, before);
+        before.forEach(([key, data]) => queryClient.setQueryData(key, data));
         throw e;
       }
     },

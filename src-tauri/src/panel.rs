@@ -69,6 +69,7 @@ pub fn init(app: &AppHandle) -> String {
     }
     crate::taskbar::set_enabled(saved["taskbarButton"].as_bool().unwrap_or(true));
     crate::taskbar::set_player_enabled(saved["taskbarPlayer"].as_bool().unwrap_or(true));
+    crate::taskbar::set_mail_enabled(saved["taskbarMail"].as_bool().unwrap_or(true));
     let shortcut = shortcut_text();
 
     let Some(win) = window(app) else { return shortcut };
@@ -114,6 +115,14 @@ pub fn show(app: &AppHandle) {
     let _ = win.show();
     let _ = win.set_focus();
     let _ = app.emit_to(LABEL, "panel:show", ());
+}
+
+/// Shows the panel (if hidden) on the given tab, e.g. from a taskbar or toast click.
+pub fn show_tab(app: &AppHandle, tab: &str) {
+    if !VISIBLE.load(Ordering::SeqCst) || HIDING.load(Ordering::SeqCst) {
+        show(app);
+    }
+    let _ = app.emit_to(LABEL, "panel:tab", tab);
 }
 
 /// Runs `f` (a modal dialog) with hide-on-blur off, then gives focus back to the panel.
@@ -210,6 +219,9 @@ pub struct PanelSettings {
     /// Show the mini player next to that button.
     #[serde(rename = "taskbarPlayer")]
     taskbar_player: bool,
+    /// Show the unread-mail counter next to that button.
+    #[serde(rename = "taskbarMail")]
+    taskbar_mail: bool,
 }
 
 fn current_settings() -> PanelSettings {
@@ -219,6 +231,7 @@ fn current_settings() -> PanelSettings {
         shortcut: shortcut_text(),
         taskbar_button: crate::taskbar::enabled(),
         taskbar_player: crate::taskbar::player_enabled(),
+        taskbar_mail: crate::taskbar::mail_enabled(),
     }
 }
 
@@ -253,6 +266,13 @@ pub fn panel_set_taskbar_button(app: AppHandle, on: bool) -> PanelSettings {
 #[tauri::command]
 pub fn panel_set_taskbar_player(app: AppHandle, on: bool) -> PanelSettings {
     crate::taskbar::set_player_enabled(on);
+    save_settings(&app);
+    current_settings()
+}
+
+#[tauri::command]
+pub fn panel_set_taskbar_mail(app: AppHandle, on: bool) -> PanelSettings {
+    crate::taskbar::set_mail_enabled(on);
     save_settings(&app);
     current_settings()
 }

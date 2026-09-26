@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -234,15 +234,49 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
   );
 }
 
+/** Loads the next page when it scrolls into view (with some margin). */
+function LoadMore({ onVisible, loading }: { onVisible: () => void; loading: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const latest = useRef(onVisible);
+  latest.current = onVisible;
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver((entries) => entries[0]?.isIntersecting && latest.current(), {
+      rootMargin: "300px",
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div ref={ref} className="flex h-10 items-center justify-center text-[12px] text-fg-subtle">
+      {loading && (
+        <span className="flex items-center gap-2">
+          <Loader2 className="size-3.5 animate-spin" /> Загружаю ещё…
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function MailTab() {
   const queryClient = useQueryClient();
   const setTab = usePanelStore((s) => s.setTab);
+  const mailToOpen = usePanelStore((s) => s.mailToOpen);
   const { data: settings } = useMailSettings();
   const accounts = settings?.accounts ?? [];
-  const { data, isPending, isFetching, isError, error } = useMailList(accounts.length > 0);
   const [account, setAccount] = useState<string | null>(null);
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [reading, setReading] = useState<Summary | null>(null);
+  const { messages, errors, isPending, isFetching, isError, error, hasNextPage, fetchNextPage, isFetchingNextPage } =
+    useMailList(account, unreadOnly, accounts.length > 0);
+
+  // A clicked notification asks for a letter.
+  useEffect(() => {
+    if (!mailToOpen) return;
+    setReading(mailToOpen);
+    usePanelStore.getState().setMailToOpen(null);
+  }, [mailToOpen]);
 
   if (settings && accounts.length === 0) {
     return (
@@ -257,10 +291,6 @@ export function MailTab() {
 
   const multi = accounts.length > 1;
   if (reading) return <Reader summary={reading} multiAccount={multi} onBack={() => setReading(null)} />;
-
-  const messages = (data?.messages ?? []).filter(
-    (m) => (!account || m.account === account) && (!unreadOnly || m.unread),
-  );
 
   return (
     <div className="flex flex-col gap-2 pb-2">
@@ -288,11 +318,11 @@ export function MailTab() {
           title="Обновить"
           className="grid size-7 shrink-0 place-items-center rounded-lg text-fg-subtle hover:bg-ink/10 hover:text-fg"
         >
-          <RefreshCw className={clsx("size-3.5", isFetching && "animate-spin")} />
+          <RefreshCw className={clsx("size-3.5", isFetching && !isFetchingNextPage && "animate-spin")} />
         </button>
       </div>
 
-      {data?.errors.map(([email, reason]) => (
+      {errors.map(([email, reason]) => (
         <p key={email} className="rounded-lg border border-warn/30 bg-warn/5 px-2.5 py-1.5 text-[12px] text-warn">
           {email}: {reason}
         </p>
@@ -315,6 +345,9 @@ export function MailTab() {
           {messages.map((m) => (
             <Row key={`${m.account}/${m.uid}`} m={m} showAccount={multi && !account} onOpen={() => setReading(m)} />
           ))}
+          {hasNextPage && (
+            <LoadMore loading={isFetchingNextPage} onVisible={() => !isFetchingNextPage && fetchNextPage()} />
+          )}
         </div>
       )}
     </div>

@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { TABS, usePanelStore } from "../store";
+import { TABS, usePanelStore, type MailToOpen, type TabId } from "../store";
 import { useApps } from "../lib/apps";
 import { useAppearance } from "../lib/appearance";
 import { usePanelSettings } from "../lib/panelWidth";
@@ -56,11 +56,14 @@ export function Panel() {
       }),
       listen("mail:changed", () => invalidateMail(queryClient)),
       listen("youtube:changed", () => invalidateYoutube(queryClient)),
+      // Taskbar counter and notification clicks open a tab (and maybe a letter).
+      listen<TabId>("panel:tab", ({ payload }) => setTab(payload)),
+      listen<MailToOpen>("mail:open", ({ payload }) => usePanelStore.getState().setMailToOpen(payload)),
       listen("panel:hide", () => setOpen(false)),
       listen("ai-limits:changed", () => queryClient.invalidateQueries({ queryKey: ["ai-limits"] })),
     ];
     return () => unlisten.forEach((p) => p.then((fn) => fn()));
-  }, [setOpen, setQuery, queryClient]);
+  }, [setOpen, setQuery, setTab, queryClient]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

@@ -163,15 +163,40 @@ pub fn summarize(account: &str, fetch: &imap::types::Fetch) -> Option<Summary> {
 }
 
 /// The newest messages of the inbox.
-pub fn list_account(account: &Account) -> Result<Vec<Summary>, String> {
+/// One page of the inbox, newest first, and the cursor for the next (older)
+/// page, if there is one. The cursor is opaque to the UI: a sequence number
+/// for the whole inbox, a UID for unread-only pages.
+pub struct Page {
+    pub messages: Vec<Summary>,
+    pub next: Option<u32>,
+}
+
+const FETCH_HEADERS: &str = "(UID FLAGS INTERNALDATE BODY.PEEK[HEADER])";
+
+pub fn list_page(account: &Account, before: Option<u32>, unread_only: bool) -> Result<Page, String> {
     with_session(account, |s| {
         let exists = s.select(INBOX)?.exists;
-        if exists == 0 {
-            return Ok(Vec::new());
+        if unread_only {
+            let mut uids: Vec<u32> = s.uid_search("UNSEEN")?.into_iter().filter(|u| before.is_none_or(|b| *u < b)).collect();
+            uids.sort_unstable_by(|a, b| b.cmp(a));
+            let page: Vec<u32> = uids.iter().take(LIST_LIMIT as usize).copied().collect();
+            if page.is_empty() {
+                return Ok(Page { messages: Vec::new(), next: None });
+            }
+            let set = page.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+            let fetches = s.uid_fetch(set, FETCH_HEADERS)?;
+            let next = (uids.len() > page.len()).then(|| *page.last().expect("page is not empty"));
+            return Ok(Page { messages: fetches.iter().filter_map(|f| summarize(&account.id, f)).collect(), next });
         }
-        let from = exists.saturating_sub(LIST_LIMIT - 1).max(1);
-        let fetches = s.fetch(format!("{from}:{exists}"), "(UID FLAGS INTERNALDATE BODY.PEEK[HEADER])")?;
-        Ok(fetches.iter().filter_map(|f| summarize(&account.id, f)).collect())
+        // Sequence numbers: 1 is the oldest letter, `exists` the newest.
+        let top = before.map_or(exists, |b| b.saturating_sub(1).min(exists));
+        if top == 0 {
+            return Ok(Page { messages: Vec::new(), next: None });
+        }
+        let from = top.saturating_sub(LIST_LIMIT - 1).max(1);
+        let fetches = s.fetch(format!("{from}:{top}"), FETCH_HEADERS)?;
+        let messages = fetches.iter().filter_map(|f| summarize(&account.id, f)).collect();
+        Ok(Page { messages, next: (from > 1).then_some(from) })
     })
 }
 

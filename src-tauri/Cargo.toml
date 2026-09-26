@@ -44,11 +44,13 @@ futures-util = "0.3"
 tauri-winrt-notification = "0.8.1"
 windows = { version = "0.62", features = [
   "Foundation",
+  "Data_Xml_Dom",
   "Graphics",
   "Graphics_Imaging",
   "Media_Control",
   "Storage_Streams",
   "UI",
+  "UI_Notifications",
   "UI_ViewManagement",
   "Win32_Devices_Display",
   "Win32_Foundation",

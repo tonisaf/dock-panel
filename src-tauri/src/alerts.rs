@@ -193,9 +193,27 @@ pub async fn ai_alerts_set(app: AppHandle, provider: String, enabled: bool) -> R
 
 #[cfg(windows)]
 pub fn notify(app: &AppHandle, title: &str, body: &str) {
-    use tauri_winrt_notification::{Duration as ToastDuration, Toast};
-    use windows::core::w;
+    notify_then(app, title, body, None);
+}
+
+/// A clicked toast only reports back while its object is alive in our
+/// process, so the last few are kept.
+#[cfg(windows)]
+static RECENT_TOASTS: std::sync::Mutex<std::collections::VecDeque<windows::UI::Notifications::ToastNotification>> =
+    std::sync::Mutex::new(std::collections::VecDeque::new());
+
+/// A toast that runs `on_click` when the user clicks it (while the app runs).
+#[cfg(windows)]
+pub fn notify_then(app: &AppHandle, title: &str, body: &str, on_click: Option<Box<dyn Fn() + Send + Sync>>) {
+    use tauri_winrt_notification::Toast;
+    use windows::core::{w, HSTRING};
+    use windows::Data::Xml::Dom::XmlDocument;
+    use windows::Foundation::TypedEventHandler;
+    use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
     use windows::Win32::Media::Audio::{PlaySoundW, SND_ALIAS, SND_ASYNC};
+
+    const KEEP: usize = 20;
+    let escape = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
 
     // A dev build has no registered AppUserModelID; borrow PowerShell's.
     let app_id = if cfg!(debug_assertions) {
@@ -205,13 +223,30 @@ pub fn notify(app: &AppHandle, title: &str, body: &str) {
     };
     // The toast is silent and we play the sound ourselves, so the sound is
     // heard even when Windows mutes notification sounds.
-    if let Err(e) = Toast::new(&app_id)
-        .title(title)
-        .text1(body)
-        .sound(None)
-        .duration(ToastDuration::Short)
-        .show()
-    {
+    let xml = format!(
+        "<toast><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual><audio silent=\"true\"/></toast>",
+        escape(title),
+        escape(body)
+    );
+    let shown = (|| -> windows::core::Result<()> {
+        let doc = XmlDocument::new()?;
+        doc.LoadXml(&HSTRING::from(xml))?;
+        let toast = ToastNotification::CreateToastNotification(&doc)?;
+        if let Some(on_click) = on_click {
+            toast.Activated(&TypedEventHandler::new(move |_, _| {
+                on_click();
+                Ok(())
+            }))?;
+        }
+        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id))?.Show(&toast)?;
+        let mut recent = RECENT_TOASTS.lock().unwrap_or_else(|e| e.into_inner());
+        recent.push_back(toast);
+        while recent.len() > KEEP {
+            recent.pop_front();
+        }
+        Ok(())
+    })();
+    if let Err(e) = shown {
         eprintln!("toast failed: {e}");
     }
     unsafe {

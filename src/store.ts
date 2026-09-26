@@ -12,6 +12,18 @@ export const TABS: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: "settings", label: "Настройки", icon: Settings },
 ];
 
+/** The letter summary a notification carries (see `Summary` in mail/api). */
+export interface MailToOpen {
+  account: string;
+  uid: number;
+  fromName: string;
+  fromEmail: string;
+  subject: string;
+  date: number;
+  unread: boolean;
+  flagged: boolean;
+}
+
 export interface ContextMenuState {
   appId: string;
   x: number;
@@ -26,11 +38,14 @@ interface PanelState {
   /** Highlighted search result, driven by the arrow keys. */
   selected: number;
   menu: ContextMenuState | null;
+  /** A letter to open in the mail tab, e.g. from a clicked notification. */
+  mailToOpen: MailToOpen | null;
   setOpen: (open: boolean) => void;
   setTab: (tab: TabId) => void;
   setQuery: (query: string) => void;
   setSelected: (selected: number) => void;
   setMenu: (menu: ContextMenuState | null) => void;
+  setMailToOpen: (letter: MailToOpen | null) => void;
 }
 
 export const usePanelStore = create<PanelState>((set) => ({
@@ -39,9 +54,11 @@ export const usePanelStore = create<PanelState>((set) => ({
   query: "",
   selected: 0,
   menu: null,
+  mailToOpen: null,
   setOpen: (open) => set(open ? { open } : { open, menu: null }),
   setTab: (tab) => set({ tab }),
   setQuery: (query) => set({ query, selected: 0 }),
   setSelected: (selected) => set({ selected }),
   setMenu: (menu) => set({ menu }),
+  setMailToOpen: (mailToOpen) => set({ mailToOpen }),
 }));

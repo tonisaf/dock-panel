@@ -10,9 +10,9 @@ export function MailWidget() {
   const setTab = usePanelStore((s) => s.setTab);
   const { data: settings } = useMailSettings();
   const connected = (settings?.accounts.length ?? 0) > 0;
-  const { data: list } = useMailList(connected);
+  const { messages } = useMailList(null, true, connected);
   const unread = useUnread().data?.total ?? 0;
-  const latest = (list?.messages ?? []).filter((m) => m.unread).slice(0, SHOWN);
+  const latest = messages.filter((m) => m.unread).slice(0, SHOWN);
 
   if (!connected) {
     return (

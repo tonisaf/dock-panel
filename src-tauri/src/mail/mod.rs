@@ -147,22 +147,47 @@ pub struct MailList {
     messages: Vec<Summary>,
     /// Accounts that failed, with the reason.
     errors: Vec<(String, String)>,
+    /// Where each account's next (older) page starts; `None` once it has no more.
+    cursors: HashMap<String, Option<u32>>,
+    more: bool,
 }
 
-/// Newest first, from every account (or one) at once.
+/// A page of letters, newest first, from every account (or one). `cursors`
+/// comes from the previous page; without it the newest letters are listed.
+/// `unread` lists only unread letters.
 #[tauri::command]
-pub async fn mail_list(app: AppHandle, account: Option<String>) -> Result<MailList, String> {
-    let accounts: Vec<Account> =
-        load(&app).accounts.into_iter().filter(|a| account.as_ref().is_none_or(|id| &a.id == id)).collect();
+pub async fn mail_list(
+    app: AppHandle,
+    account: Option<String>,
+    cursors: Option<HashMap<String, Option<u32>>>,
+    unread: bool,
+) -> Result<MailList, String> {
+    // Accounts to read, each with where to start; exhausted ones are skipped.
+    let jobs: Vec<(Account, Option<u32>)> = load(&app)
+        .accounts
+        .into_iter()
+        .filter(|a| account.as_ref().is_none_or(|id| &a.id == id))
+        .filter_map(|a| match &cursors {
+            None => Some((a, None)),
+            Some(map) => map.get(&a.id).copied().flatten().map(|c| (a, Some(c))),
+        })
+        .collect();
     tauri::async_runtime::spawn_blocking(move || {
         let results: Vec<_> = std::thread::scope(|s| {
-            let handles: Vec<_> = accounts.iter().map(|a| (a, s.spawn(move || client::list_account(a)))).collect();
+            let handles: Vec<_> = jobs
+                .iter()
+                .map(|(a, before)| (a, s.spawn(move || client::list_page(a, *before, unread))))
+                .collect();
             handles.into_iter().map(|(a, h)| (a, h.join().unwrap_or_else(|_| Err("сбой".into())))).collect()
         });
-        let mut list = MailList { messages: Vec::new(), errors: Vec::new() };
+        let mut list = MailList { messages: Vec::new(), errors: Vec::new(), cursors: HashMap::new(), more: false };
         for (a, r) in results {
             match r {
-                Ok(m) => list.messages.extend(m),
+                Ok(page) => {
+                    list.messages.extend(page.messages);
+                    list.more |= page.next.is_some();
+                    list.cursors.insert(a.id.clone(), page.next);
+                }
                 Err(e) => list.errors.push((a.email.clone(), e)),
             }
         }
@@ -225,21 +250,34 @@ fn poll(app: &AppHandle) {
     fresh.sort_by(|a, b| b.date.cmp(&a.date));
     if fresh.len() > TOASTS_MAX {
         let senders: Vec<&str> = fresh.iter().take(3).map(|m| m.from_name.as_str()).collect();
-        notify(app, &format!("Новых писем: {}", fresh.len()), &format!("От {}…", senders.join(", ")));
+        notify(app, &format!("Новых писем: {}", fresh.len()), &format!("От {}…", senders.join(", ")), None);
     } else {
-        for m in &fresh {
-            notify(app, &m.from_name, &m.subject);
+        for m in fresh {
+            notify(app, &m.from_name.clone(), &m.subject.clone(), Some(m));
         }
     }
 }
 
+/// Unread letters across all accounts, as of the last poll.
+pub fn unread_total() -> usize {
+    UNSEEN.lock().unwrap_or_else(|e| e.into_inner()).iter().flatten().map(|(_, (_, uids))| uids.len()).sum()
+}
+
 #[cfg(windows)]
-fn notify(app: &AppHandle, title: &str, body: &str) {
-    crate::alerts::notify(app, title, body);
+/// Clicking the toast opens the mail tab, and the letter itself when there is one.
+fn notify(app: &AppHandle, title: &str, body: &str, letter: Option<Summary>) {
+    let handle = app.clone();
+    let open = move || {
+        crate::panel::show_tab(&handle, "mail");
+        if let Some(letter) = &letter {
+            let _ = handle.emit("mail:open", letter);
+        }
+    };
+    crate::alerts::notify_then(app, title, body, Some(Box::new(open)));
 }
 
 #[cfg(not(windows))]
-fn notify(_app: &AppHandle, _title: &str, _body: &str) {}
+fn notify(_app: &AppHandle, _title: &str, _body: &str, _letter: Option<Summary>) {}
 
 /// Starts the background poller.
 pub fn init(app: &AppHandle) {

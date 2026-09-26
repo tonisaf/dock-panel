@@ -78,6 +78,7 @@ pub fn run() {
             panel::panel_set_width,
             panel::panel_set_taskbar_button,
             panel::panel_set_taskbar_player,
+            panel::panel_set_taskbar_mail,
             apps::list_apps,
             apps::launch_app,
             apps::pick_files,

@@ -1,5 +1,6 @@
-//! A Dock Panel button at the left end of the Windows 11 taskbar, with a mini
-//! player next to it while something is playing (or paused).
+//! A Dock Panel button at the left end of the Windows 11 taskbar, with an
+//! unread-mail counter next to it while there is unread mail, and a mini
+//! player while something is playing (or paused).
 //!
 //! Windows has no API for putting things on the taskbar any more (desk bands
 //! are gone), so this is a small layered popup *owned* by the taskbar window:
@@ -19,6 +20,7 @@ use tauri::AppHandle;
 
 static ENABLED: AtomicBool = AtomicBool::new(true);
 static PLAYER: AtomicBool = AtomicBool::new(true);
+static MAIL: AtomicBool = AtomicBool::new(true);
 
 pub fn enabled() -> bool {
     ENABLED.load(Ordering::SeqCst)
@@ -28,6 +30,10 @@ pub fn player_enabled() -> bool {
     PLAYER.load(Ordering::SeqCst)
 }
 
+pub fn mail_enabled() -> bool {
+    MAIL.load(Ordering::SeqCst)
+}
+
 /// Both take effect on the button's next timer tick.
 pub fn set_enabled(on: bool) {
     ENABLED.store(on, Ordering::SeqCst);
@@ -35,6 +41,10 @@ pub fn set_enabled(on: bool) {
 
 pub fn set_player_enabled(on: bool) {
     PLAYER.store(on, Ordering::SeqCst);
+}
+
+pub fn set_mail_enabled(on: bool) {
+    MAIL.store(on, Ordering::SeqCst);
 }
 
 pub fn start(app: &AppHandle) {
@@ -58,7 +68,7 @@ mod native {
         CreateCompatibleDC, CreateDIBSection, CreateFontW, DeleteDC, DeleteObject, DrawTextW, GetMonitorInfoW,
         GetTextExtentPoint32W, MonitorFromWindow, SelectObject, SetBkMode, SetTextColor, AC_SRC_ALPHA, AC_SRC_OVER,
         ANTIALIASED_QUALITY, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION, CLIP_DEFAULT_PRECIS,
-        DEFAULT_CHARSET, DIB_RGB_COLORS, DT_END_ELLIPSIS, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, HDC, HFONT,
+        DEFAULT_CHARSET, DIB_RGB_COLORS, DT_CENTER, DT_END_ELLIPSIS, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, HDC, HFONT,
         HGDIOBJ, MONITORINFO, MONITOR_DEFAULTTONEAREST, OUT_DEFAULT_PRECIS, TRANSPARENT,
     };
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -75,7 +85,7 @@ mod native {
         WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
     };
 
-    use crate::{media, panel};
+    use crate::{mail, media, panel};
 
     /// winuser.h; the windows crate only exports it with the Controls feature.
     const WM_MOUSELEAVE: u32 = 0x02A3;
@@ -101,6 +111,14 @@ mod native {
     const CONTROL_W: f64 = 34.0;
     const TITLE_PX: f64 = 12.0;
     const ARTIST_PX: f64 = 11.0;
+    const MAIL_W: f64 = 40.0;
+    /// Envelope centre from the zone's left edge; the badge starts just right of it.
+    const ENVELOPE_CX: f64 = 17.0;
+    const BADGE_OFFSET: f64 = 5.0;
+    const BADGE_H: f64 = 14.0;
+    const BADGE_PX: f64 = 10.0;
+    /// Windows' default accent, when the registry has none.
+    const ACCENT_FALLBACK: (u8, u8, u8) = (0x00, 0x78, 0xD4);
 
     #[derive(Clone, Copy)]
     enum Glyph {
@@ -137,6 +155,7 @@ mod native {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     enum Hit {
         Panel,
+        Mail,
         Info,
         Prev,
         Toggle,
@@ -153,6 +172,7 @@ mod native {
     #[derive(Clone, PartialEq, Default)]
     struct Layout {
         panel: Zone,
+        mail: Option<Zone>,
         info: Option<Zone>,
         prev: Option<Zone>,
         toggle: Option<Zone>,
@@ -165,6 +185,7 @@ mod native {
             let inside = |z: &Zone| x >= z.x && x < z.x + z.w;
             [
                 (Some(self.panel), Hit::Panel),
+                (self.mail, Hit::Mail),
                 (self.info, Hit::Info),
                 (self.prev, Hit::Prev),
                 (self.toggle, Hit::Toggle),
@@ -175,7 +196,7 @@ mod native {
         }
 
         fn width(&self) -> i32 {
-            [Some(self.panel), self.info, self.prev, self.toggle, self.next]
+            [Some(self.panel), self.mail, self.info, self.prev, self.toggle, self.next]
                 .into_iter()
                 .flatten()
                 .map(|z| z.x + z.w)
@@ -194,6 +215,10 @@ mod native {
         hover: Option<Hit>,
         pressed: Option<Hit>,
         media: Option<Media>,
+        /// Unread letters; the counter shows while this is above zero.
+        unread: usize,
+        /// Badge colour, from the Windows accent.
+        accent: (u8, u8, u8),
         layout: Layout,
     }
 
@@ -401,6 +426,11 @@ mod native {
                                 panel::toggle(app);
                             }
                         }
+                        Some(Hit::Mail) => {
+                            if let Some(app) = APP.get() {
+                                panel::show_tab(app, "mail");
+                            }
+                        }
                         Some(Hit::Prev) => control("prev"),
                         Some(Hit::Toggle) => control("toggle"),
                         Some(Hit::Next) => control("next"),
@@ -462,19 +492,44 @@ mod native {
         Some((x, top, bottom - top, scale))
     }
 
+    /// The Windows accent colour (DWM stores it as 0xAABBGGRR).
+    fn accent_colour() -> (u8, u8, u8) {
+        reg_dword(w!("Software\\Microsoft\\Windows\\DWM"), w!("AccentColor"))
+            .map(|v| ((v & 0xFF) as u8, ((v >> 8) & 0xFF) as u8, ((v >> 16) & 0xFF) as u8))
+            .unwrap_or(ACCENT_FALLBACK)
+    }
+
     fn px(dip: f64, scale: f64) -> i32 {
         (dip * scale).round() as i32
     }
 
-    fn layout(scale: f64, media: Option<&Media>) -> Layout {
+    /// "7", "42", "99+".
+    fn badge_label(unread: usize) -> String {
+        if unread > 99 { "99+".into() } else { unread.to_string() }
+    }
+
+    /// Badge width in pixels for its label: a circle for one digit, a pill beyond.
+    fn badge_w(label: &str, scale: f64) -> i32 {
+        let text = text_width(label, px(BADGE_PX, scale), 700, w!("Segoe UI"));
+        (text + px(8.0, scale)).max(px(BADGE_H, scale))
+    }
+
+    fn layout(scale: f64, media: Option<&Media>, unread: usize) -> Layout {
         let mut l = Layout { panel: Zone { x: 0, w: px(BUTTON_W, scale) }, ..Default::default() };
+        let mut x = l.panel.w;
+        if unread > 0 {
+            let needed = px(ENVELOPE_CX + BADGE_OFFSET + 4.0, scale) + badge_w(&badge_label(unread), scale);
+            let w = needed.max(px(MAIL_W, scale));
+            l.mail = Some(Zone { x, w });
+            x += w;
+        }
         let Some(m) = media else { return l };
 
         let title = text_width(&m.title, px(TITLE_PX, scale), 600, w!("Segoe UI"));
         let artist = text_width(&m.artist, px(ARTIST_PX, scale), 400, w!("Segoe UI"));
         l.text_w = title.max(artist).clamp(px(TEXT_MIN, scale), px(TEXT_MAX, scale));
 
-        let mut x = l.panel.w + px(PLAYER_GAP, scale);
+        x += px(PLAYER_GAP, scale);
         let info_w = px(INFO_PAD + COVER + TEXT_GAP + INFO_PAD, scale) + l.text_w;
         l.info = Some(Zone { x, w: info_w });
         x += info_w;
@@ -507,18 +562,21 @@ mod native {
                 w!("SystemUsesLightTheme"),
             ) == Some(1);
             let media = if super::player_enabled() { media_now() } else { None };
-            // Text is measured only when the track changes.
+            let unread = if super::mail_enabled() { mail::unread_total() } else { 0 };
+            // Text is measured only when the track (or the mail counter's presence) changes.
             let same_track = s.drawn.as_ref().is_some_and(|d| {
                 d.scale == scale
+                    && badge_label(d.unread) == badge_label(unread)
                     && d.media.as_ref().map(|m| (&m.title, &m.artist, m.can_prev, m.can_next))
                         == media.as_ref().map(|m| (&m.title, &m.artist, m.can_prev, m.can_next))
             });
             let layout = match &s.drawn {
                 Some(d) if same_track => d.layout.clone(),
-                _ => layout(scale, media.as_ref()),
+                _ => layout(scale, media.as_ref(), unread),
             };
             s.layout = layout.clone();
-            let look = Look { x, y, h, scale, light, hover: s.hover, pressed: s.pressed, media, layout };
+            let accent = accent_colour();
+            let look = Look { x, y, h, scale, light, hover: s.hover, pressed: s.pressed, media, unread, accent, layout };
             if s.drawn.as_ref() != Some(&look) && draw(hwnd, &look, s.icon.as_ref()).is_some() {
                 s.drawn = Some(look);
             }
@@ -579,6 +637,30 @@ mod native {
                     }
                 }
             }
+        }
+
+        /// A rounded rectangle in colour, fully opaque.
+        fn round_rect_rgb(&mut self, rect: (f64, f64, f64, f64), r: f64, (red, green, blue): (u8, u8, u8)) {
+            let (x0, y0) = (rect.0.floor().max(0.0) as usize, rect.1.floor().max(0.0) as usize);
+            let (x1, y1) = ((rect.0 + rect.2).ceil() as usize, (rect.1 + rect.3).ceil() as usize);
+            for y in y0..y1.min(self.h) {
+                for x in x0..x1.min(self.w) {
+                    let c = Self::round_cover(x as f64 + 0.5, y as f64 + 0.5, rect, r);
+                    if c > 0.0 {
+                        self.blend(x, y, (blue as f64 * c, green as f64 * c, red as f64 * c, 255.0 * c));
+                    }
+                }
+            }
+        }
+
+        /// A straight stroke of width `w` from `a` to `b`, as two triangles.
+        fn line(&mut self, a: (f64, f64), b: (f64, f64), w: f64, tone: f64, alpha: f64) {
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let len = (dx * dx + dy * dy).sqrt().max(f64::EPSILON);
+            let (nx, ny) = (-dy / len * w / 2.0, dx / len * w / 2.0);
+            let (p0, p1, p2, p3) = ((a.0 + nx, a.1 + ny), (b.0 + nx, b.1 + ny), (b.0 - nx, b.1 - ny), (a.0 - nx, a.1 - ny));
+            self.triangle([p0, p1, p2], tone, alpha);
+            self.triangle([p0, p2, p3], tone, alpha);
         }
 
         /// Box-filters `src` (premultiplied BGRA from `pixel`) into a `size` square at (ox, oy),
@@ -771,6 +853,22 @@ mod native {
         s.bytes().chunks_exact(4).map(|p| p[1]).collect()
     }
 
+    /// Like `text_mask`, centred in the box: for the badge digits.
+    fn text_mask_centered(text: &str, px: i32, weight: i32, face: PCWSTR, w: i32, h: i32) -> Vec<u8> {
+        let mut wide: Vec<u16> = text.encode_utf16().collect();
+        let font = Font::new(px, weight, face);
+        let Some(mut s) = Surface::new(w, h) else { return vec![0; (w * h).max(0) as usize] };
+        unsafe {
+            let old = SelectObject(s.dc, HGDIOBJ(font.0 .0));
+            SetTextColor(s.dc, COLORREF(0x00FF_FFFF));
+            SetBkMode(s.dc, TRANSPARENT);
+            let mut rect = RECT { left: 0, top: 0, right: w, bottom: h };
+            DrawTextW(s.dc, &mut wide, &mut rect, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+            SelectObject(s.dc, old);
+        }
+        s.bytes().chunks_exact(4).map(|p| p[1]).collect()
+    }
+
     fn draw(hwnd: HWND, look: &Look, icon: Option<&Icon>) -> Option<()> {
         let s = look.scale;
         let l = &look.layout;
@@ -790,7 +888,14 @@ mod native {
             }
         };
         let plate_h = (PLATE_H * s).min(h as f64);
-        let zones = [(Some(l.panel), Hit::Panel), (l.info, Hit::Info), (l.prev, Hit::Prev), (l.toggle, Hit::Toggle), (l.next, Hit::Next)];
+        let zones = [
+            (Some(l.panel), Hit::Panel),
+            (l.mail, Hit::Mail),
+            (l.info, Hit::Info),
+            (l.prev, Hit::Prev),
+            (l.toggle, Hit::Toggle),
+            (l.next, Hit::Next),
+        ];
         for (zone, hit) in zones {
             if let Some(z) = zone {
                 let a = plate(hit);
@@ -812,6 +917,40 @@ mod native {
                 let a = p[3] as f64 / 255.0;
                 [p[2] as f64 * a, p[1] as f64 * a, p[0] as f64 * a, p[3] as f64]
             });
+        }
+
+        // Mail: an envelope with the unread count on an accent badge.
+        if let Some(z) = l.mail {
+            let pressed = if look.pressed == Some(Hit::Mail) { 1.0 } else { 0.0 };
+            let (cx, cy) = (z.x as f64 + ENVELOPE_CX * s, mid + pressed);
+            let at = |x: f64, y: f64| (cx + x * s, cy + y * s);
+            let stroke = 1.5 * s;
+            let (ew, eh) = (18.0 * s, 13.0 * s);
+            let (ex, ey) = (cx - ew / 2.0, cy - eh / 2.0);
+            for rect in [
+                (ex, ey, ew, stroke),
+                (ex, ey + eh - stroke, ew, stroke),
+                (ex, ey, stroke, eh),
+                (ex + ew - stroke, ey, stroke, eh),
+            ] {
+                c.round_rect(rect, stroke / 2.0, fg * 0.9, 0.9);
+            }
+            c.line(at(-8.0, -5.5), at(0.0, 1.0), stroke, fg, 0.9);
+            c.line(at(0.0, 1.0), at(8.0, -5.5), stroke, fg, 0.9);
+
+            let label = badge_label(look.unread);
+            let text_px = px(BADGE_PX, s);
+            let bh = BADGE_H * s;
+            let bw = badge_w(&label, s) as f64;
+            let (bx, by) = (cx + BADGE_OFFSET * s, cy - 13.0 * s);
+            let (r, g, b) = look.accent;
+            // A ring in the taskbar's colour keeps the badge readable over the envelope.
+            let ring = if look.light { 243.0 } else { 32.0 };
+            c.round_rect((bx - s, by - s, bw + 2.0 * s, bh + 2.0 * s), bh / 2.0 + s, ring, 1.0);
+            c.round_rect_rgb((bx, by, bw, bh), bh / 2.0, (r, g, b));
+            let (mw, mh) = (bw.ceil() as i32, bh.ceil() as i32);
+            let mask = text_mask_centered(&label, text_px, 700, w!("Segoe UI"), mw, mh);
+            c.mask(&mask, (bx.round() as usize, by.round() as usize, mw as usize, mh as usize), 255.0, 1.0);
         }
 
         // Player: cover, title and artist, controls.

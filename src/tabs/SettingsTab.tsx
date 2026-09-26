@@ -179,7 +179,8 @@ function EdgeRow() {
 }
 
 function TaskbarButtonRow() {
-  const { taskbarButton, setTaskbarButton, taskbarPlayer, setTaskbarPlayer } = usePanelSettings();
+  const { taskbarButton, setTaskbarButton, taskbarPlayer, setTaskbarPlayer, taskbarMail, setTaskbarMail } =
+    usePanelSettings();
   return (
     <>
       <Row label="Кнопка на панели задач" hint="Слева на панели задач, когда значки по центру">
@@ -188,6 +189,11 @@ function TaskbarButtonRow() {
       {taskbarButton && (
         <Row label="Плеер на кнопке" hint="Трек и управление, пока что-то играет">
           <Toggle on={taskbarPlayer} onChange={setTaskbarPlayer} />
+        </Row>
+      )}
+      {taskbarButton && (
+        <Row label="Почта на кнопке" hint="Конверт со счётчиком, пока есть непрочитанные письма">
+          <Toggle on={taskbarMail} onChange={setTaskbarMail} />
         </Row>
       )}
     </>
