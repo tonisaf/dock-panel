@@ -104,6 +104,43 @@ pub fn parse_feed(xml: &str) -> Result<(String, Vec<Video>), String> {
     Ok((channel_title, videos))
 }
 
+/// ISO 8601 duration as the Data API gives it ("PT1H2M3S", "P1DT2H") → seconds.
+/// "P0D" (a live stream or an upcoming premiere) is `None`.
+pub fn parse_duration(s: &str) -> Option<u32> {
+    let rest = s.strip_prefix('P')?;
+    let (mut total, mut num, mut in_time) = (0u64, 0u64, false);
+    let mut digits = false;
+    for c in rest.chars() {
+        match c {
+            'T' => in_time = true,
+            '0'..='9' => {
+                num = num * 10 + c.to_digit(10)? as u64;
+                digits = true;
+            }
+            _ => {
+                if !digits {
+                    return None;
+                }
+                total += num
+                    * match (c, in_time) {
+                        ('W', false) => 7 * 86_400,
+                        ('D', false) => 86_400,
+                        ('H', true) => 3600,
+                        ('M', true) => 60,
+                        ('S', true) => 1,
+                        _ => return None,
+                    };
+                num = 0;
+                digits = false;
+            }
+        }
+    }
+    if digits {
+        return None;
+    }
+    u32::try_from(total).ok().filter(|&t| t > 0)
+}
+
 pub fn is_channel_id(s: &str) -> bool {
     s.len() == 24 && s.starts_with("UC") && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
@@ -203,6 +240,18 @@ mod tests {
         assert_eq!(videos[1].views, Some(12345));
         assert_eq!(videos[1].channel_id, "UC_x5XG1OV2P6uZZ5FSM9Ttw");
         assert!(videos[1].thumbnail.as_deref().unwrap().contains("hqdefault"));
+    }
+
+    #[test]
+    fn parses_durations() {
+        assert_eq!(parse_duration("PT1H2M3S"), Some(3723));
+        assert_eq!(parse_duration("PT45S"), Some(45));
+        assert_eq!(parse_duration("PT12M"), Some(720));
+        assert_eq!(parse_duration("P1DT2H"), Some(93_600));
+        assert_eq!(parse_duration("P0D"), None);
+        assert_eq!(parse_duration("PT"), None);
+        assert_eq!(parse_duration("1H"), None);
+        assert_eq!(parse_duration("PT5"), None);
     }
 
     #[test]

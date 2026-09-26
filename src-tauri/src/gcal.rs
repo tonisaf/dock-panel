@@ -1,5 +1,6 @@
 //! Google Calendar and Google Tasks for the calendar tab: read and edit
-//! events, list and complete tasks.
+//! events, list and complete tasks. The same Google sign-in also gives the
+//! YouTube widget read access to the account's subscriptions (`google_get`).
 //!
 //! Sign-in is OAuth 2.0 for installed apps with the user's own "Desktop app"
 //! client (Client ID + secret, which Google requires even with PKCE for this
@@ -26,7 +27,10 @@ const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const CALENDAR_API: &str = "https://www.googleapis.com/calendar/v3";
 const TASKS_API: &str = "https://tasks.googleapis.com/tasks/v1";
-const SCOPES: &str = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/tasks";
+const SCOPES: &str = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/tasks \
+                      https://www.googleapis.com/auth/youtube.readonly";
+/// Added after the calendar; older sign-ins lack it until the user signs in again.
+pub const YOUTUBE_SCOPE: &str = "https://www.googleapis.com/auth/youtube.readonly";
 const SECRET: &str = "DockPanel/google-calendar";
 const FILE: &str = "gcal.json";
 
@@ -51,6 +55,8 @@ struct Local {
 }
 
 static ACCESS: Mutex<Option<(String, Instant)>> = Mutex::new(None);
+/// Scopes the current token was granted, as the token endpoint reported them.
+static GRANTED: Mutex<Option<String>> = Mutex::new(None);
 
 fn stored() -> Option<Stored> {
     serde_json::from_str(&secrets::read(SECRET)?).ok()
@@ -104,6 +110,9 @@ async fn token_request(form: &[(&str, &str)]) -> Result<Value, String> {
 }
 
 fn remember_access(v: &Value) {
+    if let Some(scope) = v["scope"].as_str() {
+        *GRANTED.lock().unwrap_or_else(|e| e.into_inner()) = Some(scope.to_string());
+    }
     if let Some(token) = v["access_token"].as_str() {
         let ttl = v["expires_in"].as_u64().unwrap_or(3600).saturating_sub(60);
         *ACCESS.lock().unwrap_or_else(|e| e.into_inner()) = Some((token.to_string(), Instant::now() + Duration::from_secs(ttl)));
@@ -116,7 +125,7 @@ async fn access_token() -> Result<String, String> {
             return Ok(token);
         }
     }
-    let s = stored().ok_or("Google Календарь не подключён")?;
+    let s = stored().ok_or("Google не подключён")?;
     let v = token_request(&[
         ("grant_type", "refresh_token"),
         ("refresh_token", &s.refresh_token),
@@ -145,8 +154,13 @@ async fn api(method: Method, url: &str, body: Option<Value>) -> Result<Value, St
     }
     let msg = v["error"]["message"].as_str().unwrap_or("");
     Err(match status {
-        StatusCode::FORBIDDEN if msg.contains("has not been used") || msg.contains("disabled") => {
-            "В Google Cloud не включён Calendar API или Tasks API для этого проекта.".into()
+        StatusCode::FORBIDDEN if msg.contains("has not been used") || msg.contains("is disabled") => {
+            // "YouTube Data API v3 has not been used in project 123 before or it is disabled..."
+            let api = msg.split(" has not been used").next().filter(|a| a.len() < msg.len()).unwrap_or("нужный API");
+            format!("В Google Cloud для этого проекта не включён {api}: APIs & Services → Library.")
+        }
+        StatusCode::FORBIDDEN if msg.contains("insufficient") || msg.contains("scope") => {
+            "Не хватает разрешений: выйдите из Google в настройках календаря и войдите снова.".into()
         }
         StatusCode::FORBIDDEN => format!("Google отказал в доступе: {msg}"),
         StatusCode::NOT_FOUND => "Событие не найдено: возможно, его уже удалили".into(),
@@ -223,16 +237,18 @@ pub struct Status {
     connected: bool,
     email: Option<String>,
     error: Option<String>,
+    /// The sign-in covers YouTube (subscriptions, video details).
+    youtube: bool,
 }
 
 #[tauri::command]
 pub async fn gcal_status() -> Status {
     if stored().is_none() {
-        return Status { connected: false, email: None, error: None };
+        return Status { connected: false, email: None, error: None, youtube: false };
     }
     match primary_email().await {
-        Ok(email) => Status { connected: true, email: Some(email), error: None },
-        Err(e) => Status { connected: true, email: None, error: Some(e) },
+        Ok(email) => Status { connected: true, email: Some(email), error: None, youtube: granted(YOUTUBE_SCOPE) },
+        Err(e) => Status { connected: true, email: None, error: Some(e), youtube: granted(YOUTUBE_SCOPE) },
     }
 }
 
@@ -240,6 +256,21 @@ pub async fn gcal_status() -> Status {
 pub fn gcal_logout() {
     secrets::delete(SECRET);
     *ACCESS.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    *GRANTED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
+fn granted(scope: &str) -> bool {
+    GRANTED.lock().unwrap_or_else(|e| e.into_inner()).as_deref().is_some_and(|s| s.split(' ').any(|x| x == scope))
+}
+
+/// Whether other features can call Google with `scope` (fetching a token if needed).
+pub async fn can_use(scope: &str) -> bool {
+    stored().is_some() && access_token().await.is_ok() && granted(scope)
+}
+
+/// A GET on any Google API with the panel's sign-in.
+pub async fn google_get(url: &str) -> Result<Value, String> {
+    api(Method::GET, url, None).await
 }
 
 // ---- calendars ---------------------------------------------------------------------

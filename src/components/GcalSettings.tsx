@@ -40,7 +40,8 @@ function Connect() {
         <li>
           В <Link href="https://console.cloud.google.com/projectcreate">Google Cloud Console</Link> создайте проект и
           включите в нём <Link href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com">Calendar API</Link>{" "}
-          и <Link href="https://console.cloud.google.com/apis/library/tasks.googleapis.com">Tasks API</Link>.
+          и <Link href="https://console.cloud.google.com/apis/library/tasks.googleapis.com">Tasks API</Link>, а для
+          подписок YouTube — <Link href="https://console.cloud.google.com/apis/library/youtube.googleapis.com">YouTube Data API v3</Link>.
         </li>
         <li>
           <Link href="https://console.cloud.google.com/auth/overview">Google Auth Platform</Link>: тип «External», добавьте себя
@@ -57,8 +58,8 @@ function Connect() {
         </li>
       </ol>
       <p className="text-[11.5px] text-fg-subtle">
-        Панель просит доступ к календарям (чтение и правка событий) и к Google Tasks. Токены хранятся в Windows, не в
-        панели.
+        Панель просит доступ к календарям (чтение и правка событий), к Google Tasks и чтение YouTube (подписки,
+        длительность видео). Токены хранятся в Windows, не в панели.
       </p>
       <div className="flex flex-col gap-2">
         <input value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="Client ID" spellCheck={false} className={field} />

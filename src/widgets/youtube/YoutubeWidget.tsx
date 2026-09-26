@@ -3,12 +3,23 @@ import { Check, RefreshCw, SquarePlay, Undo2 } from "lucide-react";
 import clsx from "clsx";
 import { Card } from "../../components/Card";
 import { usePanelStore } from "../../store";
-import { ago, useYoutubeActions, useYoutubeFeed, useYoutubeSettings, views, type Video } from "./api";
+import {
+  ago,
+  duration,
+  startsAt,
+  useYoutubeActions,
+  useYoutubeFeed,
+  useYoutubeSettings,
+  views,
+  type Video,
+} from "./api";
 
 const COLLAPSED = 5;
 const EXPANDED = 20;
 /** Unwatched videos younger than this get the "new" dot. */
 const NEW_FOR_MS = 48 * 3600_000;
+
+const badge = "absolute right-1 bottom-1 rounded px-1 text-[9.5px] leading-[15px] font-semibold text-white";
 
 function Thumb({ video }: { video: Video }) {
   const [failed, setFailed] = useState(false);
@@ -24,8 +35,14 @@ function Thumb({ video }: { video: Video }) {
           className="size-full scale-[1.34] object-cover"
         />
       )}
-      {video.short && (
-        <span className="absolute right-1 bottom-1 rounded bg-black/75 px-1 text-[9.5px] font-semibold text-white">Shorts</span>
+      {video.live === "live" ? (
+        <span className={clsx(badge, "bg-[#cc0000]")}>В ЭФИРЕ</span>
+      ) : video.live === "upcoming" ? (
+        <span className={clsx(badge, "bg-black/75")}>{video.short ? "Скоро" : "Премьера"}</span>
+      ) : video.short ? (
+        <span className={clsx(badge, "bg-black/75")}>Shorts</span>
+      ) : (
+        video.duration != null && <span className={clsx(badge, "bg-black/75 tabular-nums")}>{duration(video.duration)}</span>
       )}
     </div>
   );
@@ -34,7 +51,17 @@ function Thumb({ video }: { video: Video }) {
 function Row({ video }: { video: Video }) {
   const { open, setWatched } = useYoutubeActions();
   const fresh = !video.watched && Date.now() - video.published < NEW_FOR_MS;
-  const meta = [video.channelTitle, ago(video.published), video.views != null ? `${views(video.views)} просмотров` : null]
+  const when =
+    video.live === "upcoming" && video.starts
+      ? `начнётся ${startsAt(video.starts)}`
+      : video.live === "live"
+        ? "идёт сейчас"
+        : ago(video.published);
+  const meta = [
+    video.channelTitle,
+    when,
+    video.views != null && !video.live ? `${views(video.views)} просмотров` : null,
+  ]
     .filter(Boolean)
     .join(" · ");
 

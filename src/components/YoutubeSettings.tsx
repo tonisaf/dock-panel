@@ -4,6 +4,7 @@ import { ChevronDown, ExternalLink, FileUp, Loader2, X } from "lucide-react";
 import clsx from "clsx";
 import { Toggle } from "./Toggle";
 import { useYoutubeActions, useYoutubeSettings } from "../widgets/youtube/api";
+import { useGcalStatus } from "../gcal/api";
 
 const button =
   "flex items-center gap-1.5 rounded-lg border border-stroke px-2.5 py-1.5 text-[12px] text-fg-muted hover:bg-ink/8 hover:text-fg disabled:opacity-50";
@@ -17,7 +18,27 @@ export function YoutubeSettings() {
   const [busy, setBusy] = useState<"add" | "import" | null>(null);
   const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const { data: google } = useGcalStatus();
   const channels = data?.channels ?? [];
+
+  const setSync = async (syncGoogle: boolean) => {
+    setSyncing(true);
+    setNote(null);
+    try {
+      await setOptions({ syncGoogle });
+    } catch (e) {
+      setNote({ text: String(e), error: true });
+    } finally {
+      setSyncing(false);
+    }
+  };
+  const googleReady = !!google?.connected && !google.error && google.youtube;
+  const googleHint = !google?.connected
+    ? "Сначала войдите в Google в разделе «Google Календарь»."
+    : !google.youtube
+      ? "Войдите в Google заново (в разделе «Google Календарь»), чтобы дать доступ к YouTube, и включите YouTube Data API v3 в Google Cloud."
+      : null;
 
   const run = async (kind: "add" | "import", job: () => Promise<string>) => {
     setBusy(kind);
@@ -85,6 +106,26 @@ export function YoutubeSettings() {
         {note && <p className={note.error ? "text-warn" : "text-ok"}>{note.text}</p>}
       </div>
 
+      {data && (
+        <div className="flex items-center justify-between gap-3 px-3.5 py-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 text-[14px]">
+              Подписки из аккаунта Google {syncing && <Loader2 className="size-3.5 animate-spin text-fg-subtle" />}
+            </div>
+            <div className="text-[12px] leading-relaxed text-fg-subtle">
+              Каналы сами следуют за подписками; у видео появляются длительность и отметки трансляций и премьер
+            </div>
+            {googleHint && <div className="text-[12px] leading-relaxed text-warn">{googleHint}</div>}
+            {data.syncGoogle && data.googleError && !googleHint && (
+              <div className="text-[12px] leading-relaxed text-warn">{data.googleError}</div>
+            )}
+          </div>
+          <div className={clsx(!googleReady && !data.syncGoogle && "pointer-events-none opacity-40")}>
+            <Toggle on={data.syncGoogle} onChange={(on) => (googleReady || !on) && !syncing && setSync(on)} />
+          </div>
+        </div>
+      )}
+
       {channels.length > 0 && (
         <div className="flex flex-col px-2 py-1.5">
           <div className="px-1.5 pt-1 pb-0.5 text-[11.5px] text-fg-subtle">Каналы · {channels.length}</div>
@@ -96,6 +137,7 @@ export function YoutubeSettings() {
               >
                 {c.title}
               </button>
+              {c.google && <span className="shrink-0 text-[11px] text-fg-subtle">подписка</span>}
               <button
                 onClick={() => remove(c.id).catch(console.error)}
                 title="Убрать канал"

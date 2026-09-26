@@ -5,6 +5,8 @@ export interface GcalStatus {
   connected: boolean;
   email: string | null;
   error: string | null;
+  /** The sign-in covers YouTube too. */
+  youtube: boolean;
 }
 
 export interface Calendar {

@@ -2,6 +2,10 @@
 //! public RSS feed: no API key, no Google sign-in. Channels are added by
 //! link, @handle or ID, or imported from a Google Takeout subscriptions.csv.
 //!
+//! With the panel's Google sign-in (the calendar's), the channel list can
+//! follow the account's subscriptions, and videos get their duration and
+//! live/premiere state from the Data API (a few quota units per refresh).
+//!
 //! YouTube is throttled in some countries, so feeds are cached on disk and
 //! a failed refresh keeps showing the last good copy.
 
@@ -15,10 +19,10 @@ use reqwest::header::{ACCEPT_LANGUAGE, COOKIE};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::net;
+use crate::{gcal, net};
 
 mod parse;
-use parse::{channel_id_in_page, is_channel_id, parse_feed, parse_takeout, Video};
+use parse::{channel_id_in_page, is_channel_id, parse_duration, parse_feed, parse_takeout, parse_time, Video};
 
 const FILE: &str = "youtube.json";
 const CACHE_FILE: &str = "youtube-cache.json";
@@ -32,27 +36,34 @@ const WATCHED_MAX: usize = 5000;
 const TOASTS_MAX: usize = 3;
 /// Skips YouTube's cookie-consent interstitial in the EU.
 const CONSENT_COOKIE: &str = "SOCS=CAI; CONSENT=YES+1";
+const YT_API: &str = "https://www.googleapis.com/youtube/v3";
+/// Subscriptions change rarely; re-read them at most this often.
+const SUBS_EVERY_MS: i64 = 60 * 60_000;
+/// 50 per page: up to 1000 subscriptions.
+const SUBS_PAGES_MAX: usize = 20;
 
 #[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct Channel {
     id: String,
     title: String,
+    /// Came from the Google account's subscriptions (and leaves with them).
+    #[serde(default)]
+    google: bool,
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
 struct Saved {
     channels: Vec<Channel>,
     notify: bool,
     hide_shorts: bool,
     /// Oldest first; trimmed to `WATCHED_MAX`.
     watched: VecDeque<String>,
-}
-
-impl Default for Saved {
-    fn default() -> Self {
-        Saved { channels: Vec::new(), notify: false, hide_shorts: false, watched: VecDeque::new() }
-    }
+    /// Keep `channels` in step with the Google account's subscriptions.
+    sync_google: bool,
+    /// Subscriptions the user removed from the panel; sync leaves them out.
+    ignored: HashSet<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -62,12 +73,30 @@ struct Feed {
     videos: Vec<Video>,
 }
 
+/// What the Data API adds to a feed's video.
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct Details {
+    /// Seconds; `None` for live streams and upcoming premieres.
+    duration: Option<u32>,
+    /// "live" or "upcoming" (a scheduled stream or premiere).
+    live: Option<String>,
+    /// Scheduled start of an upcoming one, Unix ms.
+    starts: Option<i64>,
+}
+
 #[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
 struct Cache {
     feeds: HashMap<String, Feed>,
     /// When the last refresh finished, and how many channels failed in it.
     refreshed: i64,
     failed: usize,
+    /// By video ID.
+    details: HashMap<String, Details>,
+    /// Last subscriptions sync (tried), and why it failed if it did.
+    subs_synced: i64,
+    google_error: Option<String>,
 }
 
 static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
@@ -199,13 +228,14 @@ async fn resolve(input: &str) -> Result<Channel, String> {
         return Err("Не похоже на ссылку на канал YouTube".into());
     }
     let feed = fetch_feed(&id).await?;
-    Ok(Channel { id, title: feed.title })
+    Ok(Channel { id, title: feed.title, google: false })
 }
 
 /// Fetches every channel's feed, keeps the old copy for those that fail,
 /// and reports new videos (not in the previous copy) for notifications.
 async fn refresh(app: &AppHandle) -> Vec<Video> {
     let _guard = REFRESHING.acquire().await;
+    sync_subscriptions(app).await;
     let channels = load(app).channels;
     let ids: Vec<String> = channels.iter().map(|c| c.id.clone()).collect();
     let results: Vec<(String, Result<Feed, String>)> = stream::iter(ids)
@@ -239,8 +269,130 @@ async fn refresh(app: &AppHandle) -> Vec<Video> {
         cache.failed = failed;
         let _ = write_json(app, CACHE_FILE, cache);
     });
+    fetch_details(app).await;
     let _ = app.emit("youtube:changed", ());
     fresh
+}
+
+// ---- Google account ----------------------------------------------------------------
+
+/// Brings the channel list in line with the account's subscriptions, when
+/// sync is on and the last sync is old enough.
+async fn sync_subscriptions(app: &AppHandle) {
+    if !load(app).sync_google || !with_cache(app, |c| now_ms() - c.subs_synced > SUBS_EVERY_MS) {
+        return;
+    }
+    let result = fetch_subscriptions().await;
+    let error = match result {
+        Ok(subs) => {
+            // Load again: the settings may have changed during the request.
+            let mut saved = load(app);
+            if saved.sync_google {
+                merge_subscriptions(&mut saved, subs);
+                let _ = save(app, &saved);
+            }
+            None
+        }
+        Err(e) => Some(e),
+    };
+    with_cache(app, |c| {
+        c.subs_synced = now_ms();
+        c.google_error = error;
+        let _ = write_json(app, CACHE_FILE, c);
+    });
+}
+
+async fn fetch_subscriptions() -> Result<Vec<Channel>, String> {
+    if !gcal::can_use(gcal::YOUTUBE_SCOPE).await {
+        return Err("Нет доступа к YouTube: войдите в Google в разделе «Google Календарь» (заново, если вход был раньше).".into());
+    }
+    let mut out = Vec::new();
+    let mut page: Option<String> = None;
+    for _ in 0..SUBS_PAGES_MAX {
+        let mut url = format!("{YT_API}/subscriptions?part=snippet&mine=true&maxResults=50");
+        if let Some(token) = &page {
+            url.push_str("&pageToken=");
+            url.push_str(&percent_encoding::utf8_percent_encode(token, percent_encoding::NON_ALPHANUMERIC).to_string());
+        }
+        let v = gcal::google_get(&url).await?;
+        for item in v["items"].as_array().into_iter().flatten() {
+            let snippet = &item["snippet"];
+            if let Some(id) = snippet["resourceId"]["channelId"].as_str() {
+                let title = snippet["title"].as_str().unwrap_or(id).to_string();
+                out.push(Channel { id: id.to_string(), title, google: true });
+            }
+        }
+        page = v["nextPageToken"].as_str().map(str::to_string);
+        if page.is_none() {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+/// Adds new subscriptions, drops channels that came from ones since cancelled;
+/// channels added by hand stay either way.
+fn merge_subscriptions(saved: &mut Saved, subs: Vec<Channel>) {
+    let subscribed: HashSet<&str> = subs.iter().map(|c| c.id.as_str()).collect();
+    saved.channels.retain(|c| !c.google || subscribed.contains(c.id.as_str()));
+    // A cancelled subscription forgets its "removed from the panel" mark.
+    saved.ignored.retain(|id| subscribed.contains(id.as_str()));
+    let known: HashSet<String> = saved.channels.iter().map(|c| c.id.clone()).collect();
+    saved.channels.extend(subs.into_iter().filter(|c| !known.contains(&c.id) && !saved.ignored.contains(&c.id)));
+}
+
+/// Duration and live state for the videos that will show and don't have them
+/// yet; live and upcoming ones are checked again each time.
+async fn fetch_details(app: &AppHandle) {
+    if !gcal::can_use(gcal::YOUTUBE_SCOPE).await {
+        return;
+    }
+    let ids: Vec<String> = with_cache(app, |c| {
+        let mut videos: Vec<&Video> = c.feeds.values().flat_map(|f| f.videos.iter()).collect();
+        videos.sort_by(|a, b| b.published.cmp(&a.published));
+        videos.truncate(FEED_MAX);
+        videos
+            .into_iter()
+            .filter(|v| c.details.get(&v.id).is_none_or(|d| d.live.is_some()))
+            .map(|v| v.id.clone())
+            .collect()
+    });
+    for chunk in ids.chunks(50) {
+        let url = format!(
+            "{YT_API}/videos?part=contentDetails,snippet,liveStreamingDetails&maxResults=50&id={}\
+             &fields=items(id,contentDetails/duration,snippet/liveBroadcastContent,liveStreamingDetails/scheduledStartTime)",
+            chunk.join(",")
+        );
+        let Ok(v) = gcal::google_get(&url).await else { break };
+        let mut found: HashMap<String, Details> = v["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|item| {
+                let live = item["snippet"]["liveBroadcastContent"].as_str().filter(|l| *l == "live" || *l == "upcoming");
+                let details = Details {
+                    duration: item["contentDetails"]["duration"].as_str().and_then(parse_duration),
+                    starts: live
+                        .filter(|l| *l == "upcoming")
+                        .and(item["liveStreamingDetails"]["scheduledStartTime"].as_str())
+                        .and_then(parse_time),
+                    live: live.map(str::to_string),
+                };
+                Some((item["id"].as_str()?.to_string(), details))
+            })
+            .collect();
+        with_cache(app, |c| {
+            for id in chunk {
+                // Missing from the answer: private or deleted; don't ask again.
+                c.details.insert(id.clone(), found.remove(id).unwrap_or_default());
+            }
+        });
+    }
+    with_cache(app, |c| {
+        let present: HashSet<String> = c.feeds.values().flat_map(|f| f.videos.iter().map(|v| v.id.clone())).collect();
+        c.details.retain(|id, _| present.contains(id));
+        let _ = write_json(app, CACHE_FILE, c);
+    });
 }
 
 fn notify_new(app: &AppHandle, mut fresh: Vec<Video>) {
@@ -288,12 +440,16 @@ pub struct Settings {
     channels: Vec<Channel>,
     notify: bool,
     hide_shorts: bool,
+    sync_google: bool,
+    /// Why the last subscriptions sync failed.
+    google_error: Option<String>,
 }
 
 #[tauri::command]
 pub fn youtube_settings(app: AppHandle) -> Settings {
     let s = load(&app);
-    Settings { channels: s.channels, notify: s.notify, hide_shorts: s.hide_shorts }
+    let google_error = if s.sync_google { with_cache(&app, |c| c.google_error.clone()) } else { None };
+    Settings { channels: s.channels, notify: s.notify, hide_shorts: s.hide_shorts, sync_google: s.sync_google, google_error }
 }
 
 #[tauri::command]
@@ -317,7 +473,8 @@ pub async fn youtube_import(app: AppHandle) -> Result<usize, String> {
         .map_err(|e| e.to_string())??;
     let Some(path) = paths.first() else { return Ok(0) };
     let csv = std::fs::read_to_string(path).map_err(|e| format!("Не удалось прочитать файл: {e}"))?;
-    let found: Vec<Channel> = parse_takeout(&csv).into_iter().map(|(id, title)| Channel { id, title }).collect();
+    let found: Vec<Channel> =
+        parse_takeout(&csv).into_iter().map(|(id, title)| Channel { id, title, google: false }).collect();
     if found.is_empty() {
         return Err("В файле нет каналов. Нужен subscriptions.csv из Google Takeout (YouTube → подписки).".into());
     }
@@ -334,6 +491,9 @@ pub async fn youtube_import(app: AppHandle) -> Result<usize, String> {
 #[tauri::command]
 pub fn youtube_remove(app: AppHandle, id: String) -> Result<(), String> {
     let mut saved = load(&app);
+    if saved.channels.iter().any(|c| c.id == id && c.google) {
+        saved.ignored.insert(id.clone());
+    }
     saved.channels.retain(|c| c.id != id);
     save(&app, &saved)?;
     with_cache(&app, |cache| {
@@ -345,7 +505,12 @@ pub fn youtube_remove(app: AppHandle, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn youtube_set_options(app: AppHandle, notify: Option<bool>, hide_shorts: Option<bool>) -> Result<(), String> {
+pub async fn youtube_set_options(
+    app: AppHandle,
+    notify: Option<bool>,
+    hide_shorts: Option<bool>,
+    sync_google: Option<bool>,
+) -> Result<(), String> {
     let mut saved = load(&app);
     if let Some(n) = notify {
         saved.notify = n;
@@ -353,7 +518,24 @@ pub fn youtube_set_options(app: AppHandle, notify: Option<bool>, hide_shorts: Op
     if let Some(h) = hide_shorts {
         saved.hide_shorts = h;
     }
-    save(&app, &saved)
+    let start_sync = sync_google == Some(true) && !saved.sync_google;
+    if let Some(on) = sync_google {
+        saved.sync_google = on;
+        if !on {
+            // The channels stay, as if added by hand.
+            saved.channels.iter_mut().for_each(|c| c.google = false);
+            saved.ignored.clear();
+        }
+    }
+    save(&app, &saved)?;
+    if start_sync {
+        with_cache(&app, |c| c.subs_synced = 0);
+        refresh(&app).await;
+        if let Some(e) = with_cache(&app, |c| c.google_error.clone()) {
+            return Err(e);
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -375,6 +557,8 @@ pub struct FeedItem {
     #[serde(flatten)]
     video: Video,
     watched: bool,
+    #[serde(flatten)]
+    details: Details,
 }
 
 #[derive(Serialize)]
@@ -406,7 +590,11 @@ pub async fn youtube_feed(app: AppHandle, force: bool) -> Result<FeedView, Strin
             .values()
             .flat_map(|f| f.videos.iter())
             .filter(|v| !(saved.hide_shorts && v.short))
-            .map(|v| FeedItem { watched: watched.contains(v.id.as_str()), video: v.clone() })
+            .map(|v| FeedItem {
+                watched: watched.contains(v.id.as_str()),
+                details: cache.details.get(&v.id).cloned().unwrap_or_default(),
+                video: v.clone(),
+            })
             .collect();
         videos.sort_by(|a, b| b.video.published.cmp(&a.video.published));
         videos.truncate(FEED_MAX);

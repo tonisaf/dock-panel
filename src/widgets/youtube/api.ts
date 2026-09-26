@@ -5,12 +5,17 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 export interface Channel {
   id: string;
   title: string;
+  /** From the Google account's subscriptions. */
+  google: boolean;
 }
 
 export interface YoutubeSettings {
   channels: Channel[];
   notify: boolean;
   hideShorts: boolean;
+  syncGoogle: boolean;
+  /** Why the last subscriptions sync failed. */
+  googleError: string | null;
 }
 
 export interface Video {
@@ -25,6 +30,12 @@ export interface Video {
   short: boolean;
   url: string;
   watched: boolean;
+  /** Seconds (with the Google sign-in); null for streams and premieres. */
+  duration: number | null;
+  /** A stream on air, or a scheduled stream or premiere. */
+  live: "live" | "upcoming" | null;
+  /** Scheduled start of an upcoming one, Unix ms. */
+  starts: number | null;
 }
 
 export interface FeedView {
@@ -95,9 +106,16 @@ export function useYoutubeActions() {
       reload();
     },
 
-    setOptions: async (options: { notify?: boolean; hideShorts?: boolean }) => {
-      await invoke("youtube_set_options", { notify: options.notify ?? null, hideShorts: options.hideShorts ?? null });
-      reload();
+    setOptions: async (options: { notify?: boolean; hideShorts?: boolean; syncGoogle?: boolean }) => {
+      try {
+        await invoke("youtube_set_options", {
+          notify: options.notify ?? null,
+          hideShorts: options.hideShorts ?? null,
+          syncGoogle: options.syncGoogle ?? null,
+        });
+      } finally {
+        reload();
+      }
     },
   };
 }
@@ -120,4 +138,23 @@ export function views(n: number) {
   if (n >= 1_000_000) return `${fmt(n / 1_000_000)} млн`;
   if (n >= 1_000) return `${fmt(n / 1_000)} тыс.`;
   return String(n);
+}
+
+/** 754 → "12:34", 3723 → "1:02:03". */
+export function duration(seconds: number) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const sec = String(seconds % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+}
+
+/** "сегодня в 18:00", "завтра в 9:30", "3 окт. в 20:00". */
+export function startsAt(ms: number, now = new Date()) {
+  const d = new Date(ms);
+  const time = d.toLocaleTimeString("ru-RU", { hour: "numeric", minute: "2-digit" });
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(d) - day(now)) / 86_400_000);
+  if (diff === 0) return `сегодня в ${time}`;
+  if (diff === 1) return `завтра в ${time}`;
+  return `${d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" })} в ${time}`;
 }
