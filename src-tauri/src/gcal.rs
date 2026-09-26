@@ -476,9 +476,17 @@ pub struct Task {
     list: String,
     id: String,
     title: String,
-    /// YYYY-MM-DD; Google Tasks keeps only the date.
+    /// YYYY-MM-DD.
     due: Option<String>,
+    /// The full due time (RFC 3339) when Google kept a time of day; the Tasks
+    /// API has documented only the date, so this is usually `None`.
+    due_at: Option<String>,
     notes: Option<String>,
+}
+
+/// Google's date-only due: midnight UTC of that date.
+fn date_only_due(date: &str) -> String {
+    format!("{date}T00:00:00.000Z")
 }
 
 /// The account's task lists as (id, title), in Google's order (the default list first).
@@ -503,8 +511,19 @@ fn task_from(t: &Value, list_id: &str, list: &str) -> Option<Task> {
         id: id.to_string(),
         title: title.to_string(),
         due: t["due"].as_str().map(|d| d.chars().take(10).collect()),
+        due_at: t["due"]
+            .as_str()
+            .filter(|d| d.get(10..).is_some_and(|t| !t.is_empty() && !is_midnight(t)))
+            .map(str::to_string),
         notes: t["notes"].as_str().map(str::to_string),
     })
+}
+
+/// "T00:00:00.000Z", "T00:00:00Z" and the like: no time of day.
+fn is_midnight(rest: &str) -> bool {
+    let time = rest.trim_start_matches('T');
+    let Some(rest) = time.strip_prefix("00:00:00") else { return false };
+    matches!(rest.trim_start_matches(|c: char| c == '.' || c.is_ascii_digit()), "Z" | "+00:00" | "")
 }
 
 #[derive(Serialize)]
@@ -518,24 +537,36 @@ pub async fn gcal_task_lists() -> Result<Vec<TaskList>, String> {
     Ok(task_lists().await?.into_iter().map(|(id, title)| TaskList { id, title }).collect())
 }
 
-/// Adds a task; `due` is YYYY-MM-DD (Google Tasks keeps no time of day).
+/// Adds a task due on `due` (YYYY-MM-DD). `due_at` (RFC 3339) also offers
+/// Google a time of day: if it drops the time and the date slips with it
+/// (a time before the UTC offset), the date is put back.
 #[tauri::command]
 pub async fn gcal_task_create(
     list_id: String,
     title: String,
     notes: Option<String>,
     due: Option<String>,
+    due_at: Option<String>,
 ) -> Result<Task, String> {
     let list = task_lists().await?.into_iter().find(|(id, _)| *id == list_id).map(|(_, t)| t).unwrap_or_default();
     let mut body = json!({ "title": title.trim() });
     if let Some(n) = notes.filter(|n| !n.trim().is_empty()) {
         body["notes"] = json!(n);
     }
-    if let Some(d) = due.filter(|d| d.len() == 10) {
-        body["due"] = json!(format!("{d}T00:00:00.000Z"));
+    let due = due.filter(|d| d.len() == 10);
+    if let Some(d) = &due {
+        body["due"] = json!(due_at.clone().unwrap_or_else(|| date_only_due(d)));
     }
     let v = api(Method::POST, &format!("{TASKS_API}/lists/{}/tasks", enc(&list_id)), Some(body)).await?;
-    task_from(&v, &list_id, &list).ok_or_else(|| "Google вернул непонятную задачу".into())
+    let task = task_from(&v, &list_id, &list).ok_or("Google вернул непонятную задачу")?;
+    match &due {
+        Some(d) if due_at.is_some() && task.due_at.is_none() && task.due.as_deref() != Some(d.as_str()) => {
+            let url = format!("{TASKS_API}/lists/{}/tasks/{}", enc(&list_id), enc(&task.id));
+            let v = api(Method::PATCH, &url, Some(json!({ "due": date_only_due(d) }))).await?;
+            task_from(&v, &list_id, &list).ok_or_else(|| "Google вернул непонятную задачу".into())
+        }
+        _ => Ok(task),
+    }
 }
 
 /// Unfinished tasks of every list.

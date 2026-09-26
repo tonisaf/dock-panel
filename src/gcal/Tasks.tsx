@@ -1,14 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Circle, CircleCheck } from "lucide-react";
-import { useGcalActions, ymd, type GTask } from "./api";
+import { hhmm, useGcalActions, ymd, type GTask } from "./api";
+
+/** The local day a task is due: from its time when Google kept one. */
+const dueDay = (t: GTask) => (t.dueAt ? ymd(new Date(t.dueAt)) : t.due);
+
+/** "15:00 " for a task with a time of day. */
+const dueTime = (t: GTask) => (t.dueAt ? `${hhmm(new Date(t.dueAt))} ` : "");
 
 /** Each day's unfinished tasks; overdue ones gather on today, as in Google Calendar. */
 export function tasksForDays(days: Date[], tasks: GTask[], now: Date) {
   const todayKey = ymd(now);
   return days.map((d) => {
     const key = ymd(d);
-    return tasks.filter((t) => t.due && (t.due === key || (key === todayKey && t.due < todayKey)));
+    return tasks
+      .filter((t) => {
+        const due = dueDay(t);
+        return due && (due === key || (key === todayKey && due < todayKey));
+      })
+      .sort((a, b) => (a.dueAt ?? "").localeCompare(b.dueAt ?? ""));
   });
 }
 
@@ -24,7 +35,7 @@ export function TasksChip({ tasks }: { tasks: GTask[] }) {
     return () => window.removeEventListener("mousedown", close);
   }, [open]);
   if (tasks.length === 0) return null;
-  const label = tasks.length === 1 ? tasks[0].title : `${tasks.length} ${plural(tasks.length)}`;
+  const label = tasks.length === 1 ? dueTime(tasks[0]) + tasks[0].title : `${tasks.length} ${plural(tasks.length)}`;
   return (
     <>
       <button
@@ -51,10 +62,14 @@ export function TasksChip({ tasks }: { tasks: GTask[] }) {
                 <Circle className="mt-0.5 size-4 shrink-0 text-fg-subtle group-hover:hidden" />
                 <CircleCheck className="mt-0.5 hidden size-4 shrink-0 text-accent group-hover:block" />
                 <span className="min-w-0">
-                  <span className="block text-[13px]">{t.title}</span>
+                  <span className="block text-[13px]">
+                    {t.dueAt && <span className="text-fg-muted tabular-nums">{dueTime(t)}</span>}
+                    {t.title}
+                  </span>
                   <span className="block text-[11px] text-fg-subtle">
                     {t.list}
-                    {t.due && ` · ${new Date(`${t.due}T00:00`).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}`}
+                    {dueDay(t) &&
+                      ` · ${new Date(`${dueDay(t)}T00:00`).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}`}
                   </span>
                 </span>
               </button>

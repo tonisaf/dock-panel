@@ -90,6 +90,7 @@ export function EventCard({
   const [kind, setKind] = useState<"event" | "task">("event");
   const { data: taskLists = [] } = useTaskLists(isNew && kind === "task");
   const [listId, setListId] = useState("");
+  const [taskTime, setTaskTime] = useState("");
   const taskList = listId || taskLists[0]?.id || "";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -158,7 +159,9 @@ export function EventCard({
         setError("Введите название задачи");
         return;
       }
-      return run(() => createTask({ listId: taskList, title: title.trim(), notes: description, due: start.slice(0, 10) }));
+      return run(() =>
+        createTask({ listId: taskList, title: title.trim(), notes: description, due: start.slice(0, 10), time: taskTime || null }),
+      );
     }
     if (isNew) {
       return run(() => create({ calendarId, title: name, start: s, end: e, allDay, location, description }));
@@ -246,12 +249,32 @@ export function EventCard({
           />
           {kind === "task" ? (
             <>
-              <input
-                type="date"
-                value={start.slice(0, 10)}
-                onChange={(e) => e.target.value && setStart(`${e.target.value}T${start.slice(11) || "00:00"}`)}
-                className={field}
-              />
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={start.slice(0, 10)}
+                  onChange={(e) => e.target.value && setStart(`${e.target.value}T${start.slice(11) || "00:00"}`)}
+                  className={clsx(field, "min-w-0 flex-1")}
+                />
+                <div className="w-32 shrink-0">
+                  <input
+                    type="time"
+                    value={taskTime}
+                    onChange={(e) => setTaskTime(e.target.value)}
+                    title="Время (необязательно)"
+                    className={clsx(field, !taskTime && "text-fg-subtle")}
+                  />
+                </div>
+                {taskTime && (
+                  <button
+                    onClick={() => setTaskTime("")}
+                    title="Без времени"
+                    className="grid size-7 shrink-0 place-items-center rounded-md text-fg-subtle hover:bg-ink/10 hover:text-fg"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                )}
+              </div>
               {taskLists.length > 1 && (
                 <select value={taskList} onChange={(e) => setListId(e.target.value)} className={field}>
                   {taskLists.map((l) => (

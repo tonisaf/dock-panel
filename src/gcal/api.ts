@@ -43,6 +43,8 @@ export interface GTask {
   title: string;
   /** YYYY-MM-DD. */
   due: string | null;
+  /** Due time (RFC 3339) when Google kept a time of day; usually null. */
+  dueAt: string | null;
   notes: string | null;
 }
 
@@ -196,6 +198,8 @@ export interface NewTask {
   notes: string;
   /** YYYY-MM-DD. */
   due: string | null;
+  /** A time of day on `due`, offered to Google (which may drop it). */
+  time: string | null;
 }
 
 export interface NewEvent {
@@ -280,6 +284,7 @@ export function useGcalActions() {
         title: t.title,
         notes: t.notes || null,
         due: t.due,
+        dueAt: t.due && t.time ? rfc3339(new Date(`${t.due}T${t.time}`)) : null,
       });
       queryClient.setQueryData<GTask[]>(TASKS, (l) => l && [...l, created]);
       queryClient.invalidateQueries({ queryKey: TASKS });
