@@ -199,24 +199,50 @@ function Reader({
   );
 }
 
-function Row({ m, showAccount, onOpen }: { m: Summary; showAccount: boolean; onOpen: () => void }) {
+function Row({
+  m,
+  showAccount,
+  onOpen,
+  onError,
+}: {
+  m: Summary;
+  showAccount: boolean;
+  onOpen: () => void;
+  onError: (message: string) => void;
+}) {
+  const { act } = useMailActions();
+  // The row disappears at once (optimistic); a failure brings it back with a note.
+  const run = (action: MailAction) => act(m, action).catch((e) => onError(String(e)));
+  const quick =
+    "grid size-7 place-items-center rounded-lg text-fg-muted transition-colors hover:bg-ink/10 hover:text-fg";
+
   return (
-    <button
-      onClick={onOpen}
-      className="flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-surface-hover"
-    >
-      <span className={clsx("mt-1.5 size-2 shrink-0 rounded-full", m.unread ? "bg-accent" : "bg-transparent")} />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
-          <span className={clsx("min-w-0 flex-1 truncate text-[13.5px]", m.unread ? "font-semibold" : "text-fg-muted")}>
-            {m.fromName || m.fromEmail || "(без отправителя)"}
-          </span>
-          <span className="shrink-0 text-[11.5px] text-fg-subtle tabular-nums">{shortDate(m.date)}</span>
+    <div className="group relative rounded-xl transition-colors hover:bg-surface-hover">
+      <button onClick={onOpen} className="flex w-full items-start gap-2.5 px-2.5 py-2 text-left">
+        <span className={clsx("mt-1.5 size-2 shrink-0 rounded-full", m.unread ? "bg-accent" : "bg-transparent")} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2">
+            <span className={clsx("min-w-0 flex-1 truncate text-[13.5px]", m.unread ? "font-semibold" : "text-fg-muted")}>
+              {m.fromName || m.fromEmail || "(без отправителя)"}
+            </span>
+            {/* The quick actions take the date's place on hover. */}
+            <span className="shrink-0 text-[11.5px] text-fg-subtle tabular-nums group-hover:invisible">
+              {shortDate(m.date)}
+            </span>
+          </div>
+          <div className={clsx("truncate text-[12.5px]", m.unread ? "text-fg" : "text-fg-subtle")}>{m.subject}</div>
+          {showAccount && <div className="truncate text-[11px] text-fg-subtle">{m.account}</div>}
         </div>
-        <div className={clsx("truncate text-[12.5px]", m.unread ? "text-fg" : "text-fg-subtle")}>{m.subject}</div>
-        {showAccount && <div className="truncate text-[11px] text-fg-subtle">{m.account}</div>}
+      </button>
+      <div className="absolute top-1 right-1.5 hidden items-center gap-0.5 rounded-lg bg-popover/90 p-0.5 shadow-sm group-hover:flex">
+        <button title="В архив" onClick={() => run("archive")} className={quick}>
+          <Archive className="size-4" />
+        </button>
+        <button title="Удалить" onClick={() => run("delete")} className={quick}>
+          <Trash2 className="size-4" />
+        </button>
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -268,6 +294,7 @@ export function MailTab() {
   const [account, setAccount] = useState<string | null>(null);
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [reading, setReading] = useState<Summary | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const { messages, errors, isPending, isFetching, isError, error, hasNextPage, fetchNextPage, isFetchingNextPage } =
     useMailList(account, unreadOnly, accounts.length > 0);
 
@@ -322,6 +349,16 @@ export function MailTab() {
         </button>
       </div>
 
+      {actionError && (
+        <p
+          onClick={() => setActionError(null)}
+          title="Скрыть"
+          className="cursor-default rounded-lg border border-warn/30 bg-warn/5 px-2.5 py-1.5 text-[12px] text-warn"
+        >
+          {actionError}
+        </p>
+      )}
+
       {errors.map(([email, reason]) => (
         <p key={email} className="rounded-lg border border-warn/30 bg-warn/5 px-2.5 py-1.5 text-[12px] text-warn">
           {email}: {reason}
@@ -343,7 +380,13 @@ export function MailTab() {
       ) : (
         <div className="flex flex-col">
           {messages.map((m) => (
-            <Row key={`${m.account}/${m.uid}`} m={m} showAccount={multi && !account} onOpen={() => setReading(m)} />
+            <Row
+              key={`${m.account}/${m.uid}`}
+              m={m}
+              showAccount={multi && !account}
+              onOpen={() => setReading(m)}
+              onError={setActionError}
+            />
           ))}
           {hasNextPage && (
             <LoadMore loading={isFetchingNextPage} onVisible={() => !isFetchingNextPage && fetchNextPage()} />
