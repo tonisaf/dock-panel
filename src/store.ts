@@ -1,14 +1,15 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import { AppWindow, CheckSquare, LayoutGrid, Mail, Settings, Sparkles, type LucideIcon } from "lucide-react";
+import { AppWindow, CalendarDays, CheckSquare, LayoutGrid, Mail, Settings, Sparkles, type LucideIcon } from "lucide-react";
 
-export type TabId = "home" | "apps" | "tasks" | "mail" | "ai" | "settings";
+export type TabId = "home" | "apps" | "tasks" | "mail" | "calendar" | "ai" | "settings";
 
 export const TABS: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: "home", label: "Главная", icon: LayoutGrid },
   { id: "apps", label: "Приложения", icon: AppWindow },
   { id: "tasks", label: "Задачи", icon: CheckSquare },
   { id: "mail", label: "Почта", icon: Mail },
+  { id: "calendar", label: "Календарь", icon: CalendarDays },
   { id: "ai", label: "AI", icon: Sparkles },
   { id: "settings", label: "Настройки", icon: Settings },
 ];

@@ -20,6 +20,7 @@ import { TasksTab } from "../tabs/TasksTab";
 import { AiTab } from "../tabs/AiTab";
 import { SettingsTab } from "../tabs/SettingsTab";
 import { MailTab } from "../tabs/MailTab";
+import { CalendarTab } from "../gcal/CalendarTab";
 import { invalidateMail } from "../mail/api";
 import { invalidateYoutube } from "../widgets/youtube/api";
 
@@ -28,6 +29,7 @@ const TAB_VIEWS = {
   apps: AppsTab,
   tasks: TasksTab,
   mail: MailTab,
+  calendar: CalendarTab,
   ai: AiTab,
   settings: SettingsTab,
 };

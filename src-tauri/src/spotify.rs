@@ -6,18 +6,15 @@
 //! Spotify dashboard (its validator rejects port-less loopback URIs). The
 //! refresh token lives in Credential Manager.
 
-use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
 use reqwest::{Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 
-use crate::{net, secrets};
+use crate::{net, oauth, secrets};
 
 const AUTH_URL: &str = "https://accounts.spotify.com/authorize";
 const TOKEN_URL: &str = "https://accounts.spotify.com/api/token";
@@ -27,7 +24,6 @@ const SCOPES: &str = "playlist-read-private playlist-read-collaborative user-lib
 /// Added after the first release; older sign-ins lack it until the user signs in again.
 const LIKE_SCOPE: &str = "user-library-modify";
 const SECRET: &str = "DockPanel/spotify";
-const LOGIN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// Must match the Redirect URI registered in the Spotify dashboard.
 const REDIRECT_PORT: u16 = 43821;
 /// Opens Liked Songs in the desktop app.
@@ -45,12 +41,6 @@ struct Stored {
 static ACCESS: Mutex<Option<(String, Instant)>> = Mutex::new(None);
 /// Scopes the current token was granted, as the token endpoint reported them.
 static GRANTED: Mutex<Option<String>> = Mutex::new(None);
-
-fn random_urlsafe(bytes: usize) -> Result<String, String> {
-    let mut buf = vec![0u8; bytes];
-    getrandom::fill(&mut buf).map_err(|e| e.to_string())?;
-    Ok(BASE64_URL_SAFE_NO_PAD.encode(buf))
-}
 
 fn stored() -> Option<Stored> {
     serde_json::from_str(&secrets::read(SECRET)?).ok()
@@ -141,52 +131,6 @@ async fn api_get(path: &str) -> Result<Value, String> {
 
 // ---- login ------------------------------------------------------------------------
 
-/// Waits for the browser redirect on the loopback listener; returns the query string.
-fn wait_for_redirect(listener: TcpListener) -> Result<String, String> {
-    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-    let deadline = Instant::now() + LOGIN_TIMEOUT;
-    loop {
-        match listener.accept() {
-            Ok((mut stream, _)) => {
-                let _ = stream.set_nonblocking(false);
-                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-                let mut buf = [0u8; 4096];
-                let n = stream.read(&mut buf).unwrap_or(0);
-                let request = String::from_utf8_lossy(&buf[..n]);
-                let target = request.split_whitespace().nth(1).unwrap_or("");
-                // Browsers also ask for /favicon.ico; only the callback counts.
-                let Some(query) = target.strip_prefix("/callback?") else {
-                    let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
-                    continue;
-                };
-                let body = "<!doctype html><meta charset=utf-8><title>Dock Panel</title>\
-                    <body style=\"font:16px system-ui;background:#18181c;color:#eee;display:grid;place-items:center;height:100vh;margin:0\">\
-                    <div>Готово! Вкладку можно закрыть и вернуться в Dock Panel.</div>";
-                let _ = write!(
-                    stream,
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                    body.len()
-                );
-                return Ok(query.to_string());
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                if Instant::now() > deadline {
-                    return Err("Вход не завершён за 5 минут".into());
-                }
-                std::thread::sleep(Duration::from_millis(150));
-            }
-            Err(e) => return Err(e.to_string()),
-        }
-    }
-}
-
-fn query_param(query: &str, key: &str) -> Option<String> {
-    query.split('&').find_map(|pair| {
-        let (k, v) = pair.split_once('=')?;
-        (k == key).then(|| percent_encoding::percent_decode_str(v).decode_utf8_lossy().into_owned())
-    })
-}
-
 #[tauri::command]
 pub async fn spotify_login(app: tauri::AppHandle, client_id: String) -> Result<String, String> {
     let client_id = client_id.trim().to_string();
@@ -197,9 +141,8 @@ pub async fn spotify_login(app: tauri::AppHandle, client_id: String) -> Result<S
     let listener = TcpListener::bind(("127.0.0.1", REDIRECT_PORT))
         .map_err(|_| format!("Порт {REDIRECT_PORT} занят другой программой. Закройте её или повторите позже."))?;
     let redirect = format!("http://127.0.0.1:{REDIRECT_PORT}/callback");
-    let verifier = random_urlsafe(48)?;
-    let challenge = BASE64_URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
-    let state = random_urlsafe(16)?;
+    let (verifier, challenge) = oauth::pkce()?;
+    let state = oauth::random_urlsafe(16)?;
 
     let auth = reqwest::Url::parse_with_params(
         AUTH_URL,
@@ -218,16 +161,16 @@ pub async fn spotify_login(app: tauri::AppHandle, client_id: String) -> Result<S
         .open_url(auth.as_str(), None::<&str>)
         .map_err(|e| e.to_string())?;
 
-    let query = tauri::async_runtime::spawn_blocking(move || wait_for_redirect(listener))
+    let query = tauri::async_runtime::spawn_blocking(move || oauth::wait_for_redirect(listener, "/callback"))
         .await
         .map_err(|e| e.to_string())??;
-    if let Some(err) = query_param(&query, "error") {
+    if let Some(err) = oauth::query_param(&query, "error") {
         return Err(if err == "access_denied" { "Вход отменён".into() } else { format!("Spotify: {err}") });
     }
-    if query_param(&query, "state").as_deref() != Some(state.as_str()) {
+    if oauth::query_param(&query, "state").as_deref() != Some(state.as_str()) {
         return Err("Ответ Spotify не прошёл проверку, попробуйте ещё раз".into());
     }
-    let code = query_param(&query, "code").ok_or("Spotify не вернул код входа")?;
+    let code = oauth::query_param(&query, "code").ok_or("Spotify не вернул код входа")?;
 
     let v = token_request(&[
         ("grant_type", "authorization_code"),

@@ -8,7 +8,7 @@ export function TabBar() {
   const unread = useUnread().data?.total ?? 0;
 
   return (
-    <nav className="flex shrink-0 gap-1 rounded-xl border border-stroke bg-surface p-1">
+    <nav className="@container flex shrink-0 gap-1 rounded-xl border border-stroke bg-surface p-1">
       {TABS.map(({ id, label, icon: Icon }, i) => {
         const active = id === tab;
         return (
@@ -17,7 +17,7 @@ export function TabBar() {
             onClick={() => setTab(id)}
             title={`${label}  (Ctrl+${i + 1})`}
             className={clsx(
-              "relative flex flex-1 flex-col items-center gap-0.5 rounded-lg py-1.5 text-[11px] font-medium outline-none transition-colors",
+              "relative flex min-w-0 flex-auto flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-[11px] font-medium outline-none transition-colors",
               active ? "text-fg" : "text-fg-muted hover:text-fg",
             )}
           >
@@ -36,7 +36,10 @@ export function TabBar() {
                 </span>
               )}
             </span>
-            <span className="relative">{label}</span>
+            {/* Seven labels need a tighter font on the narrowest panel; tabs size to their labels. */}
+            <span className="relative max-w-full truncate @max-[480px]:text-[10px] @max-[480px]:tracking-tight">
+              {label}
+            </span>
           </button>
         );
       })}

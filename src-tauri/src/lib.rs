@@ -2,6 +2,7 @@ mod ai_limits;
 mod alerts;
 mod apps;
 mod calendar;
+mod gcal;
 mod home;
 mod claude_web;
 mod mail;
@@ -9,6 +10,7 @@ mod media;
 mod monitors;
 mod net;
 mod notion;
+mod oauth;
 mod panel;
 mod secrets;
 mod spotify;
@@ -104,6 +106,17 @@ pub fn run() {
             notion::notion_complete,
             notion::notion_restore,
             notion::notion_create,
+            gcal::gcal_login,
+            gcal::gcal_status,
+            gcal::gcal_logout,
+            gcal::gcal_calendars,
+            gcal::gcal_set_visible,
+            gcal::gcal_events,
+            gcal::gcal_create,
+            gcal::gcal_update,
+            gcal::gcal_delete,
+            gcal::gcal_tasks,
+            gcal::gcal_task_done,
             calendar::calendar_list,
             calendar::calendar_add,
             calendar::calendar_remove,

@@ -10,6 +10,7 @@ import { MAX_WIDTH, MIN_WIDTH, WIDTH_PRESETS, usePanelSettings, usePanelWidth, t
 import { usePrefs, type ThemeMode } from "../lib/prefs";
 import { Toggle } from "../components/Toggle";
 import { MailSettings } from "../components/MailSettings";
+import { GcalSettings } from "../components/GcalSettings";
 import { YoutubeSettings } from "../components/YoutubeSettings";
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
@@ -256,7 +257,11 @@ export function SettingsTab() {
       <div className="rounded-2xl border border-stroke bg-surface">
         <NotionSettings />
       </div>
-      <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Календарь</h3>
+      <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Google Календарь</h3>
+      <div className="rounded-2xl border border-stroke bg-surface">
+        <GcalSettings />
+      </div>
+      <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Календари по ссылке (iCal)</h3>
       <div className="rounded-2xl border border-stroke bg-surface">
         <CalendarSettings />
       </div>
