@@ -42,6 +42,7 @@ futures-util = "0.3"
 
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.8.1"
+windows-numerics = "0.3"
 windows = { version = "0.62", features = [
   "Foundation",
   "Data_Xml_Dom",
@@ -53,6 +54,11 @@ windows = { version = "0.62", features = [
   "UI_Notifications",
   "UI_ViewManagement",
   "Win32_Devices_Display",
+  "Win32_Graphics_Direct2D",
+  "Win32_Graphics_Direct2D_Common",
+  "Win32_Graphics_DirectWrite",
+  "Win32_Graphics_Dxgi_Common",
+  "Win32_Graphics_Imaging",
   "Win32_Foundation",
   "Win32_System_Power",
   "Win32_Graphics_Dwm",

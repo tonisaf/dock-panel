@@ -75,11 +75,9 @@ mod native {
     use windows::core::{w, PCWSTR};
     use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
     use windows::Win32::Graphics::Gdi::{
-        CreateCompatibleDC, CreateDIBSection, CreateFontW, DeleteDC, DeleteObject, DrawTextW, GetMonitorInfoW,
-        GetTextExtentPoint32W, MonitorFromWindow, SelectObject, SetBkMode, SetTextColor, AC_SRC_ALPHA, AC_SRC_OVER,
-        ANTIALIASED_QUALITY, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION, CLIP_DEFAULT_PRECIS,
-        DEFAULT_CHARSET, DIB_RGB_COLORS, DT_END_ELLIPSIS, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, HDC, HFONT,
-        HGDIOBJ, MONITORINFO, MONITOR_DEFAULTTONEAREST, OUT_DEFAULT_PRECIS, TRANSPARENT,
+        CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetMonitorInfoW, MonitorFromWindow,
+        SelectObject, AC_SRC_ALPHA, AC_SRC_OVER, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION, DIB_RGB_COLORS,
+        HDC, HGDIOBJ, MONITORINFO, MONITOR_DEFAULTTONEAREST,
     };
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
@@ -526,7 +524,7 @@ mod native {
 
     /// A counter (mail, tasks) is its glyph and number side by side on one plate.
     fn counter_w(count: usize, scale: f64) -> i32 {
-        let number = text_width(&badge_label(count), px(TITLE_PX, scale), 600, w!("Segoe UI"));
+        let number = text::width(&badge_label(count), px(TITLE_PX, scale), 600);
         px(COUNTER_PAD + GLYPH + COUNTER_GAP + COUNTER_PAD, scale) + number
     }
 
@@ -546,8 +544,8 @@ mod native {
         }
         let Some(m) = media else { return l };
 
-        let title = text_width(&m.title, px(TITLE_PX, scale), 600, w!("Segoe UI"));
-        let artist = text_width(&m.artist, px(ARTIST_PX, scale), 400, w!("Segoe UI"));
+        let title = text::width(&m.title, px(TITLE_PX, scale), 600);
+        let artist = text::width(&m.artist, px(ARTIST_PX, scale), 400);
         l.text_w = title.max(artist).clamp(px(TEXT_MIN, scale), px(TEXT_MAX, scale));
 
         // The track and its controls are one group: no gaps inside it.
@@ -827,34 +825,121 @@ mod native {
         }
     }
 
-    struct Font(HFONT);
+    /// Text through DirectWrite, the way Windows 11 draws its own taskbar
+    /// labels: Segoe UI Variable with real semibold, grayscale antialiasing
+    /// (the only kind that works on a transparent layered window). GDI's
+    /// `CreateFont` has no semibold Segoe UI and fakes it with bold.
+    mod text {
+        use std::cell::OnceCell;
 
-    impl Font {
-        fn new(px: i32, weight: i32, face: PCWSTR) -> Self {
-            Font(unsafe {
-                CreateFontW(
-                    -px,
-                    0,
-                    0,
-                    0,
-                    weight,
-                    0,
-                    0,
-                    0,
-                    DEFAULT_CHARSET,
-                    OUT_DEFAULT_PRECIS,
-                    CLIP_DEFAULT_PRECIS,
-                    ANTIALIASED_QUALITY,
-                    0,
-                    face,
-                )
+        use windows::core::{Result, HSTRING};
+        use windows::Win32::Graphics::Direct2D::Common::{
+            D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
+        };
+        use windows::Win32::Graphics::Direct2D::{
+            D2D1CreateFactory, ID2D1Factory, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_FACTORY_TYPE_SINGLE_THREADED,
+            D2D1_RENDER_TARGET_PROPERTIES, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE,
+        };
+        use windows::Win32::Graphics::DirectWrite::{
+            DWriteCreateFactory, IDWriteFactory, IDWriteTextFormat, IDWriteTextLayout, DWRITE_FACTORY_TYPE_SHARED,
+            DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT,
+            DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_METRICS, DWRITE_TRIMMING,
+            DWRITE_TRIMMING_GRANULARITY_CHARACTER, DWRITE_WORD_WRAPPING_NO_WRAP,
+        };
+        use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
+        use windows::Win32::Graphics::Imaging::{
+            CLSID_WICImagingFactory, GUID_WICPixelFormat32bppPBGRA, IWICImagingFactory, WICBitmapCacheOnLoad,
+        };
+        use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+
+        /// Windows 11's UI font; DirectWrite falls back on its own if it's missing.
+        const FAMILY: &str = "Segoe UI Variable Text";
+
+        struct Factories {
+            d2d: ID2D1Factory,
+            dwrite: IDWriteFactory,
+            wic: IWICImagingFactory,
+        }
+
+        thread_local! {
+            static FACTORIES: OnceCell<Option<Factories>> = const { OnceCell::new() };
+        }
+
+        fn with<R>(f: impl FnOnce(&Factories) -> Result<R>) -> Option<R> {
+            FACTORIES.with(|cell| {
+                let factories = cell.get_or_init(|| unsafe {
+                    // Harmless if COM is already initialised on this thread.
+                    let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+                    Some(Factories {
+                        d2d: D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None).ok()?,
+                        dwrite: DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED).ok()?,
+                        wic: CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER).ok()?,
+                    })
+                });
+                factories.as_ref().and_then(|x| f(x).ok())
             })
         }
-    }
 
-    impl Drop for Font {
-        fn drop(&mut self) {
-            let _ = unsafe { DeleteObject(HGDIOBJ(self.0 .0)) };
+        fn layout(f: &Factories, text: &str, px: i32, weight: i32, w: f32, h: f32) -> Result<IDWriteTextLayout> {
+            unsafe {
+                let format: IDWriteTextFormat = f.dwrite.CreateTextFormat(
+                    &HSTRING::from(FAMILY),
+                    None,
+                    DWRITE_FONT_WEIGHT(weight),
+                    DWRITE_FONT_STYLE_NORMAL,
+                    DWRITE_FONT_STRETCH_NORMAL,
+                    px as f32,
+                    &HSTRING::from("ru-ru"),
+                )?;
+                format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
+                format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
+                let ellipsis = f.dwrite.CreateEllipsisTrimmingSign(&format)?;
+                let trimming = DWRITE_TRIMMING { granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER, ..Default::default() };
+                format.SetTrimming(&trimming, &ellipsis)?;
+                let wide: Vec<u16> = text.encode_utf16().collect();
+                f.dwrite.CreateTextLayout(&wide, &format, w, h)
+            }
+        }
+
+        /// Width in pixels of `text` at `px` pixels and CSS-style `weight`.
+        pub fn width(text: &str, px: i32, weight: i32) -> i32 {
+            with(|f| {
+                let l = layout(f, text, px, weight, 100_000.0, px as f32 * 2.0)?;
+                let mut m = DWRITE_TEXT_METRICS::default();
+                unsafe { l.GetMetrics(&mut m)? };
+                Ok(m.widthIncludingTrailingWhitespace.ceil() as i32)
+            })
+            .unwrap_or(0)
+        }
+
+        /// `text` as an alpha mask `w`×`h`, vertically centred, cut with "…" to fit.
+        pub fn mask(text: &str, px: i32, weight: i32, w: i32, h: i32) -> Vec<u8> {
+            let (w, h) = (w.max(1), h.max(1));
+            with(|f| unsafe {
+                let bitmap = f.wic.CreateBitmap(w as u32, h as u32, &GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad)?;
+                let props = D2D1_RENDER_TARGET_PROPERTIES {
+                    pixelFormat: D2D1_PIXEL_FORMAT {
+                        format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                        alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                    },
+                    dpiX: 96.0,
+                    dpiY: 96.0,
+                    ..Default::default()
+                };
+                let target = f.d2d.CreateWicBitmapRenderTarget(&bitmap, &props)?;
+                target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+                let white = D2D1_COLOR_F { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
+                let brush = target.CreateSolidColorBrush(&white, None)?;
+                let l = layout(f, text, px, weight, w as f32, h as f32)?;
+                target.BeginDraw();
+                target.Clear(Some(&D2D1_COLOR_F::default()));
+                target.DrawTextLayout(windows_numerics::Vector2 { X: 0.0, Y: 0.0 }, &l, &brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+                target.EndDraw(None, None)?;
+                let mut px_buf = vec![0u8; (w * h * 4) as usize];
+                bitmap.CopyPixels(std::ptr::null(), (w * 4) as u32, &mut px_buf)?;
+                Ok(px_buf.chunks_exact(4).map(|p| p[3]).collect())
+            })
+            .unwrap_or_else(|| vec![0; (w * h) as usize])
         }
     }
 
@@ -909,35 +994,6 @@ mod native {
         }
     }
 
-    fn text_width(text: &str, px: i32, weight: i32, face: PCWSTR) -> i32 {
-        let wide: Vec<u16> = text.encode_utf16().collect();
-        let font = Font::new(px, weight, face);
-        let Some(s) = Surface::new(1, 1) else { return 0 };
-        let mut size = SIZE::default();
-        unsafe {
-            let old = SelectObject(s.dc, HGDIOBJ(font.0 .0));
-            let _ = GetTextExtentPoint32W(s.dc, &wide, &mut size);
-            SelectObject(s.dc, old);
-        }
-        size.cx
-    }
-
-    /// Grayscale-antialiased text as an alpha mask, cut with "…" to fit `w`.
-    fn text_mask(text: &str, px: i32, weight: i32, face: PCWSTR, w: i32, h: i32) -> Vec<u8> {
-        let mut wide: Vec<u16> = text.encode_utf16().collect();
-        let font = Font::new(px, weight, face);
-        let Some(mut s) = Surface::new(w, h) else { return vec![0; (w * h).max(0) as usize] };
-        unsafe {
-            let old = SelectObject(s.dc, HGDIOBJ(font.0 .0));
-            SetTextColor(s.dc, COLORREF(0x00FF_FFFF));
-            SetBkMode(s.dc, TRANSPARENT);
-            let mut rect = RECT { left: 0, top: 0, right: w, bottom: h };
-            DrawTextW(s.dc, &mut wide, &mut rect, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
-            SelectObject(s.dc, old);
-        }
-        // White on black: any channel is the coverage.
-        s.bytes().chunks_exact(4).map(|p| p[1]).collect()
-    }
 
     fn draw(hwnd: HWND, look: &Look, icon: Option<&Icon>) -> Option<()> {
         present(hwnd, look, &render(look, icon))
@@ -1004,7 +1060,7 @@ mod native {
             glyph(c, (gx, cy));
             let tx = z.x + px(COUNTER_PAD + GLYPH + COUNTER_GAP, s);
             let (tw, line) = (z.x + z.w - px(COUNTER_PAD, s) - tx + 2, px(LINE, s));
-            let mask = text_mask(&badge_label(count), px(TITLE_PX, s), 600, w!("Segoe UI"), tw, line);
+            let mask = text::mask(&badge_label(count), px(TITLE_PX, s), 600, tw, line);
             let top = (cy - line as f64 / 2.0).round() as usize;
             c.mask(&mask, (tx as usize, top, tw as usize, line as usize), fg, INK);
         };
@@ -1046,10 +1102,10 @@ mod native {
             let tx = cx + (cover + px(TEXT_GAP, s)) as usize;
             let line = px(LINE, s);
             let (tw, top) = (l.text_w, (h / 2 - line) as usize + nudge(Hit::Info) as usize);
-            let title = text_mask(&m.title, px(TITLE_PX, s), 600, w!("Segoe UI"), tw, line);
+            let title = text::mask(&m.title, px(TITLE_PX, s), 600, tw, line);
             c.mask(&title, (tx, top, tw as usize, line as usize), fg, INK);
             if !m.artist.is_empty() {
-                let artist = text_mask(&m.artist, px(ARTIST_PX, s), 400, w!("Segoe UI"), tw, line);
+                let artist = text::mask(&m.artist, px(ARTIST_PX, s), 400, tw, line);
                 c.mask(&artist, (tx, top + line as usize, tw as usize, line as usize), fg, INK_DIM);
             }
 
@@ -1185,7 +1241,9 @@ mod native {
         #[ignore]
         fn taskbar_preview() {
             let icon = app_icon();
-            let (scale, pad) = (2.0, 12usize);
+            // PREVIEW_SCALE=1 shows the real size at 100 % display scaling.
+            let scale = std::env::var("PREVIEW_SCALE").ok().and_then(|s| s.parse().ok()).unwrap_or(2.0);
+            let pad = 12usize;
             let light_bg = (238.0, 242.0, 246.0);
             let dark_bg = (28.0, 30.0, 34.0);
             let rows: Vec<(Canvas, (f64, f64, f64))> = [
