@@ -18,6 +18,8 @@ import clsx from "clsx";
 import { EmptyState } from "../components/Card";
 import { usePanelStore } from "../store";
 import { usePanelSettings } from "../lib/panelWidth";
+import { usePrefs } from "../lib/prefs";
+import { motion } from "motion/react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   invalidateMail,
@@ -323,42 +325,95 @@ const WIDE_PANEL = 1050;
 /** Below this much extra room the letter replaces the list instead. */
 const READER_MIN = 360;
 
-const setExtraWidth = (extra: number) => invoke<number>("panel_set_extra_width", { extra });
+/** The list's narrowest and default widths next to an open letter. */
+const LIST_MIN = 280;
+const DIVIDER = 12;
+
+const setExtraWidth = (extra: number, animate = false) =>
+  invoke<number>("panel_set_extra_width", { extra, animate });
+
+type PaneMode = "split" | "full";
 
 /**
- * Where an open letter goes: next to the list (growing the window if the panel
- * is narrow and the screen allows) or, failing that, in place of the list.
- * `null` while the window is still being resized.
+ * The open letter and where it shows: next to the list ("split", growing the
+ * window with an animation when the panel is narrow) or, when the screen has no
+ * room, in place of the list ("full"). Closing shrinks the window back first,
+ * keeping the split layout until it has, so the list doesn't jump.
  */
-function useSplit(reading: boolean, baseWidth: number) {
-  const [split, setSplit] = useState<boolean | null>(null);
-  useEffect(() => {
-    if (!reading) {
-      setSplit(null);
+function useLetterPane(baseWidth: number) {
+  const [letter, setLetter] = useState<Summary | null>(null);
+  const [mode, setMode] = useState<PaneMode | null>(null);
+  const [closing, setClosing] = useState(false);
+  // Refs mirror the state for the async steps; `turn` cancels outdated ones.
+  const state = useRef({ mode: null as PaneMode | null, closing: false, grown: false, turn: 0 });
+  const update = (patch: Partial<typeof state.current>) => {
+    Object.assign(state.current, patch);
+    if ("mode" in patch) setMode(patch.mode ?? null);
+    if ("closing" in patch) setClosing(!!patch.closing);
+  };
+
+  const open = async (next: Summary) => {
+    setLetter(next);
+    const st = state.current;
+    if (st.mode && !st.closing) return; // already open: just another letter
+    const turn = ++st.turn;
+    update({ mode: "split", closing: false });
+    if (baseWidth >= WIDE_PANEL) return;
+    const applied = await setExtraWidth(READER_W, true).catch(() => 0);
+    if (turn !== state.current.turn) return;
+    state.current.grown = applied > 0;
+    if (applied < READER_MIN) {
+      // No room on screen: the letter takes the list's place instead.
+      state.current.grown = false;
       setExtraWidth(0).catch(console.error);
-      return;
+      update({ mode: "full" });
     }
-    if (baseWidth >= WIDE_PANEL) {
-      setSplit(true);
-      return;
+  };
+
+  const close = async () => {
+    const st = state.current;
+    const turn = ++st.turn;
+    if (st.mode === "split" && st.grown) {
+      update({ closing: true });
+      await setExtraWidth(0, true).catch(console.error);
+      if (turn !== state.current.turn) return; // reopened meanwhile
+      state.current.grown = false;
     }
-    let current = true;
-    setExtraWidth(READER_W).then(
-      (applied) => {
-        if (!current) return;
-        const fits = applied >= READER_MIN;
-        if (!fits) setExtraWidth(0).catch(console.error);
-        setSplit(fits);
-      },
-      () => current && setSplit(false),
-    );
-    return () => {
-      current = false;
-    };
-  }, [reading, baseWidth]);
-  // Leaving the tab gives the width back.
+    setLetter(null);
+    update({ mode: null, closing: false });
+  };
+
+  // Leaving the tab gives the width back at once.
   useEffect(() => () => void setExtraWidth(0).catch(console.error), []);
-  return split;
+
+  return { letter, mode, closing, open, close };
+}
+
+/** Drag handle between the list and the letter; moves the split, not the window. */
+function Divider({ width, max, onChange }: { width: number; max: number; onChange: (w: number, done: boolean) => void }) {
+  const drag = useRef<{ x: number; start: number } | null>(null);
+  const clamp = (w: number) => Math.round(Math.min(max, Math.max(LIST_MIN, w)));
+  return (
+    <div
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        drag.current = { x: e.clientX, start: width };
+      }}
+      onPointerMove={(e) => drag.current && onChange(clamp(drag.current.start + e.clientX - drag.current.x), false)}
+      onPointerUp={(e) => {
+        if (!drag.current) return;
+        onChange(clamp(drag.current.start + e.clientX - drag.current.x), true);
+        drag.current = null;
+      }}
+      onDoubleClick={() => onChange(-1, true)}
+      title="Потяните, чтобы изменить ширину письма. Двойной клик — как было"
+      className="group relative shrink-0 cursor-col-resize touch-none"
+      style={{ width: DIVIDER }}
+    >
+      <div className="absolute inset-y-2 left-1/2 w-px -translate-x-1/2 bg-stroke transition-colors group-hover:w-0.5 group-hover:bg-accent/60 group-active:bg-accent" />
+    </div>
+  );
 }
 
 export function MailTab() {
@@ -370,11 +425,15 @@ export function MailTab() {
   const accounts = settings?.accounts ?? [];
   const [account, setAccount] = useState<string | null>(null);
   const [unreadOnly, setUnreadOnly] = useState(false);
-  const [reading, setReading] = useState<Summary | null>(null);
+  const pane = useLetterPane(baseWidth);
+  const reading = pane.letter;
+  const setReading = (m: Summary) => void pane.open(m);
+  const savedListWidth = usePrefs((s) => s.mailListWidth);
+  const setMailListWidth = usePrefs((s) => s.setMailListWidth);
+  const [draftListWidth, setDraftListWidth] = useState<number | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const { messages, errors, isPending, isFetching, isError, error, hasNextPage, fetchNextPage, isFetchingNextPage } =
     useMailList(account, unreadOnly, accounts.length > 0);
-  const split = useSplit(!!reading, baseWidth);
   const [cursor, setCursor] = useState(0);
   // A new filter starts at the top.
   useEffect(() => setCursor(0), [account, unreadOnly]);
@@ -427,17 +486,17 @@ export function MailTab() {
   }
 
   const multi = accounts.length > 1;
-  const close = () => setReading(null);
+  const close = () => void pane.close();
   const reader = reading && (
     <Reader
       key={`${reading.account}/${reading.uid}`}
       summary={reading}
       multiAccount={multi}
-      split={!!split}
+      split={pane.mode === "split"}
       onBack={close}
     />
   );
-  if (reading && split === false) return reader;
+  if (reading && pane.mode === "full") return reader;
 
   const list = (
     <div className="flex flex-col gap-2 pb-2">
@@ -518,17 +577,37 @@ export function MailTab() {
     </div>
   );
 
-  // Not reading, or the window is still growing: just the list.
-  if (!reading || split === null) return list;
+  if (!reading || !pane.mode) return list;
 
-  // The list keeps the panel's own width (a share of it on a wide panel); the letter takes the rest.
-  const listWidth = baseWidth >= WIDE_PANEL ? Math.min(440, Math.round(baseWidth * 0.42)) : baseWidth - 32;
+  // Sizes against the window as it will be once grown, not as it is mid-animation.
+  const content = (baseWidth >= WIDE_PANEL ? baseWidth : baseWidth + READER_W) - 32;
+  const maxList = Math.max(LIST_MIN, content - READER_MIN - DIVIDER);
+  const defaultList = baseWidth >= WIDE_PANEL ? Math.min(440, Math.round(baseWidth * 0.42)) : baseWidth - 32;
+  const listWidth = Math.min(maxList, Math.max(LIST_MIN, draftListWidth ?? savedListWidth ?? defaultList));
+  const resize = (w: number, done: boolean) => {
+    if (w < 0) {
+      // Double click: back to the default split.
+      setDraftListWidth(null);
+      setMailListWidth(defaultList);
+      return;
+    }
+    setDraftListWidth(done ? null : w);
+    if (done) setMailListWidth(w);
+  };
   return (
-    <div className="flex h-full gap-3">
+    <div className="flex h-full">
       <div className="scroll-area -mr-1 shrink-0 pr-1" style={{ width: listWidth }}>
         {list}
       </div>
-      <div className="scroll-area min-w-0 flex-1 pr-1">{reader}</div>
+      <Divider width={listWidth} max={maxList} onChange={resize} />
+      <motion.div
+        className="scroll-area min-w-0 flex-1 pr-1"
+        initial={{ opacity: 0, x: 16 }}
+        animate={pane.closing ? { opacity: 0, x: 16 } : { opacity: 1, x: 0 }}
+        transition={{ duration: 0.2, ease: "easeOut" }}
+      >
+        {reader}
+      </motion.div>
     </div>
   );
 }

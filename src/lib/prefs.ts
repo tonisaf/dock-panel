@@ -36,6 +36,8 @@ interface PrefsState {
   hiddenWidgets: string[];
   /** Hand-arranged widget columns, keyed by column count; none means auto (masonry). */
   widgetColumns: Record<string, string[][]>;
+  /** Width of the mail list while a letter is open next to it; null for the default. */
+  mailListWidth: number | null;
   togglePin: (id: string) => void;
   /** Pins ids that are not pinned yet, keeping their order. */
   pinMany: (ids: string[]) => void;
@@ -46,6 +48,7 @@ interface PrefsState {
   setSystemAccent: (on: boolean) => void;
   /** `columns` saves an arrangement for that many columns; null drops all of them (back to auto). */
   setWidgetLayout: (order: string[], hidden: string[], columns: string[][] | null) => void;
+  setMailListWidth: (width: number) => void;
 }
 
 /** User preferences, persisted to `prefs.json` in the app data dir. */
@@ -65,6 +68,7 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   widgetOrder: [],
   hiddenWidgets: [],
   widgetColumns: {},
+  mailListWidth: null,
   togglePin: (id) => {
     const current = get().pinned;
     const pinned = current.includes(id) ? current.filter((p) => p !== id) : [...current, id];
@@ -101,6 +105,10 @@ export const usePrefs = create<PrefsState>((set, get) => ({
     set({ systemAccent });
     persist("systemAccent", systemAccent);
   },
+  setMailListWidth: (mailListWidth) => {
+    set({ mailListWidth });
+    persist("mailListWidth", mailListWidth);
+  },
   setWidgetLayout: (widgetOrder, hiddenWidgets, columns) => {
     const widgetColumns = columns ? { ...get().widgetColumns, [columns.length]: columns } : {};
     set({ widgetOrder, hiddenWidgets, widgetColumns });
@@ -123,6 +131,7 @@ load("prefs.json", { defaults: {}, autoSave: 300 })
       widgetOrder: (await s.get<string[]>("widgetOrder")) ?? [],
       hiddenWidgets: (await s.get<string[]>("hiddenWidgets")) ?? [],
       widgetColumns: (await s.get<Record<string, string[][]>>("widgetColumns")) ?? {},
+      mailListWidth: (await s.get<number>("mailListWidth")) ?? null,
     });
   })
   .catch((e) => console.error("prefs load failed", e));

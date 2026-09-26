@@ -34,6 +34,10 @@ static WIDTH: AtomicU32 = AtomicU32::new(DEFAULT_WIDTH);
 /// Temporary width on top of `WIDTH` (logical px), e.g. while a letter is open
 /// next to the mail list. Never saved; dropped when the panel hides.
 static EXTRA: AtomicU32 = AtomicU32::new(0);
+/// Bumped by every extra-width change; a running animation stops when it moves on.
+static RESIZE_GENERATION: AtomicU64 = AtomicU64::new(0);
+const RESIZE_ANIMATION: Duration = Duration::from_millis(200);
+const RESIZE_FRAME: Duration = Duration::from_millis(8);
 
 /// The window's current logical width: the user's width plus any extra.
 fn window_width() -> u32 {
@@ -142,8 +146,10 @@ pub fn show(app: &AppHandle) {
 
 /// Widens the window by `extra` logical px for now (0 goes back to the user's
 /// width), as far as the screen allows; returns the extra actually applied.
+/// With `animate` the width eases there over `RESIZE_ANIMATION` and the call
+/// returns once it has; a newer call takes over a running animation.
 #[tauri::command]
-pub fn panel_set_extra_width(app: AppHandle, extra: u32) -> u32 {
+pub async fn panel_set_extra_width(app: AppHandle, extra: u32, animate: Option<bool>) -> u32 {
     let Some(win) = window(&app) else { return 0 };
     let room = win
         .current_monitor()
@@ -155,13 +161,36 @@ pub fn panel_set_extra_width(app: AppHandle, extra: u32) -> u32 {
             screen.saturating_sub(2 * MARGIN as u32 + WIDTH.load(Ordering::SeqCst))
         })
         .unwrap_or(0);
-    let extra = extra.min(room);
-    if EXTRA.swap(extra, Ordering::SeqCst) != extra {
+    let target = extra.min(room);
+    let generation = RESIZE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    let from = EXTRA.load(Ordering::SeqCst);
+    if !animate.unwrap_or(false) || from == target || !VISIBLE.load(Ordering::SeqCst) {
+        EXTRA.store(target, Ordering::SeqCst);
         apply_width(&win);
+        return target;
     }
-    extra
-}
 
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        let start = std::time::Instant::now();
+        loop {
+            if RESIZE_GENERATION.load(Ordering::SeqCst) != generation {
+                return; // a newer resize took over
+            }
+            let t = (start.elapsed().as_secs_f64() / RESIZE_ANIMATION.as_secs_f64()).min(1.0);
+            // Ease-out cubic: quick start, soft landing.
+            let eased = 1.0 - (1.0 - t).powi(3);
+            let now = from as f64 + (target as f64 - from as f64) * eased;
+            EXTRA.store(now.round() as u32, Ordering::SeqCst);
+            apply_width(&win);
+            if t >= 1.0 {
+                return;
+            }
+            std::thread::sleep(RESIZE_FRAME);
+        }
+    })
+    .await;
+    target
+}
 /// Pins the panel open (or unpins it); returns the new state.
 #[tauri::command]
 pub fn panel_set_pinned(on: bool) -> bool {
@@ -222,7 +251,8 @@ pub fn finish_hide(app: &AppHandle) {
     VISIBLE.store(false, Ordering::SeqCst);
     HIDING.store(false, Ordering::SeqCst);
     LAST_HIDE_MS.store(now_ms(), Ordering::SeqCst);
-    // The next show starts at the user's own width.
+    // The next show starts at the user's own width; a running resize stops.
+    RESIZE_GENERATION.fetch_add(1, Ordering::SeqCst);
     EXTRA.store(0, Ordering::SeqCst);
     if let Some(win) = window(app) {
         let _ = win.hide();
