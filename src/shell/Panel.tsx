@@ -20,6 +20,7 @@ import { AiTab } from "../tabs/AiTab";
 import { SettingsTab } from "../tabs/SettingsTab";
 import { MailTab } from "../tabs/MailTab";
 import { invalidateMail } from "../mail/api";
+import { invalidateYoutube } from "../widgets/youtube/api";
 
 const TAB_VIEWS = {
   home: HomeTab,
@@ -54,6 +55,7 @@ export function Panel() {
         invoke("mail_refresh").catch(console.error);
       }),
       listen("mail:changed", () => invalidateMail(queryClient)),
+      listen("youtube:changed", () => invalidateYoutube(queryClient)),
       listen("panel:hide", () => setOpen(false)),
       listen("ai-limits:changed", () => queryClient.invalidateQueries({ queryKey: ["ai-limits"] })),
     ];

@@ -18,6 +18,7 @@ mod tray;
 mod updater;
 mod vpn;
 mod weather;
+mod youtube;
 
 use tauri::Manager;
 use tauri_plugin_autostart::MacosLauncher;
@@ -56,6 +57,7 @@ pub fn run() {
             claude_web::init(handle);
             alerts::init(handle);
             mail::init(handle);
+            youtube::init(handle);
             updater::init(handle);
             apps::start_icon_worker(app.path().app_cache_dir()?.join("icons"));
             let registered = shortcut
@@ -132,6 +134,13 @@ pub fn run() {
             mail::mail_action,
             mail::mail_unread,
             mail::mail_refresh,
+            youtube::youtube_settings,
+            youtube::youtube_add,
+            youtube::youtube_import,
+            youtube::youtube_remove,
+            youtube::youtube_set_options,
+            youtube::youtube_set_watched,
+            youtube::youtube_feed,
             vpn::vpn_status,
             vpn::vpn_toggle,
             vpn::vpn_open,

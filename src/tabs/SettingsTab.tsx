@@ -10,6 +10,7 @@ import { MAX_WIDTH, MIN_WIDTH, WIDTH_PRESETS, usePanelSettings, usePanelWidth, t
 import { usePrefs, type ThemeMode } from "../lib/prefs";
 import { Toggle } from "../components/Toggle";
 import { MailSettings } from "../components/MailSettings";
+import { YoutubeSettings } from "../components/YoutubeSettings";
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
@@ -256,6 +257,10 @@ export function SettingsTab() {
       <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Spotify</h3>
       <div className="rounded-2xl border border-stroke bg-surface">
         <SpotifySettings />
+      </div>
+      <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">YouTube</h3>
+      <div className="rounded-2xl border border-stroke bg-surface">
+        <YoutubeSettings />
       </div>
       <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Погода</h3>
       <div className="rounded-2xl border border-stroke bg-surface">

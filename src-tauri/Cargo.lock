@@ -941,6 +941,7 @@ name = "dock-panel"
 version = "0.2.7"
 dependencies = [
  "base64 0.23.1",
+ "futures-util",
  "getrandom 0.4.3",
  "if-addrs",
  "imap",
@@ -950,6 +951,7 @@ dependencies = [
  "percent-encoding",
  "png 0.17.16",
  "reqwest",
+ "roxmltree",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -3440,6 +3442,15 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "roxmltree"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1964b10c76125c36f8afe190065a4bf9a87bf324842c05701330bba9f1cacbb"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]

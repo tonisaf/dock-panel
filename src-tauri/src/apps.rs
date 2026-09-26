@@ -63,10 +63,14 @@ pub async fn launch_app(id: String) -> Result<(), String> {
 /// Native picker for files (or folders) to pin. Returns `file:` ids; empty if cancelled.
 #[tauri::command]
 pub async fn pick_files(app: AppHandle, folders: bool) -> Result<Vec<String>, String> {
-    let owner = crate::panel::hwnd(&app);
-    let paths = crate::panel::keep_open_while(&app, || on_sta(move || win::pick(owner, folders)))
-        .map_err(|e| e.to_string())?;
+    let paths = pick_paths(&app, folders)?;
     Ok(paths.into_iter().map(|p| format!("{FILE_PREFIX}{p}")).collect())
+}
+
+/// The system open dialog over the panel (which stays open meanwhile); empty if cancelled.
+pub fn pick_paths(app: &AppHandle, folders: bool) -> Result<Vec<String>, String> {
+    let owner = crate::panel::hwnd(app);
+    crate::panel::keep_open_while(app, || on_sta(move || win::pick(owner, folders))).map_err(|e| e.to_string())
 }
 
 /// AppsFolder also lists uninstallers, readmes and web links next to real apps.

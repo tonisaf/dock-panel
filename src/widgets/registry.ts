@@ -9,6 +9,7 @@ import { PlaylistsWidget } from "./spotify/PlaylistsWidget";
 import { VpnWidget } from "./vpn/VpnWidget";
 import { PinnedWidget } from "./pinned/PinnedWidget";
 import { MailWidget } from "./mail/MailWidget";
+import { YoutubeWidget } from "./youtube/YoutubeWidget";
 import { HomeWidget } from "./home/HomeWidget";
 import { MonitorsWidget } from "./monitors/MonitorsWidget";
 
@@ -29,6 +30,7 @@ export const WIDGETS: WidgetDef[] = [
   { id: "media", title: "Сейчас играет", component: MediaWidget },
   { id: "playlists", title: "Плейлисты", component: PlaylistsWidget },
   { id: "mail", title: "Почта", component: MailWidget },
+  { id: "youtube", title: "YouTube", component: YoutubeWidget },
   { id: "tasks", title: "Задачи", component: TasksWidget },
   { id: "ai", title: "Лимиты AI", component: AiLimitsWidget },
   { id: "vpn", title: "VPN", component: VpnWidget },
