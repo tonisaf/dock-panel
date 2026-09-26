@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { LucideIcon } from "lucide-react";
+import { ChevronDown, type LucideIcon } from "lucide-react";
 import clsx from "clsx";
 
 export function Card({
@@ -7,6 +7,9 @@ export function Card({
   icon: Icon,
   className,
   action,
+  summary,
+  collapsed,
+  onToggle,
   children,
 }: {
   title?: string;
@@ -14,8 +17,14 @@ export function Card({
   className?: string;
   /** Small controls at the right end of the header. */
   action?: ReactNode;
+  /** Short text shown in the header while collapsed. */
+  summary?: ReactNode;
+  /** With `onToggle`, the header folds the card to just itself. */
+  collapsed?: boolean;
+  onToggle?: () => void;
   children: ReactNode;
 }) {
+  const collapsible = onToggle != null;
   return (
     <section
       className={clsx(
@@ -24,13 +33,40 @@ export function Card({
       )}
     >
       {title && (
-        <header className="mb-2 flex items-center gap-1.5 text-[12px] font-medium text-fg-muted">
+        <header
+          role={collapsible ? "button" : undefined}
+          aria-expanded={collapsible ? !collapsed : undefined}
+          onClick={onToggle}
+          className={clsx(
+            "flex items-center gap-1.5 text-[12px] font-medium text-fg-muted",
+            // A collapsible header gets a padded hit area without moving its text.
+            !collapsible && "mb-2",
+            collapsible && "-mx-1 -mt-1 cursor-default rounded-lg p-1 hover:text-fg",
+            collapsible && (collapsed ? "-mb-1" : "mb-1"),
+          )}
+        >
           {Icon && <Icon className="size-3.5" strokeWidth={2.2} />}
           {title}
-          {action && <div className="-my-1 ml-auto flex items-center gap-0.5">{action}</div>}
+          {collapsible && collapsed && summary && (
+            <span className="truncate font-normal text-fg-subtle">· {summary}</span>
+          )}
+          {(action || collapsible) && (
+            <div className="-my-1 ml-auto flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+              {action}
+              {collapsible && (
+                <button
+                  onClick={onToggle}
+                  title={collapsed ? "Развернуть" : "Свернуть"}
+                  className="grid size-6 place-items-center rounded-md text-fg-subtle hover:bg-ink/10 hover:text-fg"
+                >
+                  <ChevronDown className={clsx("size-3.5 transition-transform", !collapsed && "rotate-180")} />
+                </button>
+              )}
+            </div>
+          )}
         </header>
       )}
-      {children}
+      {!(collapsible && collapsed) && children}
     </section>
   );
 }

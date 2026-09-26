@@ -155,6 +155,7 @@ pub fn run() {
             home::home_forget,
             monitors::monitors_list,
             monitors::monitor_set,
+            monitors::monitors_blackout,
             mail::mail_settings,
             mail::mail_add,
             mail::mail_remove,

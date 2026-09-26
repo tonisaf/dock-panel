@@ -112,6 +112,145 @@ pub async fn monitor_set(id: String, feature: String, value: u32) -> Result<(), 
     tauri::async_runtime::spawn_blocking(move || win::set(&id, code, value)).await.map_err(|e| e.to_string())?
 }
 
+/// Blacks out every screen and turns every monitor's brightness to its
+/// minimum; a click or any key brings both back. The panel hides first.
+#[tauri::command]
+pub fn monitors_blackout(app: tauri::AppHandle) {
+    crate::panel::request_hide(&app);
+    #[cfg(windows)]
+    blackout::start();
+}
+
+/// Black topmost windows over every screen, with the brightness to restore.
+///
+/// The windows go up first, so the screens go dark at once; DDC/CI then dims
+/// the backlight, which takes a second or two. Mouse movement is ignored so a
+/// nudge doesn't wake them, and input in the first moments is ignored too: the
+/// click that started it must not end it.
+#[cfg(windows)]
+mod blackout {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    use windows::core::w;
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::Graphics::Gdi::{GetStockObject, HBRUSH, BLACK_BRUSH};
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, PostQuitMessage,
+        RegisterClassW, SetCursor, SetForegroundWindow, TranslateMessage, MSG, WM_KEYDOWN, WM_LBUTTONDOWN,
+        WM_MBUTTONDOWN, WM_RBUTTONDOWN, WM_SETCURSOR, WM_SYSKEYDOWN, WNDCLASSW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+        WS_POPUP, WS_VISIBLE,
+    };
+
+    use super::{win, BRIGHTNESS};
+
+    /// Input this soon after the start is the click that started it.
+    const GRACE: Duration = Duration::from_millis(700);
+
+    static ACTIVE: AtomicBool = AtomicBool::new(false);
+    static STARTED_AT: Mutex<Option<Instant>> = Mutex::new(None);
+
+    pub fn start() {
+        if ACTIVE.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        std::thread::spawn(|| {
+            // Let the panel's hide animation finish before the screens go black.
+            std::thread::sleep(Duration::from_millis(250));
+            let windows = cover();
+            *STARTED_AT.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+
+            // Remember each monitor's brightness, then dim it, off this thread's message loop.
+            let dimmer = std::thread::spawn(|| {
+                let saved: Vec<(String, u32)> = win::list()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|m| Some((m.id, m.brightness?.value)))
+                    .collect();
+                for (id, _) in &saved {
+                    let _ = win::set(id, BRIGHTNESS, 0);
+                }
+                saved
+            });
+
+            let mut msg = MSG::default();
+            while unsafe { GetMessageW(&mut msg, None, 0, 0) }.as_bool() {
+                unsafe {
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            }
+            for hwnd in windows {
+                let _ = unsafe { DestroyWindow(hwnd) };
+            }
+            // Waits for the dimming if the user woke the screens before it finished.
+            for (id, value) in dimmer.join().unwrap_or_default() {
+                let _ = win::set(&id, BRIGHTNESS, value);
+            }
+            ACTIVE.store(false, Ordering::SeqCst);
+        });
+    }
+
+    /// One black window per screen, on this thread.
+    fn cover() -> Vec<HWND> {
+        let Ok(module) = (unsafe { GetModuleHandleW(None) }) else { return Vec::new() };
+        let class = WNDCLASSW {
+            lpfnWndProc: Some(wndproc),
+            hInstance: module.into(),
+            lpszClassName: w!("DockPanelBlackout"),
+            hbrBackground: HBRUSH(unsafe { GetStockObject(BLACK_BRUSH) }.0),
+            ..Default::default()
+        };
+        // Fails harmlessly when already registered by an earlier blackout.
+        unsafe { RegisterClassW(&class) };
+        let windows: Vec<HWND> = win::screen_rects()
+            .into_iter()
+            .filter_map(|r| unsafe {
+                CreateWindowExW(
+                    WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+                    w!("DockPanelBlackout"),
+                    w!("Dock Panel"),
+                    WS_POPUP | WS_VISIBLE,
+                    r.left,
+                    r.top,
+                    r.right - r.left,
+                    r.bottom - r.top,
+                    None,
+                    None,
+                    Some(module.into()),
+                    None,
+                )
+                .ok()
+            })
+            .collect();
+        // Keyboard input needs one of them in the foreground.
+        if let Some(&first) = windows.first() {
+            let _ = unsafe { SetForegroundWindow(first) };
+        }
+        windows
+    }
+
+    unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        match msg {
+            WM_SETCURSOR => {
+                unsafe { SetCursor(None) };
+                return LRESULT(1);
+            }
+            WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_KEYDOWN | WM_SYSKEYDOWN => {
+                let started = *STARTED_AT.lock().unwrap_or_else(|e| e.into_inner());
+                if started.is_some_and(|t| t.elapsed() >= GRACE) {
+                    unsafe { PostQuitMessage(0) };
+                }
+                return LRESULT(0);
+            }
+            _ => {}
+        }
+        unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+    }
+}
+
 #[cfg(windows)]
 mod win {
     use std::collections::HashMap;
@@ -183,8 +322,8 @@ mod win {
     struct Screen {
         handle: HMONITOR,
         device: String,
-        left: i32,
-        top: i32,
+        /// Desktop coordinates of the whole screen.
+        rect: RECT,
         primary: bool,
     }
 
@@ -207,14 +346,18 @@ mod win {
                 Some(Screen {
                     handle,
                     device: wide(&info.szDevice),
-                    left: info.monitorInfo.rcMonitor.left,
-                    top: info.monitorInfo.rcMonitor.top,
+                    rect: info.monitorInfo.rcMonitor,
                     primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
                 })
             })
             .collect();
-        out.sort_by_key(|s| (s.left, s.top));
+        out.sort_by_key(|s| (s.rect.left, s.rect.top));
         out
+    }
+
+    /// Desktop rectangles of every screen, for covering them all.
+    pub fn screen_rects() -> Vec<RECT> {
+        screens().into_iter().map(|s| s.rect).collect()
     }
 
     /// A monitor handle to read from a worker thread; the bus lock keeps it exclusive.

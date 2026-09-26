@@ -38,6 +38,8 @@ interface PrefsState {
   widgetColumns: Record<string, string[][]>;
   /** Width of the mail list while a letter is open next to it; null for the default. */
   mailListWidth: number | null;
+  /** Collapsed state of collapsible widgets, by id; a widget picks its own default. */
+  collapsedWidgets: Record<string, boolean>;
   togglePin: (id: string) => void;
   /** Pins ids that are not pinned yet, keeping their order. */
   pinMany: (ids: string[]) => void;
@@ -49,6 +51,7 @@ interface PrefsState {
   /** `columns` saves an arrangement for that many columns; null drops all of them (back to auto). */
   setWidgetLayout: (order: string[], hidden: string[], columns: string[][] | null) => void;
   setMailListWidth: (width: number) => void;
+  setWidgetCollapsed: (id: string, collapsed: boolean) => void;
 }
 
 /** User preferences, persisted to `prefs.json` in the app data dir. */
@@ -69,6 +72,7 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   hiddenWidgets: [],
   widgetColumns: {},
   mailListWidth: null,
+  collapsedWidgets: {},
   togglePin: (id) => {
     const current = get().pinned;
     const pinned = current.includes(id) ? current.filter((p) => p !== id) : [...current, id];
@@ -109,6 +113,11 @@ export const usePrefs = create<PrefsState>((set, get) => ({
     set({ mailListWidth });
     persist("mailListWidth", mailListWidth);
   },
+  setWidgetCollapsed: (id, collapsed) => {
+    const collapsedWidgets = { ...get().collapsedWidgets, [id]: collapsed };
+    set({ collapsedWidgets });
+    persist("collapsedWidgets", collapsedWidgets);
+  },
   setWidgetLayout: (widgetOrder, hiddenWidgets, columns) => {
     const widgetColumns = columns ? { ...get().widgetColumns, [columns.length]: columns } : {};
     set({ widgetOrder, hiddenWidgets, widgetColumns });
@@ -132,6 +141,7 @@ load("prefs.json", { defaults: {}, autoSave: 300 })
       hiddenWidgets: (await s.get<string[]>("hiddenWidgets")) ?? [],
       widgetColumns: (await s.get<Record<string, string[][]>>("widgetColumns")) ?? {},
       mailListWidth: (await s.get<number>("mailListWidth")) ?? null,
+      collapsedWidgets: (await s.get<Record<string, boolean>>("collapsedWidgets")) ?? {},
     });
   })
   .catch((e) => console.error("prefs load failed", e));

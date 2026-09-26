@@ -1,7 +1,19 @@
 import { useState } from "react";
-import { ChevronDown, Contrast, Loader2, Monitor as MonitorIcon, MonitorCog, Power, Sun, Volume2 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  ChevronDown,
+  Contrast,
+  Loader2,
+  Monitor as MonitorIcon,
+  MonitorCog,
+  MoonStar,
+  Power,
+  Sun,
+  Volume2,
+} from "lucide-react";
 import clsx from "clsx";
 import { Card } from "../../components/Card";
+import { usePrefs } from "../../lib/prefs";
 import { Slider } from "../../components/Slider";
 import { inputName, percent, useMonitors, useSetMonitor, type Feature, type Level, type Monitor } from "./api";
 
@@ -141,8 +153,34 @@ function AllBrightness({ monitors }: { monitors: Monitor[] }) {
 
 export function MonitorsWidget() {
   const { data, isPending, isError, error } = useMonitors();
+  // Folded by default: it's reached for rarely and takes a lot of room.
+  const collapsed = usePrefs((s) => s.collapsedWidgets.monitors ?? true);
+  const setCollapsed = usePrefs((s) => s.setWidgetCollapsed);
+  const levels = data?.flatMap((m) => (m.brightness ? [percent(m.brightness)] : [])) ?? [];
+  const summary = levels.length
+    ? `${levels.length} · ${Math.round(levels.reduce((a, b) => a + b, 0) / levels.length)}%`
+    : undefined;
+
+  const blackout = (
+    <button
+      onClick={() => invoke("monitors_blackout").catch(console.error)}
+      title="Затемнить все мониторы: чёрный экран и минимальная яркость. Клик или любая клавиша — вернуть"
+      className="grid size-6 place-items-center rounded-md text-fg-subtle hover:bg-ink/10 hover:text-fg"
+    >
+      <MoonStar className="size-3.5" />
+    </button>
+  );
+
   return (
-    <Card title="Мониторы" icon={MonitorCog} className="hover:bg-surface">
+    <Card
+      title="Мониторы"
+      icon={MonitorCog}
+      className="hover:bg-surface"
+      action={blackout}
+      summary={summary}
+      collapsed={collapsed}
+      onToggle={() => setCollapsed("monitors", !collapsed)}
+    >
       {isPending ? (
         <p className="flex items-center gap-2 text-[12px] text-fg-subtle">
           <Loader2 className="size-3.5 animate-spin" /> Спрашиваю мониторы…
