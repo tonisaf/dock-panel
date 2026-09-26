@@ -12,6 +12,7 @@ import {
   localInput,
   timesBody,
   useGcalActions,
+  useTaskLists,
   ymd,
   type Calendar,
   type GEvent,
@@ -76,7 +77,7 @@ export function EventCard({
   calendars: Calendar[];
   onClose: () => void;
 }) {
-  const { create, update, remove } = useGcalActions();
+  const { create, createTask, update, remove } = useGcalActions();
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: target.x, top: target.y });
   const isNew = target.kind === "new";
@@ -85,6 +86,11 @@ export function EventCard({
   const writable = calendars.filter((c) => c.writable);
 
   const [editing, setEditing] = useState(isNew);
+  // A new item can be an event or a Google Tasks task, as in Google Calendar.
+  const [kind, setKind] = useState<"event" | "task">("event");
+  const { data: taskLists = [] } = useTaskLists(isNew && kind === "task");
+  const [listId, setListId] = useState("");
+  const taskList = listId || taskLists[0]?.id || "";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState(event?.title === "(Без названия)" ? "" : (event?.title ?? ""));
@@ -147,6 +153,13 @@ export function EventCard({
       return;
     }
     const name = title.trim() || "(Без названия)";
+    if (isNew && kind === "task") {
+      if (!title.trim()) {
+        setError("Введите название задачи");
+        return;
+      }
+      return run(() => createTask({ listId: taskList, title: title.trim(), notes: description, due: start.slice(0, 10) }));
+    }
     if (isNew) {
       return run(() => create({ calendarId, title: name, start: s, end: e, allDay, location, description }));
     }
@@ -204,6 +217,25 @@ export function EventCard({
 
       {editing ? (
         <div className="flex flex-col gap-2 px-1 pb-1">
+          {isNew && (
+            <div className="flex self-start rounded-full border border-stroke p-0.5">
+              {(["event", "task"] as const).map((k) => (
+                <button
+                  key={k}
+                  onClick={() => {
+                    setKind(k);
+                    setError(null);
+                  }}
+                  className={clsx(
+                    "rounded-full px-3 py-1 text-[12.5px] outline-none transition-colors",
+                    kind === k ? "bg-accent/20 font-medium text-fg" : "text-fg-muted hover:text-fg",
+                  )}
+                >
+                  {k === "event" ? "Мероприятие" : "Задача"}
+                </button>
+              ))}
+            </div>
+          )}
           <input
             autoFocus
             value={title}
@@ -212,35 +244,57 @@ export function EventCard({
             placeholder="Название"
             className={clsx(field, "text-[15px] font-medium")}
           />
-          <label className="flex items-center gap-2 text-[12.5px] text-fg-muted">
-            <input type="checkbox" checked={allDay} onChange={(e) => setAllDay(e.target.checked)} className="accent-accent" />
-            Весь день
-          </label>
-          <div className="flex items-center gap-2">
-            <input
-              type={allDay ? "date" : "datetime-local"}
-              value={allDay ? start.slice(0, 10) : start}
-              onChange={(e) => setStart(allDay ? `${e.target.value}T00:00` : e.target.value)}
-              className={field}
-            />
-            <span className="text-fg-subtle">–</span>
-            <input
-              type={allDay ? "date" : "datetime-local"}
-              value={allDay ? end.slice(0, 10) : end}
-              onChange={(e) => setEnd(allDay ? `${e.target.value}T00:00` : e.target.value)}
-              className={field}
-            />
-          </div>
-          {isNew && writable.length > 1 && (
-            <select value={calendarId} onChange={(e) => setCalendarId(e.target.value)} className={field}>
-              {writable.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+          {kind === "task" ? (
+            <>
+              <input
+                type="date"
+                value={start.slice(0, 10)}
+                onChange={(e) => e.target.value && setStart(`${e.target.value}T${start.slice(11) || "00:00"}`)}
+                className={field}
+              />
+              {taskLists.length > 1 && (
+                <select value={taskList} onChange={(e) => setListId(e.target.value)} className={field}>
+                  {taskLists.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.title}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </>
+          ) : (
+            <>
+              <label className="flex items-center gap-2 text-[12.5px] text-fg-muted">
+                <input type="checkbox" checked={allDay} onChange={(e) => setAllDay(e.target.checked)} className="accent-accent" />
+                Весь день
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type={allDay ? "date" : "datetime-local"}
+                  value={allDay ? start.slice(0, 10) : start}
+                  onChange={(e) => setStart(allDay ? `${e.target.value}T00:00` : e.target.value)}
+                  className={field}
+                />
+                <span className="text-fg-subtle">–</span>
+                <input
+                  type={allDay ? "date" : "datetime-local"}
+                  value={allDay ? end.slice(0, 10) : end}
+                  onChange={(e) => setEnd(allDay ? `${e.target.value}T00:00` : e.target.value)}
+                  className={field}
+                />
+              </div>
+              {isNew && writable.length > 1 && (
+                <select value={calendarId} onChange={(e) => setCalendarId(e.target.value)} className={field}>
+                  {writable.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Место" className={field} />
+            </>
           )}
-          <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Место" className={field} />
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -261,7 +315,7 @@ export function EventCard({
               </button>
             )}
             <button
-              disabled={busy || (isNew && !calendarId)}
+              disabled={busy || (isNew && (kind === "task" ? !taskList : !calendarId))}
               onClick={save}
               className="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-1.5 text-[12.5px] font-medium text-on-accent hover:bg-accent/90 disabled:opacity-50"
             >

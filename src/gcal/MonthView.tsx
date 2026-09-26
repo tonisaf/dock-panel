@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import clsx from "clsx";
-import { addDays, bounds, hhmm, onColor, sameDay, type GEvent } from "./api";
+import { addDays, bounds, hhmm, onColor, sameDay, type GEvent, type GTask } from "./api";
 import type { CardTarget } from "./EventCard";
+import { TasksChip, tasksForDays } from "./Tasks";
 
 const WEEKDAYS = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"];
 const SHOWN = 3;
@@ -11,12 +12,14 @@ export function MonthView({
   days,
   month,
   events,
+  tasks,
   onOpen,
   onPickDay,
 }: {
   days: Date[];
   month: number;
   events: GEvent[];
+  tasks: GTask[];
   onOpen: (target: CardTarget) => void;
   onPickDay: (day: Date) => void;
 }) {
@@ -35,6 +38,7 @@ export function MonthView({
       }),
     [days, events],
   );
+  const tasksByDay = useMemo(() => tasksForDays(days, tasks, new Date()), [days, tasks]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -68,6 +72,7 @@ export function MonthView({
               >
                 {d.getDate()}
               </button>
+              <TasksChip tasks={tasksByDay[i]} />
               {list.slice(0, SHOWN).map((ev) => (
                 <button
                   key={`${ev.calendarId}/${ev.id}`}

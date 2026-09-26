@@ -481,16 +481,67 @@ pub struct Task {
     notes: Option<String>,
 }
 
-/// Unfinished tasks of every list.
-#[tauri::command]
-pub async fn gcal_tasks() -> Result<Vec<Task>, String> {
+/// The account's task lists as (id, title), in Google's order (the default list first).
+async fn task_lists() -> Result<Vec<(String, String)>, String> {
     let lists = api(Method::GET, &format!("{TASKS_API}/users/@me/lists?maxResults=100"), None).await?;
-    let lists: Vec<(String, String)> = lists["items"]
+    Ok(lists["items"]
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(|l| Some((l["id"].as_str()?.to_string(), l["title"].as_str().unwrap_or_default().to_string())))
-        .collect();
+        .collect())
+}
+
+fn task_from(t: &Value, list_id: &str, list: &str) -> Option<Task> {
+    let (id, title) = (t["id"].as_str()?, t["title"].as_str()?);
+    if title.trim().is_empty() {
+        return None;
+    }
+    Some(Task {
+        list_id: list_id.to_string(),
+        list: list.to_string(),
+        id: id.to_string(),
+        title: title.to_string(),
+        due: t["due"].as_str().map(|d| d.chars().take(10).collect()),
+        notes: t["notes"].as_str().map(str::to_string),
+    })
+}
+
+#[derive(Serialize)]
+pub struct TaskList {
+    id: String,
+    title: String,
+}
+
+#[tauri::command]
+pub async fn gcal_task_lists() -> Result<Vec<TaskList>, String> {
+    Ok(task_lists().await?.into_iter().map(|(id, title)| TaskList { id, title }).collect())
+}
+
+/// Adds a task; `due` is YYYY-MM-DD (Google Tasks keeps no time of day).
+#[tauri::command]
+pub async fn gcal_task_create(
+    list_id: String,
+    title: String,
+    notes: Option<String>,
+    due: Option<String>,
+) -> Result<Task, String> {
+    let list = task_lists().await?.into_iter().find(|(id, _)| *id == list_id).map(|(_, t)| t).unwrap_or_default();
+    let mut body = json!({ "title": title.trim() });
+    if let Some(n) = notes.filter(|n| !n.trim().is_empty()) {
+        body["notes"] = json!(n);
+    }
+    if let Some(d) = due.filter(|d| d.len() == 10) {
+        body["due"] = json!(format!("{d}T00:00:00.000Z"));
+    }
+    let v = api(Method::POST, &format!("{TASKS_API}/lists/{}/tasks", enc(&list_id)), Some(body)).await?;
+    task_from(&v, &list_id, &list).ok_or_else(|| "Google вернул непонятную задачу".into())
+}
+
+/// Unfinished tasks of every list.
+#[tauri::command]
+pub async fn gcal_tasks() -> Result<Vec<Task>, String> {
+    let lists = task_lists().await?;
     let urls: Vec<String> = lists
         .iter()
         .map(|(id, _)| format!("{TASKS_API}/lists/{}/tasks?showCompleted=false&showHidden=false&maxResults=100", enc(id)))
@@ -498,20 +549,7 @@ pub async fn gcal_tasks() -> Result<Vec<Task>, String> {
     let results = futures_util::future::join_all(urls.iter().map(|u| api(Method::GET, u, None))).await;
     let mut tasks = Vec::new();
     for ((list_id, list), r) in lists.iter().zip(results) {
-        for t in r?["items"].as_array().into_iter().flatten() {
-            let (Some(id), Some(title)) = (t["id"].as_str(), t["title"].as_str()) else { continue };
-            if title.trim().is_empty() {
-                continue;
-            }
-            tasks.push(Task {
-                list_id: list_id.clone(),
-                list: list.clone(),
-                id: id.to_string(),
-                title: title.to_string(),
-                due: t["due"].as_str().map(|d| d.chars().take(10).collect()),
-                notes: t["notes"].as_str().map(str::to_string),
-            });
-        }
+        tasks.extend(r?["items"].as_array().into_iter().flatten().filter_map(|t| task_from(t, list_id, list)));
     }
     tasks.sort_by(|a, b| a.due.cmp(&b.due));
     Ok(tasks)

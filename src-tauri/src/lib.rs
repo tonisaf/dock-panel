@@ -118,6 +118,8 @@ pub fn run() {
             gcal::gcal_delete,
             gcal::gcal_tasks,
             gcal::gcal_task_done,
+            gcal::gcal_task_lists,
+            gcal::gcal_task_create,
             calendar::calendar_list,
             calendar::calendar_add,
             calendar::calendar_remove,

@@ -204,7 +204,14 @@ export function CalendarTab() {
             <Loader2 className="size-4 animate-spin" /> Загружаю события…
           </p>
         ) : view === "month" ? (
-          <MonthView days={range.days} month={monthOf} events={events} onOpen={setCard} onPickDay={pickDay} />
+          <MonthView
+            days={range.days}
+            month={monthOf}
+            events={events}
+            tasks={tasks}
+            onOpen={setCard}
+            onPickDay={pickDay}
+          />
         ) : view === "schedule" ? (
           <ScheduleView days={range.days} events={events} onOpen={setCard} onPickDay={pickDay} />
         ) : (

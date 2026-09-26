@@ -46,6 +46,11 @@ export interface GTask {
   notes: string | null;
 }
 
+export interface TaskList {
+  id: string;
+  title: string;
+}
+
 export type View = "day" | "week" | "month" | "schedule";
 
 // ---- dates -----------------------------------------------------------------------
@@ -175,6 +180,24 @@ export function useTasks(enabled: boolean) {
   return useQuery({ queryKey: TASKS, queryFn: () => invoke<GTask[]>("gcal_tasks"), enabled, staleTime: 60_000 });
 }
 
+/** Only needed while a task is being created. */
+export function useTaskLists(enabled: boolean) {
+  return useQuery({
+    queryKey: ["gcal-task-lists"],
+    queryFn: () => invoke<TaskList[]>("gcal_task_lists"),
+    enabled,
+    staleTime: 10 * 60_000,
+  });
+}
+
+export interface NewTask {
+  listId: string;
+  title: string;
+  notes: string;
+  /** YYYY-MM-DD. */
+  due: string | null;
+}
+
 export interface NewEvent {
   calendarId: string;
   title: string;
@@ -249,6 +272,18 @@ export function useGcalActions() {
         undo();
         throw err;
       }
+    },
+
+    createTask: async (t: NewTask) => {
+      const created = await invoke<GTask>("gcal_task_create", {
+        listId: t.listId,
+        title: t.title,
+        notes: t.notes || null,
+        due: t.due,
+      });
+      queryClient.setQueryData<GTask[]>(TASKS, (l) => l && [...l, created]);
+      queryClient.invalidateQueries({ queryKey: TASKS });
+      return created;
     },
 
     completeTask: async (t: GTask) => {
