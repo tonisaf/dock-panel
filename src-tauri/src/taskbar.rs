@@ -78,7 +78,7 @@ mod native {
         CreateCompatibleDC, CreateDIBSection, CreateFontW, DeleteDC, DeleteObject, DrawTextW, GetMonitorInfoW,
         GetTextExtentPoint32W, MonitorFromWindow, SelectObject, SetBkMode, SetTextColor, AC_SRC_ALPHA, AC_SRC_OVER,
         ANTIALIASED_QUALITY, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION, CLIP_DEFAULT_PRECIS,
-        DEFAULT_CHARSET, DIB_RGB_COLORS, DT_CENTER, DT_END_ELLIPSIS, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, HDC, HFONT,
+        DEFAULT_CHARSET, DIB_RGB_COLORS, DT_END_ELLIPSIS, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, HDC, HFONT,
         HGDIOBJ, MONITORINFO, MONITOR_DEFAULTTONEAREST, OUT_DEFAULT_PRECIS, TRANSPARENT,
     };
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -106,30 +106,34 @@ mod native {
     /// Album art is decoded at this size and filtered down to the DPI's size.
     const COVER_PX: u32 = 96;
 
-    // Layout, in DIPs, matching the Windows 11 taskbar buttons.
+    // Layout, in DIPs, on the Windows 11 taskbar's grid: every part is a
+    // 40-DIP-tall plate, parts sit GAP apart, glyphs share one size and stroke.
     const LEFT_GAP: f64 = 6.0;
-    const BUTTON_W: f64 = 44.0;
+    const BUTTON_W: f64 = 40.0;
     const PLATE_H: f64 = 40.0;
     const RADIUS: f64 = 4.0;
+    const GAP: f64 = 4.0;
     const ICON: f64 = 24.0;
-    const PLAYER_GAP: f64 = 2.0;
+    /// Outline glyphs (mail, tasks): box size and stroke.
+    const GLYPH: f64 = 18.0;
+    const STROKE: f64 = 1.5;
+    /// Counters: padding inside the plate, and glyph-to-number spacing.
+    const COUNTER_PAD: f64 = 9.0;
+    const COUNTER_GAP: f64 = 6.0;
     const INFO_PAD: f64 = 6.0;
     const COVER: f64 = 30.0;
-    const COVER_RADIUS: f64 = 3.0;
+    const COVER_RADIUS: f64 = 4.0;
     const TEXT_GAP: f64 = 8.0;
     const TEXT_MIN: f64 = 60.0;
     const TEXT_MAX: f64 = 190.0;
-    const CONTROL_W: f64 = 34.0;
+    const CONTROL_W: f64 = 36.0;
+    /// Title, counters and artist.
     const TITLE_PX: f64 = 12.0;
     const ARTIST_PX: f64 = 11.0;
-    const MAIL_W: f64 = 40.0;
-    /// Envelope centre from the zone's left edge; the badge starts just right of it.
-    const ENVELOPE_CX: f64 = 17.0;
-    const BADGE_OFFSET: f64 = 5.0;
-    const BADGE_H: f64 = 14.0;
-    const BADGE_PX: f64 = 10.0;
-    /// Windows' default accent, when the registry has none.
-    const ACCENT_FALLBACK: (u8, u8, u8) = (0x00, 0x78, 0xD4);
+    const LINE: f64 = 16.0;
+    /// Opacity of glyphs and primary text; secondary text is dimmer.
+    const INK: f64 = 0.9;
+    const INK_DIM: f64 = 0.62;
 
     #[derive(Clone, Copy)]
     enum Glyph {
@@ -233,8 +237,6 @@ mod native {
         unread: usize,
         /// Google tasks due today or overdue; that counter shows while above zero.
         due: usize,
-        /// Badge colour, from the Windows accent.
-        accent: (u8, u8, u8),
         layout: Layout,
     }
 
@@ -513,46 +515,34 @@ mod native {
         Some((x, top, bottom - top, scale))
     }
 
-    /// The Windows accent colour (DWM stores it as 0xAABBGGRR).
-    fn accent_colour() -> (u8, u8, u8) {
-        reg_dword(w!("Software\\Microsoft\\Windows\\DWM"), w!("AccentColor"))
-            .map(|v| ((v & 0xFF) as u8, ((v >> 8) & 0xFF) as u8, ((v >> 16) & 0xFF) as u8))
-            .unwrap_or(ACCENT_FALLBACK)
-    }
-
     fn px(dip: f64, scale: f64) -> i32 {
         (dip * scale).round() as i32
     }
 
     /// "7", "42", "99+".
-    fn badge_label(unread: usize) -> String {
-        if unread > 99 { "99+".into() } else { unread.to_string() }
+    fn badge_label(count: usize) -> String {
+        if count > 99 { "99+".into() } else { count.to_string() }
     }
 
-    /// Badge width in pixels for its label: a circle for one digit, a pill beyond.
-    fn badge_w(label: &str, scale: f64) -> i32 {
-        let text = text_width(label, px(BADGE_PX, scale), 700, w!("Segoe UI"));
-        (text + px(8.0, scale)).max(px(BADGE_H, scale))
-    }
-
-    /// Width of an icon-with-badge zone (mail, tasks) for `count`.
+    /// A counter (mail, tasks) is its glyph and number side by side on one plate.
     fn counter_w(count: usize, scale: f64) -> i32 {
-        let needed = px(ENVELOPE_CX + BADGE_OFFSET + 4.0, scale) + badge_w(&badge_label(count), scale);
-        needed.max(px(MAIL_W, scale))
+        let number = text_width(&badge_label(count), px(TITLE_PX, scale), 600, w!("Segoe UI"));
+        px(COUNTER_PAD + GLYPH + COUNTER_GAP + COUNTER_PAD, scale) + number
     }
 
     fn layout(scale: f64, media: Option<&Media>, unread: usize, due: usize) -> Layout {
         let mut l = Layout { panel: Zone { x: 0, w: px(BUTTON_W, scale) }, ..Default::default() };
-        let mut x = l.panel.w;
+        let gap = px(GAP, scale);
+        let mut x = l.panel.w + gap;
         if unread > 0 {
             let w = counter_w(unread, scale);
             l.mail = Some(Zone { x, w });
-            x += w;
+            x += w + gap;
         }
         if due > 0 {
             let w = counter_w(due, scale);
             l.tasks = Some(Zone { x, w });
-            x += w;
+            x += w + gap;
         }
         let Some(m) = media else { return l };
 
@@ -560,7 +550,7 @@ mod native {
         let artist = text_width(&m.artist, px(ARTIST_PX, scale), 400, w!("Segoe UI"));
         l.text_w = title.max(artist).clamp(px(TEXT_MIN, scale), px(TEXT_MAX, scale));
 
-        x += px(PLAYER_GAP, scale);
+        // The track and its controls are one group: no gaps inside it.
         let info_w = px(INFO_PAD + COVER + TEXT_GAP + INFO_PAD, scale) + l.text_w;
         l.info = Some(Zone { x, w: info_w });
         x += info_w;
@@ -608,8 +598,7 @@ mod native {
                 _ => layout(scale, media.as_ref(), unread, due),
             };
             s.layout = layout.clone();
-            let accent = accent_colour();
-            let look = Look { x, y, h, scale, light, hover: s.hover, pressed: s.pressed, media, unread, due, accent, layout };
+            let look = Look { x, y, h, scale, light, hover: s.hover, pressed: s.pressed, media, unread, due, layout };
             if s.drawn.as_ref() != Some(&look) && draw(hwnd, &look, s.icon.as_ref()).is_some() {
                 s.drawn = Some(look);
             }
@@ -701,15 +690,20 @@ mod native {
             }
         }
 
-        /// A rounded rectangle in colour, fully opaque.
-        fn round_rect_rgb(&mut self, rect: (f64, f64, f64, f64), r: f64, (red, green, blue): (u8, u8, u8)) {
+        /// The outline of a rounded rectangle, the stroke inside its edge.
+        fn round_rect_outline(&mut self, rect: (f64, f64, f64, f64), r: f64, stroke: f64, tone: f64, alpha: f64) {
+            let (cx, cy) = (rect.0 + rect.2 / 2.0, rect.1 + rect.3 / 2.0);
             let (x0, y0) = (rect.0.floor().max(0.0) as usize, rect.1.floor().max(0.0) as usize);
             let (x1, y1) = ((rect.0 + rect.2).ceil() as usize, (rect.1 + rect.3).ceil() as usize);
             for y in y0..y1.min(self.h) {
                 for x in x0..x1.min(self.w) {
-                    let c = Self::round_cover(x as f64 + 0.5, y as f64 + 0.5, rect, r);
-                    if c > 0.0 {
-                        self.blend(x, y, (blue as f64 * c, green as f64 * c, red as f64 * c, 255.0 * c));
+                    // Signed distance to the rectangle's edge, negative inside.
+                    let qx = (x as f64 + 0.5 - cx).abs() - (rect.2 / 2.0 - r);
+                    let qy = (y as f64 + 0.5 - cy).abs() - (rect.3 / 2.0 - r);
+                    let d = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + qx.max(qy).min(0.0) - r;
+                    let cover = (stroke / 2.0 + 0.5 - (d + stroke / 2.0).abs()).clamp(0.0, 1.0) * alpha;
+                    if cover > 0.0 {
+                        self.blend(x, y, (tone * cover, tone * cover, tone * cover, 255.0 * cover));
                     }
                 }
             }
@@ -731,14 +725,28 @@ mod native {
             }
         }
 
-        /// A straight stroke of width `w` from `a` to `b`, as two triangles.
-        fn line(&mut self, a: (f64, f64), b: (f64, f64), w: f64, tone: f64, alpha: f64) {
-            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-            let len = (dx * dx + dy * dy).sqrt().max(f64::EPSILON);
-            let (nx, ny) = (-dy / len * w / 2.0, dx / len * w / 2.0);
-            let (p0, p1, p2, p3) = ((a.0 + nx, a.1 + ny), (b.0 + nx, b.1 + ny), (b.0 - nx, b.1 - ny), (a.0 - nx, a.1 - ny));
-            self.triangle([p0, p1, p2], tone, alpha);
-            self.triangle([p0, p2, p3], tone, alpha);
+        /// A stroke of width `w` through `points`, with round caps and joins.
+        /// Coverage is taken per pixel over the whole path, so joins don't double up.
+        fn polyline(&mut self, points: &[(f64, f64)], w: f64, tone: f64, alpha: f64) {
+            let seg_dist = |(px, py): (f64, f64), a: (f64, f64), b: (f64, f64)| {
+                let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+                let t = (((px - a.0) * dx + (py - a.1) * dy) / (dx * dx + dy * dy).max(f64::EPSILON)).clamp(0.0, 1.0);
+                ((px - a.0 - t * dx).powi(2) + (py - a.1 - t * dy).powi(2)).sqrt()
+            };
+            let x0 = points.iter().map(|p| p.0).fold(f64::MAX, f64::min) - w;
+            let x1 = points.iter().map(|p| p.0).fold(f64::MIN, f64::max) + w;
+            let y0 = points.iter().map(|p| p.1).fold(f64::MAX, f64::min) - w;
+            let y1 = points.iter().map(|p| p.1).fold(f64::MIN, f64::max) + w;
+            for y in (y0.floor().max(0.0) as usize)..(y1.ceil() as usize).min(self.h) {
+                for x in (x0.floor().max(0.0) as usize)..(x1.ceil() as usize).min(self.w) {
+                    let p = (x as f64 + 0.5, y as f64 + 0.5);
+                    let d = points.windows(2).map(|s| seg_dist(p, s[0], s[1])).fold(f64::MAX, f64::min);
+                    let cover = (w / 2.0 + 0.5 - d).clamp(0.0, 1.0) * alpha;
+                    if cover > 0.0 {
+                        self.blend(x, y, (tone * cover, tone * cover, tone * cover, 255.0 * cover));
+                    }
+                }
+            }
         }
 
         /// Box-filters `src` (premultiplied BGRA from `pixel`) into a `size` square at (ox, oy),
@@ -931,47 +939,22 @@ mod native {
         s.bytes().chunks_exact(4).map(|p| p[1]).collect()
     }
 
-    /// Like `text_mask`, centred in the box: for the badge digits.
-    fn text_mask_centered(text: &str, px: i32, weight: i32, face: PCWSTR, w: i32, h: i32) -> Vec<u8> {
-        let mut wide: Vec<u16> = text.encode_utf16().collect();
-        let font = Font::new(px, weight, face);
-        let Some(mut s) = Surface::new(w, h) else { return vec![0; (w * h).max(0) as usize] };
-        unsafe {
-            let old = SelectObject(s.dc, HGDIOBJ(font.0 .0));
-            SetTextColor(s.dc, COLORREF(0x00FF_FFFF));
-            SetBkMode(s.dc, TRANSPARENT);
-            let mut rect = RECT { left: 0, top: 0, right: w, bottom: h };
-            DrawTextW(s.dc, &mut wide, &mut rect, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
-            SelectObject(s.dc, old);
-        }
-        s.bytes().chunks_exact(4).map(|p| p[1]).collect()
-    }
-
-    /// The count on an accent pill at the top right of an icon centred at `(cx, cy)`.
-    fn badge(c: &mut Canvas, look: &Look, (cx, cy): (f64, f64), count: usize) {
-        let s = look.scale;
-        let label = badge_label(count);
-        let bh = BADGE_H * s;
-        let bw = badge_w(&label, s) as f64;
-        let (bx, by) = (cx + BADGE_OFFSET * s, cy - 13.0 * s);
-        // A ring in the taskbar's colour keeps the badge readable over the icon.
-        let ring = if look.light { 243.0 } else { 32.0 };
-        c.round_rect((bx - s, by - s, bw + 2.0 * s, bh + 2.0 * s), bh / 2.0 + s, ring, 1.0);
-        c.round_rect_rgb((bx, by, bw, bh), bh / 2.0, look.accent);
-        let (mw, mh) = (bw.ceil() as i32, bh.ceil() as i32);
-        let mask = text_mask_centered(&label, px(BADGE_PX, s), 700, w!("Segoe UI"), mw, mh);
-        c.mask(&mask, (bx.round() as usize, by.round() as usize, mw as usize, mh as usize), 255.0, 1.0);
-    }
-
     fn draw(hwnd: HWND, look: &Look, icon: Option<&Icon>) -> Option<()> {
+        present(hwnd, look, &render(look, icon))
+    }
+
+    /// The whole button as pixels, for `present` (and previews in tests).
+    fn render(look: &Look, icon: Option<&Icon>) -> Canvas {
         let s = look.scale;
         let l = &look.layout;
         let h = look.h;
         let mut c = Canvas::new(l.width(), h);
         let fg = if look.light { 0.0 } else { 255.0 };
         let mid = h as f64 / 2.0;
+        // Pressed parts nudge down a pixel, like the taskbar's own buttons.
+        let nudge = |hit: Hit| if look.pressed == Some(hit) { s.round() } else { 0.0 };
 
-        // Hover / pressed plates, like the taskbar's own buttons.
+        // Hover / pressed plates.
         let plate = |hit: Hit| -> f64 {
             match (look.pressed == Some(hit), look.hover == Some(hit), look.light) {
                 (true, _, false) => 0.045,
@@ -995,9 +978,8 @@ mod native {
             if let Some(z) = zone {
                 let a = plate(hit);
                 if a > 0.0 {
-                    let inset = 2.0 * s;
-                    let rect = (z.x as f64 + inset, mid - plate_h / 2.0, z.w as f64 - 2.0 * inset, plate_h);
-                    c.round_rect(rect, RADIUS * s, fg * a, a);
+                    let rect = (z.x as f64, mid - plate_h / 2.0, z.w as f64, plate_h);
+                    c.round_rect(rect, RADIUS * s, fg, a);
                 }
             }
         }
@@ -1005,8 +987,8 @@ mod native {
         // App icon.
         if let Some(icon) = icon {
             let size = (px(ICON, s) as usize).min(l.panel.w as usize).min(h as usize).max(1);
-            let pressed = usize::from(look.pressed == Some(Hit::Panel));
-            let origin = ((l.panel.w as usize - size) / 2, (h as usize - size) / 2 + pressed, size);
+            let origin =
+                ((l.panel.w as usize - size) / 2, (h as usize - size) / 2 + nudge(Hit::Panel) as usize, size);
             c.image(origin, (icon.width, icon.height), 0.0, |x, y| {
                 let p = &icon.rgba[(y * icon.width + x) * 4..][..4];
                 let a = p[3] as f64 / 255.0;
@@ -1014,44 +996,42 @@ mod native {
             });
         }
 
-        // Mail: an envelope with the unread count on an accent badge.
+        // Counters: an outline glyph in an 18-DIP box, then the number.
+        let stroke = STROKE * s;
+        let counter = |c: &mut Canvas, z: Zone, hit: Hit, count: usize, glyph: &dyn Fn(&mut Canvas, (f64, f64))| {
+            let cy = mid + nudge(hit);
+            let gx = z.x as f64 + COUNTER_PAD * s + GLYPH * s / 2.0;
+            glyph(c, (gx, cy));
+            let tx = z.x + px(COUNTER_PAD + GLYPH + COUNTER_GAP, s);
+            let (tw, line) = (z.x + z.w - px(COUNTER_PAD, s) - tx + 2, px(LINE, s));
+            let mask = text_mask(&badge_label(count), px(TITLE_PX, s), 600, w!("Segoe UI"), tw, line);
+            let top = (cy - line as f64 / 2.0).round() as usize;
+            c.mask(&mask, (tx as usize, top, tw as usize, line as usize), fg, INK);
+        };
         if let Some(z) = l.mail {
-            let pressed = if look.pressed == Some(Hit::Mail) { 1.0 } else { 0.0 };
-            let (cx, cy) = (z.x as f64 + ENVELOPE_CX * s, mid + pressed);
-            let at = |x: f64, y: f64| (cx + x * s, cy + y * s);
-            let stroke = 1.5 * s;
-            let (ew, eh) = (18.0 * s, 13.0 * s);
-            let (ex, ey) = (cx - ew / 2.0, cy - eh / 2.0);
-            for rect in [
-                (ex, ey, ew, stroke),
-                (ex, ey + eh - stroke, ew, stroke),
-                (ex, ey, stroke, eh),
-                (ex + ew - stroke, ey, stroke, eh),
-            ] {
-                c.round_rect(rect, stroke / 2.0, fg * 0.9, 0.9);
-            }
-            c.line(at(-8.0, -5.5), at(0.0, 1.0), stroke, fg, 0.9);
-            c.line(at(0.0, 1.0), at(8.0, -5.5), stroke, fg, 0.9);
-            badge(&mut c, look, (cx, cy), look.unread);
+            counter(&mut c, z, Hit::Mail, look.unread, &|c, (cx, cy)| {
+                // Envelope: 18×14, flap meeting a third of the way down.
+                let (w, hh) = (GLYPH * s, 14.0 * s);
+                let (x, y) = (cx - w / 2.0, cy - hh / 2.0);
+                c.round_rect_outline((x, y, w, hh), 2.5 * s, stroke, fg, INK);
+                let inset = stroke * 1.5;
+                c.polyline(&[(x + inset, y + inset), (cx, cy + 0.5 * s), (x + w - inset, y + inset)], stroke, fg, INK);
+            });
         }
-
-        // Tasks: a ticked circle, like Google Tasks' icon, with the count due today.
         if let Some(z) = l.tasks {
-            let pressed = if look.pressed == Some(Hit::Tasks) { 1.0 } else { 0.0 };
-            let (cx, cy) = (z.x as f64 + ENVELOPE_CX * s, mid + pressed);
-            let at = |x: f64, y: f64| (cx + x * s, cy + y * s);
-            let stroke = 1.5 * s;
-            c.ring((cx, cy), 8.0 * s, stroke, fg, 0.9);
-            c.line(at(-3.8, 0.2), at(-1.0, 3.0), stroke, fg, 0.9);
-            c.line(at(-1.0, 3.0), at(4.2, -2.6), stroke, fg, 0.9);
-            badge(&mut c, look, (cx, cy), look.due);
+            counter(&mut c, z, Hit::Tasks, look.due, &|c, (cx, cy)| {
+                // Ticked circle, as in Google Tasks: the stroke's outer edge fills the 18-DIP box.
+                c.ring((cx, cy), (GLYPH * s - stroke) / 2.0, stroke, fg, INK);
+                let at = |x: f64, y: f64| (cx + x * s, cy + y * s);
+                c.polyline(&[at(-3.6, 0.2), at(-1.0, 2.8), at(3.9, -2.4)], stroke, fg, INK);
+            });
         }
 
         // Player: cover, title and artist, controls.
         if let (Some(m), Some(info)) = (&look.media, l.info) {
             let cover = px(COVER, s);
             let cx = (info.x + px(INFO_PAD, s)) as usize;
-            let cy = ((h - cover) / 2) as usize;
+            let cy = ((h - cover) / 2) as usize + nudge(Hit::Info) as usize;
             match &m.cover {
                 Some(pixels) => {
                     let n = COVER_PX as usize;
@@ -1060,41 +1040,41 @@ mod native {
                         [p[0] as f64, p[1] as f64, p[2] as f64, p[3] as f64]
                     });
                 }
-                None => c.round_rect((cx as f64, cy as f64, cover as f64, cover as f64), COVER_RADIUS * s, fg * 0.08, 0.08),
+                None => c.round_rect((cx as f64, cy as f64, cover as f64, cover as f64), COVER_RADIUS * s, fg, 0.08),
             }
 
             let tx = cx + (cover + px(TEXT_GAP, s)) as usize;
-            let line = px(16.0, s);
-            let (tw, top) = (l.text_w, (h / 2 - line) as usize);
+            let line = px(LINE, s);
+            let (tw, top) = (l.text_w, (h / 2 - line) as usize + nudge(Hit::Info) as usize);
             let title = text_mask(&m.title, px(TITLE_PX, s), 600, w!("Segoe UI"), tw, line);
-            c.mask(&title, (tx, top, tw as usize, line as usize), fg, 0.92);
+            c.mask(&title, (tx, top, tw as usize, line as usize), fg, INK);
             if !m.artist.is_empty() {
                 let artist = text_mask(&m.artist, px(ARTIST_PX, s), 400, w!("Segoe UI"), tw, line);
-                c.mask(&artist, (tx, top + line as usize, tw as usize, line as usize), fg, 0.62);
+                c.mask(&artist, (tx, top + line as usize, tw as usize, line as usize), fg, INK_DIM);
             }
 
-            // Control glyphs, drawn as shapes in DIPs around the zone's centre.
+            // Control glyphs: filled shapes, 12 DIPs tall, around the zone's centre.
             let glyph = |c: &mut Canvas, zone: Option<Zone>, shape: Glyph, hit: Hit| {
                 let Some(z) = zone else { return };
-                let (cx, cy) = ((z.x + z.w / 2) as f64, mid + if look.pressed == Some(hit) { 1.0 } else { 0.0 });
+                let (cx, cy) = ((z.x + z.w / 2) as f64, mid + nudge(hit));
                 let at = |x: f64, y: f64| (cx + x * s, cy + y * s);
-                let bar = |c: &mut Canvas, x0: f64, x1: f64, half: f64| {
-                    let (ax, ay) = at(x0, -half);
-                    c.round_rect((ax, ay, (x1 - x0) * s, 2.0 * half * s), 1.0 * s, fg * 0.9, 0.9);
+                let bar = |c: &mut Canvas, x0: f64, x1: f64| {
+                    let (ax, ay) = at(x0, -6.0);
+                    c.round_rect((ax, ay, (x1 - x0) * s, 12.0 * s), 1.0 * s, fg, INK);
                 };
                 match shape {
-                    Glyph::Play => c.triangle([at(-4.5, -6.5), at(-4.5, 6.5), at(6.5, 0.0)], fg, 0.9),
+                    Glyph::Play => c.triangle([at(-4.0, -6.5), at(-4.0, 6.5), at(6.5, 0.0)], fg, INK),
                     Glyph::Pause => {
-                        bar(c, -5.0, -1.5, 6.5);
-                        bar(c, 1.5, 5.0, 6.5);
+                        bar(c, -4.5, -1.25);
+                        bar(c, 1.25, 4.5);
                     }
                     Glyph::Prev => {
-                        bar(c, -6.0, -4.0, 5.5);
-                        c.triangle([at(5.5, -5.5), at(5.5, 5.5), at(-3.5, 0.0)], fg, 0.9);
+                        bar(c, -5.5, -3.5);
+                        c.triangle([at(5.5, -6.0), at(5.5, 6.0), at(-3.0, 0.0)], fg, INK);
                     }
                     Glyph::Next => {
-                        bar(c, 4.0, 6.0, 5.5);
-                        c.triangle([at(-5.5, -5.5), at(-5.5, 5.5), at(3.5, 0.0)], fg, 0.9);
+                        bar(c, 3.5, 5.5);
+                        c.triangle([at(-5.5, -6.0), at(-5.5, 6.0), at(3.0, 0.0)], fg, INK);
                     }
                 }
             };
@@ -1103,7 +1083,7 @@ mod native {
             glyph(&mut c, l.next, Glyph::Next, Hit::Next);
         }
 
-        present(hwnd, look, &c)
+        c
     }
 
     fn present(hwnd: HWND, look: &Look, c: &Canvas) -> Option<()> {
@@ -1130,5 +1110,111 @@ mod native {
             )
         }
         .ok()
+    }
+
+    /// Renders the button to a PNG for eyeballing the design:
+    /// `cargo test --lib taskbar_preview -- --ignored --nocapture`, output path printed.
+    #[cfg(test)]
+    mod preview {
+        use super::*;
+
+        fn app_icon() -> Icon {
+            let decoder = png::Decoder::new(std::fs::File::open("icons/64x64.png").unwrap());
+            let mut reader = decoder.read_info().unwrap();
+            let mut buf = vec![0; reader.output_buffer_size()];
+            let info = reader.next_frame(&mut buf).unwrap();
+            Icon { rgba: buf[..info.buffer_size()].to_vec(), width: info.width as usize, height: info.height as usize }
+        }
+
+        /// A stand-in album cover: a diagonal gradient.
+        fn cover() -> Arc<Vec<u8>> {
+            let n = COVER_PX as usize;
+            Arc::new(
+                (0..n * n)
+                    .flat_map(|i| {
+                        let t = ((i % n) + (i / n)) as f64 / (2 * n) as f64;
+                        [(200.0 - 120.0 * t) as u8, (90.0 + 60.0 * t) as u8, (40.0 + 150.0 * t) as u8, 255]
+                    })
+                    .collect(),
+            )
+        }
+
+        fn look(light: bool, scale: f64, hover: Option<Hit>) -> Look {
+            let media = Media {
+                title: "Странники".into(),
+                artist: "Телепорт".into(),
+                playing: true,
+                can_prev: true,
+                can_next: true,
+                cover: Some(cover()),
+            };
+            let (unread, due) = (73, 7);
+            let layout = layout(scale, Some(&media), unread, due);
+            Look {
+                x: 0,
+                y: 0,
+                h: (48.0 * scale) as i32,
+                scale,
+                light,
+                hover,
+                pressed: None,
+                media: Some(media),
+                unread,
+                due,
+                layout,
+            }
+        }
+
+        /// Composites premultiplied BGRA over a taskbar colour into straight RGBA rows.
+        fn flatten(c: &Canvas, bg: (f64, f64, f64)) -> Vec<Vec<u8>> {
+            (0..c.h)
+                .map(|y| {
+                    (0..c.w)
+                        .flat_map(|x| {
+                            let p = &c.px[(y * c.w + x) * 4..][..4];
+                            let keep = 1.0 - p[3] as f64 / 255.0;
+                            let ch = |v: u8, b: f64| (v as f64 + b * keep).round().min(255.0) as u8;
+                            [ch(p[2], bg.0), ch(p[1], bg.1), ch(p[0], bg.2), 255]
+                        })
+                        .collect()
+                })
+                .collect()
+        }
+
+        #[test]
+        #[ignore]
+        fn taskbar_preview() {
+            let icon = app_icon();
+            let (scale, pad) = (2.0, 12usize);
+            let light_bg = (238.0, 242.0, 246.0);
+            let dark_bg = (28.0, 30.0, 34.0);
+            let rows: Vec<(Canvas, (f64, f64, f64))> = [
+                (true, None, light_bg),
+                (true, Some(Hit::Tasks), light_bg),
+                (false, None, dark_bg),
+                (false, Some(Hit::Mail), dark_bg),
+            ]
+            .into_iter()
+            .map(|(light, hover, bg)| (render(&look(light, scale, hover), Some(&icon)), bg))
+            .collect();
+            let w = rows.iter().map(|(c, _)| c.w).max().unwrap() + 2 * pad;
+            let mut out: Vec<u8> = Vec::new();
+            let mut h = 0;
+            for (c, bg) in &rows {
+                let bg_px = [bg.0 as u8, bg.1 as u8, bg.2 as u8, 255];
+                for line in flatten(c, *bg) {
+                    out.extend(bg_px.repeat(pad));
+                    out.extend(line);
+                    out.extend(bg_px.repeat(w - pad - c.w));
+                    h += 1;
+                }
+            }
+            let path = std::env::temp_dir().join("taskbar-preview.png");
+            let mut enc = png::Encoder::new(std::fs::File::create(&path).unwrap(), w as u32, h as u32);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            enc.write_header().unwrap().write_image_data(&out).unwrap();
+            println!("preview: {}", path.display());
+        }
     }
 }
