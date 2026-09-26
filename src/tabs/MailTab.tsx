@@ -319,7 +319,7 @@ function LoadMore({ onVisible, loading }: { onVisible: () => void; loading: bool
 /** The letter pane's width when the window grows for it. */
 const READER_W = 560;
 /** A panel at least this wide has room for the letter without growing. */
-const WIDE_PANEL = 900;
+const WIDE_PANEL = 1050;
 /** Below this much extra room the letter replaces the list instead. */
 const READER_MIN = 360;
 
