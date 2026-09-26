@@ -31,6 +31,26 @@ static VISIBLE: AtomicBool = AtomicBool::new(false);
 static HIDING: AtomicBool = AtomicBool::new(false);
 static LAST_HIDE_MS: AtomicU64 = AtomicU64::new(0);
 static WIDTH: AtomicU32 = AtomicU32::new(DEFAULT_WIDTH);
+/// Temporary width on top of `WIDTH` (logical px), e.g. while a letter is open
+/// next to the mail list. Never saved; dropped when the panel hides.
+static EXTRA: AtomicU32 = AtomicU32::new(0);
+
+/// The window's current logical width: the user's width plus any extra.
+fn window_width() -> u32 {
+    WIDTH.load(Ordering::SeqCst) + EXTRA.load(Ordering::SeqCst)
+}
+
+/// Resizes the window to `window_width()`; docked right, it grows leftwards
+/// so the right edge stays put.
+fn apply_width(win: &WebviewWindow) {
+    if let (Ok(scale), Ok(size), Ok(pos)) = (win.scale_factor(), win.outer_size(), win.outer_position()) {
+        let new_w = (window_width() as f64 * scale).round() as u32;
+        let _ = win.set_size(PhysicalSize::new(new_w, size.height));
+        if RIGHT.load(Ordering::SeqCst) {
+            let _ = win.set_position(PhysicalPosition::new(pos.x + size.width as i32 - new_w as i32, pos.y));
+        }
+    }
+}
 /// Dock to the right screen edge instead of the left.
 static RIGHT: AtomicBool = AtomicBool::new(false);
 static SHORTCUT: Mutex<String> = Mutex::new(String::new());
@@ -117,6 +137,28 @@ pub fn show(app: &AppHandle) {
     let _ = app.emit_to(LABEL, "panel:show", ());
 }
 
+/// Widens the window by `extra` logical px for now (0 goes back to the user's
+/// width), as far as the screen allows; returns the extra actually applied.
+#[tauri::command]
+pub fn panel_set_extra_width(app: AppHandle, extra: u32) -> u32 {
+    let Some(win) = window(&app) else { return 0 };
+    let room = win
+        .current_monitor()
+        .ok()
+        .flatten()
+        .map(|m| {
+            let scale = m.scale_factor();
+            let screen = (m.work_area().size.width as f64 / scale) as u32;
+            screen.saturating_sub(2 * MARGIN as u32 + WIDTH.load(Ordering::SeqCst))
+        })
+        .unwrap_or(0);
+    let extra = extra.min(room);
+    if EXTRA.swap(extra, Ordering::SeqCst) != extra {
+        apply_width(&win);
+    }
+    extra
+}
+
 /// Shows the panel (if hidden) on the given tab, e.g. from a taskbar or toast click.
 pub fn show_tab(app: &AppHandle, tab: &str) {
     if !VISIBLE.load(Ordering::SeqCst) || HIDING.load(Ordering::SeqCst) {
@@ -170,6 +212,8 @@ pub fn finish_hide(app: &AppHandle) {
     VISIBLE.store(false, Ordering::SeqCst);
     HIDING.store(false, Ordering::SeqCst);
     LAST_HIDE_MS.store(now_ms(), Ordering::SeqCst);
+    // The next show starts at the user's own width.
+    EXTRA.store(0, Ordering::SeqCst);
     if let Some(win) = window(app) {
         let _ = win.hide();
     }
@@ -187,7 +231,7 @@ fn place_on_cursor_monitor(app: &AppHandle, win: &WebviewWindow) {
     let scale = monitor.scale_factor();
     let area = monitor.work_area();
     let margin = (MARGIN * scale).round() as i32;
-    let width = (WIDTH.load(Ordering::SeqCst) as f64 * scale).round() as u32;
+    let width = ((window_width() as f64 * scale).round() as u32).min(area.size.width.saturating_sub(2 * margin as u32));
     let height = area.size.height.saturating_sub(2 * margin as u32);
 
     let _ = win.set_size(PhysicalSize::new(width, height));
@@ -315,14 +359,7 @@ pub fn panel_set_width(app: AppHandle, width: u32, persist: bool) -> u32 {
     let width = width.clamp(MIN_WIDTH, MAX_WIDTH);
     WIDTH.store(width, Ordering::SeqCst);
     if let Some(win) = window(&app) {
-        if let (Ok(scale), Ok(size), Ok(pos)) = (win.scale_factor(), win.outer_size(), win.outer_position()) {
-            let new_w = (width as f64 * scale).round() as u32;
-            let _ = win.set_size(PhysicalSize::new(new_w, size.height));
-            // Docked right: grow leftwards so the right edge stays put.
-            if RIGHT.load(Ordering::SeqCst) {
-                let _ = win.set_position(PhysicalPosition::new(pos.x + size.width as i32 - new_w as i32, pos.y));
-            }
-        }
+        apply_width(&win);
     }
     if persist {
         save_settings(&app);

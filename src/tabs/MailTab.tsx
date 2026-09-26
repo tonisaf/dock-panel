@@ -12,10 +12,13 @@ import {
   Paperclip,
   RefreshCw,
   Trash2,
+  X,
 } from "lucide-react";
 import clsx from "clsx";
 import { EmptyState } from "../components/Card";
 import { usePanelStore } from "../store";
+import { usePanelSettings } from "../lib/panelWidth";
+import { invoke } from "@tauri-apps/api/core";
 import {
   invalidateMail,
   shortDate,
@@ -81,10 +84,13 @@ function IconButton({
 function Reader({
   summary,
   multiAccount,
+  split,
   onBack,
 }: {
   summary: Summary;
   multiAccount: boolean;
+  /** Shown next to the list rather than instead of it. */
+  split: boolean;
   onBack: () => void;
 }) {
   const { open, act } = useMailActions();
@@ -130,9 +136,15 @@ function Reader({
   return (
     <div className="flex flex-col gap-3 pb-2">
       <div className="flex items-center gap-0.5">
-        <IconButton title="Назад (Esc)" onClick={onBack}>
-          <ArrowLeft className="size-4" /> Назад
-        </IconButton>
+        {split ? (
+          <IconButton title="Закрыть письмо (Esc)" onClick={onBack}>
+            <X className="size-4" /> Закрыть
+          </IconButton>
+        ) : (
+          <IconButton title="Назад (Esc)" onClick={onBack}>
+            <ArrowLeft className="size-4" /> Назад
+          </IconButton>
+        )}
         <div className="flex-1" />
         <IconButton title="В архив" onClick={() => run("archive")} busy={busy}>
           <Archive className="size-4" />
@@ -202,11 +214,14 @@ function Reader({
 function Row({
   m,
   showAccount,
+  active,
   onOpen,
   onError,
 }: {
   m: Summary;
   showAccount: boolean;
+  /** The letter open next to the list. */
+  active: boolean;
   onOpen: () => void;
   onError: (message: string) => void;
 }) {
@@ -217,7 +232,12 @@ function Row({
     "grid size-7 place-items-center rounded-lg text-fg-muted transition-colors hover:bg-ink/10 hover:text-fg";
 
   return (
-    <div className="group relative rounded-xl transition-colors hover:bg-surface-hover">
+    <div
+      className={clsx(
+        "group relative rounded-xl transition-colors",
+        active ? "bg-accent/12 ring-1 ring-accent/30 ring-inset" : "hover:bg-surface-hover",
+      )}
+    >
       <button onClick={onOpen} className="flex w-full items-start gap-2.5 px-2.5 py-2 text-left">
         <span className={clsx("mt-1.5 size-2 shrink-0 rounded-full", m.unread ? "bg-accent" : "bg-transparent")} />
         <div className="min-w-0 flex-1">
@@ -285,10 +305,56 @@ function LoadMore({ onVisible, loading }: { onVisible: () => void; loading: bool
   );
 }
 
+/** The letter pane's width when the window grows for it. */
+const READER_W = 560;
+/** A panel at least this wide has room for the letter without growing. */
+const WIDE_PANEL = 900;
+/** Below this much extra room the letter replaces the list instead. */
+const READER_MIN = 360;
+
+const setExtraWidth = (extra: number) => invoke<number>("panel_set_extra_width", { extra });
+
+/**
+ * Where an open letter goes: next to the list (growing the window if the panel
+ * is narrow and the screen allows) or, failing that, in place of the list.
+ * `null` while the window is still being resized.
+ */
+function useSplit(reading: boolean, baseWidth: number) {
+  const [split, setSplit] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!reading) {
+      setSplit(null);
+      setExtraWidth(0).catch(console.error);
+      return;
+    }
+    if (baseWidth >= WIDE_PANEL) {
+      setSplit(true);
+      return;
+    }
+    let current = true;
+    setExtraWidth(READER_W).then(
+      (applied) => {
+        if (!current) return;
+        const fits = applied >= READER_MIN;
+        if (!fits) setExtraWidth(0).catch(console.error);
+        setSplit(fits);
+      },
+      () => current && setSplit(false),
+    );
+    return () => {
+      current = false;
+    };
+  }, [reading, baseWidth]);
+  // Leaving the tab gives the width back.
+  useEffect(() => () => void setExtraWidth(0).catch(console.error), []);
+  return split;
+}
+
 export function MailTab() {
   const queryClient = useQueryClient();
   const setTab = usePanelStore((s) => s.setTab);
   const mailToOpen = usePanelStore((s) => s.mailToOpen);
+  const baseWidth = usePanelSettings().width;
   const { data: settings } = useMailSettings();
   const accounts = settings?.accounts ?? [];
   const [account, setAccount] = useState<string | null>(null);
@@ -297,6 +363,7 @@ export function MailTab() {
   const [actionError, setActionError] = useState<string | null>(null);
   const { messages, errors, isPending, isFetching, isError, error, hasNextPage, fetchNextPage, isFetchingNextPage } =
     useMailList(account, unreadOnly, accounts.length > 0);
+  const split = useSplit(!!reading, baseWidth);
 
   // A clicked notification asks for a letter.
   useEffect(() => {
@@ -317,9 +384,19 @@ export function MailTab() {
   }
 
   const multi = accounts.length > 1;
-  if (reading) return <Reader summary={reading} multiAccount={multi} onBack={() => setReading(null)} />;
+  const close = () => setReading(null);
+  const reader = reading && (
+    <Reader
+      key={`${reading.account}/${reading.uid}`}
+      summary={reading}
+      multiAccount={multi}
+      split={!!split}
+      onBack={close}
+    />
+  );
+  if (reading && split === false) return reader;
 
-  return (
+  const list = (
     <div className="flex flex-col gap-2 pb-2">
       <div className="flex items-center gap-1.5">
         <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto">
@@ -384,6 +461,7 @@ export function MailTab() {
               key={`${m.account}/${m.uid}`}
               m={m}
               showAccount={multi && !account}
+              active={!!reading && reading.account === m.account && reading.uid === m.uid}
               onOpen={() => setReading(m)}
               onError={setActionError}
             />
@@ -393,6 +471,20 @@ export function MailTab() {
           )}
         </div>
       )}
+    </div>
+  );
+
+  // Not reading, or the window is still growing: just the list.
+  if (!reading || split === null) return list;
+
+  // The list keeps the panel's own width (a share of it on a wide panel); the letter takes the rest.
+  const listWidth = baseWidth >= WIDE_PANEL ? Math.min(440, Math.round(baseWidth * 0.42)) : baseWidth - 32;
+  return (
+    <div className="flex h-full gap-3">
+      <div className="scroll-area -mr-1 shrink-0 pr-1" style={{ width: listWidth }}>
+        {list}
+      </div>
+      <div className="scroll-area min-w-0 flex-1 pr-1">{reader}</div>
     </div>
   );
 }
