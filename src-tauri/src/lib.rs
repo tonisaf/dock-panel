@@ -4,6 +4,7 @@ mod apps;
 mod calendar;
 mod home;
 mod claude_web;
+mod mail;
 mod media;
 mod monitors;
 mod net;
@@ -54,6 +55,7 @@ pub fn run() {
             monitors::warm_up();
             claude_web::init(handle);
             alerts::init(handle);
+            mail::init(handle);
             updater::init(handle);
             apps::start_icon_worker(app.path().app_cache_dir()?.join("icons"));
             let registered = shortcut
@@ -121,6 +123,15 @@ pub fn run() {
             home::home_forget,
             monitors::monitors_list,
             monitors::monitor_set,
+            mail::mail_settings,
+            mail::mail_add,
+            mail::mail_remove,
+            mail::mail_set_notify,
+            mail::mail_list,
+            mail::mail_open,
+            mail::mail_action,
+            mail::mail_unread,
+            mail::mail_refresh,
             vpn::vpn_status,
             vpn::vpn_toggle,
             vpn::vpn_open,

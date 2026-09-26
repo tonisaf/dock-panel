@@ -35,6 +35,8 @@ mdns-sd = "0.21.4"
 if-addrs = "0.15.0"
 native-tls = "0.2"
 socket2 = "0.6"
+imap = "2.4"
+mail-parser = "0.11.9"
 
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.8.1"

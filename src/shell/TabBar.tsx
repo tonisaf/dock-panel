@@ -1,9 +1,11 @@
 import { motion } from "motion/react";
 import clsx from "clsx";
 import { TABS, usePanelStore } from "../store";
+import { useUnread } from "../mail/api";
 
 export function TabBar() {
   const { tab, setTab } = usePanelStore();
+  const unread = useUnread().data?.total ?? 0;
 
   return (
     <nav className="flex shrink-0 gap-1 rounded-xl border border-stroke bg-surface p-1">
@@ -26,7 +28,14 @@ export function TabBar() {
                 transition={{ type: "spring", stiffness: 500, damping: 38 }}
               />
             )}
-            <Icon className={clsx("relative size-[18px]", active && "text-accent")} strokeWidth={2} />
+            <span className="relative">
+              <Icon className={clsx("size-[18px]", active && "text-accent")} strokeWidth={2} />
+              {id === "mail" && unread > 0 && (
+                <span className="absolute -top-1.5 left-3 min-w-4 rounded-full bg-accent px-1 text-center text-[9.5px] leading-4 font-semibold text-on-accent tabular-nums">
+                  {unread > 99 ? "99+" : unread}
+                </span>
+              )}
+            </span>
             <span className="relative">{label}</span>
           </button>
         );
