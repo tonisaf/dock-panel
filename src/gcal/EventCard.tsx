@@ -92,7 +92,8 @@ export function EventCard({
   const [start, setStart] = useState(localInput(initial.start));
   const [end, setEnd] = useState(localInput(allDay ? addDays(initial.end, -1) : initial.end));
   const [location, setLocation] = useState(event?.location ?? "");
-  const [description, setDescription] = useState(event?.description ? plain(event.description) : "");
+  const [initialDescription] = useState(() => (event?.description ? plain(event.description) : ""));
+  const [description, setDescription] = useState(initialDescription);
   const [calendarId, setCalendarId] = useState(
     event?.calendarId ?? (writable.find((c) => c.primary) ?? writable[0])?.id ?? "",
   );
@@ -149,8 +150,22 @@ export function EventCard({
     if (isNew) {
       return run(() => create({ calendarId, title: name, start: s, end: e, allDay, location, description }));
     }
-    const body = { summary: name, location, description, ...timesBody(allDay ? new Date(`${start.slice(0, 10)}T00:00`) : s, e, allDay) };
-    return run(() => update(event!, { title: name, location: location || null, description: description || null, allDay }, body));
+    const body: Record<string, unknown> = {
+      summary: name,
+      ...timesBody(allDay ? new Date(`${start.slice(0, 10)}T00:00`) : s, e, allDay, true),
+    };
+    const changes: Partial<GEvent> = { title: name, allDay };
+    // Only fields the user touched: the text box holds a plain copy of an HTML
+    // description, and sending it back unchanged would strip the formatting.
+    if (location !== (event!.location ?? "")) {
+      body.location = location;
+      changes.location = location || null;
+    }
+    if (description !== initialDescription) {
+      body.description = description;
+      changes.description = description || null;
+    }
+    return run(() => update(event!, changes, body));
   };
 
   const icon = "size-4 shrink-0 text-fg-subtle";

@@ -36,6 +36,8 @@ static WIDTH: AtomicU32 = AtomicU32::new(DEFAULT_WIDTH);
 static EXTRA: AtomicU32 = AtomicU32::new(0);
 /// Bumped by every extra-width change; a running animation stops when it moves on.
 static RESIZE_GENERATION: AtomicU64 = AtomicU64::new(0);
+/// Held while an animation frame or a hide touches EXTRA.
+static RESIZE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 const RESIZE_ANIMATION: Duration = Duration::from_millis(200);
 const RESIZE_FRAME: Duration = Duration::from_millis(8);
 
@@ -165,6 +167,10 @@ pub async fn panel_set_extra_width(app: AppHandle, extra: u32, animate: Option<b
     let generation = RESIZE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     let from = EXTRA.load(Ordering::SeqCst);
     if !animate.unwrap_or(false) || from == target || !VISIBLE.load(Ordering::SeqCst) {
+        let _frame = RESIZE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        if RESIZE_GENERATION.load(Ordering::SeqCst) != generation {
+            return EXTRA.load(Ordering::SeqCst);
+        }
         EXTRA.store(target, Ordering::SeqCst);
         apply_width(&win);
         return target;
@@ -173,14 +179,19 @@ pub async fn panel_set_extra_width(app: AppHandle, extra: u32, animate: Option<b
     let _ = tauri::async_runtime::spawn_blocking(move || {
         let start = std::time::Instant::now();
         loop {
-            if RESIZE_GENERATION.load(Ordering::SeqCst) != generation {
-                return; // a newer resize took over
-            }
             let t = (start.elapsed().as_secs_f64() / RESIZE_ANIMATION.as_secs_f64()).min(1.0);
             // Ease-out cubic: quick start, soft landing.
             let eased = 1.0 - (1.0 - t).powi(3);
             let now = from as f64 + (target as f64 - from as f64) * eased;
-            EXTRA.store(now.round() as u32, Ordering::SeqCst);
+            {
+                // Check and store together, so a hide can't slip in between
+                // and have its reset overwritten by a stale frame.
+                let _frame = RESIZE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+                if RESIZE_GENERATION.load(Ordering::SeqCst) != generation {
+                    return; // a newer resize took over
+                }
+                EXTRA.store(now.round() as u32, Ordering::SeqCst);
+            }
             apply_width(&win);
             if t >= 1.0 {
                 return;
@@ -252,8 +263,11 @@ pub fn finish_hide(app: &AppHandle) {
     HIDING.store(false, Ordering::SeqCst);
     LAST_HIDE_MS.store(now_ms(), Ordering::SeqCst);
     // The next show starts at the user's own width; a running resize stops.
-    RESIZE_GENERATION.fetch_add(1, Ordering::SeqCst);
-    EXTRA.store(0, Ordering::SeqCst);
+    {
+        let _frame = RESIZE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        RESIZE_GENERATION.fetch_add(1, Ordering::SeqCst);
+        EXTRA.store(0, Ordering::SeqCst);
+    }
     if let Some(win) = window(app) {
         let _ = win.hide();
     }

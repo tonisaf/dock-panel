@@ -218,6 +218,10 @@ pub fn mail_unread() -> Unread {
 }
 
 fn poll(app: &AppHandle) {
+    // The timer and a manual refresh can overlap; both would see the same
+    // "previous" unread set and announce the same letters twice.
+    static POLLING: Mutex<()> = Mutex::new(());
+    let _guard = POLLING.lock().unwrap_or_else(|e| e.into_inner());
     let saved = load(app);
     let mut changed = false;
     let mut fresh: Vec<Summary> = Vec::new();

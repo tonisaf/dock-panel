@@ -384,9 +384,22 @@ async fn calendar_events(cal: &Calendar, time_min: &str, time_max: &str) -> Resu
 pub async fn gcal_events(app: AppHandle, time_min: String, time_max: String) -> Result<Vec<Event>, String> {
     let cals: Vec<Calendar> = calendars(&app).await?.into_iter().filter(|c| c.visible).collect();
     let results = futures_util::future::join_all(cals.iter().map(|c| calendar_events(c, &time_min, &time_max))).await;
+    // One broken calendar (a removed subscription, say) shouldn't hide the rest.
     let mut events = Vec::new();
+    let mut first_error = None;
+    let total = results.len();
+    let mut failed = 0;
     for r in results {
-        events.extend(r?);
+        match r {
+            Ok(list) => events.extend(list),
+            Err(e) => {
+                failed += 1;
+                first_error.get_or_insert(e);
+            }
+        }
+    }
+    if total > 0 && failed == total {
+        return Err(first_error.unwrap_or_default());
     }
     events.sort_by(|a, b| a.start.cmp(&b.start));
     Ok(events)

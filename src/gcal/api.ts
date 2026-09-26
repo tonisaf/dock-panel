@@ -183,11 +183,16 @@ export interface NewEvent {
   location?: string;
 }
 
-/** Google's start/end body for a range. */
-export function timesBody(start: Date, end: Date, allDay: boolean) {
+/**
+ * Google's start/end body for a range. For a PATCH (`patch`), the other kind of
+ * time is cleared explicitly: PATCH merges objects, so switching an event to or
+ * from "all day" would otherwise leave both `date` and `dateTime` set.
+ */
+export function timesBody(start: Date, end: Date, allDay: boolean, patch = false) {
+  const clear = patch ? (allDay ? { dateTime: null, timeZone: null } : { date: null }) : {};
   return allDay
-    ? { start: { date: ymd(start) }, end: { date: ymd(end) } }
-    : { start: { dateTime: rfc3339(start) }, end: { dateTime: rfc3339(end) } };
+    ? { start: { date: ymd(start), ...clear }, end: { date: ymd(end), ...clear } }
+    : { start: { dateTime: rfc3339(start), ...clear }, end: { dateTime: rfc3339(end), ...clear } };
 }
 
 export function useGcalActions() {
@@ -232,7 +237,7 @@ export function useGcalActions() {
 
     /** Moves or resizes a timed event. */
     retime: (e: GEvent, start: Date, end: Date) =>
-      update(e, { start: rfc3339(start), end: rfc3339(end) }, timesBody(start, end, false)),
+      update(e, { start: rfc3339(start), end: rfc3339(end) }, timesBody(start, end, false, true)),
 
     remove: async (e: GEvent) => {
       const undo = patchEvents((l) => l.filter((x) => !same(x, e)));

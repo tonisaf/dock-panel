@@ -63,7 +63,10 @@ pub async fn launch_app(id: String) -> Result<(), String> {
 /// Native picker for files (or folders) to pin. Returns `file:` ids; empty if cancelled.
 #[tauri::command]
 pub async fn pick_files(app: AppHandle, folders: bool) -> Result<Vec<String>, String> {
-    let paths = pick_paths(&app, folders)?;
+    // The dialog stays up as long as the user likes; keep it off the async workers.
+    let paths = tauri::async_runtime::spawn_blocking(move || pick_paths(&app, folders))
+        .await
+        .map_err(|e| e.to_string())??;
     Ok(paths.into_iter().map(|p| format!("{FILE_PREFIX}{p}")).collect())
 }
 

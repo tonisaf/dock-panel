@@ -19,6 +19,8 @@ export const SearchBar = forwardRef<HTMLInputElement>(function SearchBar(_, ref)
       setSelected((selected + step + count) % count);
     } else if (e.key === "Enter") {
       e.preventDefault();
+      // The list still shows the previous term's results until the debounce settles.
+      if (spotify.term && (spotify.typing || spotify.isFetching)) return;
       const i = Math.min(selected, count - 1);
       if (spotify.term) activateSpotifyItem(spotify.results[i], e.shiftKey);
       else launchApp(apps[i].id);

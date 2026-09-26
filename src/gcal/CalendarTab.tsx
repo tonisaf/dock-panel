@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { CalendarDays, ChevronLeft, ChevronRight, Loader2, Plus, RefreshCw } from "lucide-react";
 import clsx from "clsx";
@@ -49,8 +49,11 @@ const setExtraWidth = (extra: number, animate: boolean) =>
 /** Grows the window for the calendar, and gives the width back on the way out. */
 function useWideWindow() {
   const base = usePanelSettings().width;
+  const opened = useRef(false);
   useEffect(() => {
-    setExtraWidth(Math.max(0, CALENDAR_W - base), true);
+    // Animated on the way in; later width changes (the resize handle) follow at once.
+    setExtraWidth(Math.max(0, CALENDAR_W - base), !opened.current);
+    opened.current = true;
   }, [base]);
   useEffect(() => () => void setExtraWidth(0, true), []);
 }

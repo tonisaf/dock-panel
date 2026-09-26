@@ -69,13 +69,26 @@ export function useMailList(account: string | null, unread: boolean, enabled: bo
   const pages = query.data?.pages ?? [];
   // A letter can show up on two pages when the inbox shifts in between.
   const seen = new Set<string>();
-  const messages = pages
+  const all = pages
     .flatMap((p) => p.messages)
     .filter((m) => {
       const key = `${m.account}/${m.uid}`;
       return !seen.has(key) && !!seen.add(key);
     })
     .sort((a, b) => b.date - a.date);
+  // Each account pages on its own, so a quiet mailbox's 40 letters can reach
+  // much further back than a busy one's. Show only down to where every account
+  // with more to load has been loaded, or the busy one's older letters would
+  // later pop up in the middle of the list.
+  const cursors = pages[pages.length - 1]?.cursors ?? {};
+  let frontier = -Infinity;
+  const oldest = new Map<string, number>();
+  for (const m of all) oldest.set(m.account, m.date); // sorted newest first: the last one wins
+  for (const [id, cursor] of Object.entries(cursors)) {
+    const date = oldest.get(id);
+    if (cursor != null && date !== undefined) frontier = Math.max(frontier, date);
+  }
+  const messages = all.filter((m) => m.date >= frontier);
   return { ...query, messages, errors: pages[0]?.errors ?? [] };
 }
 

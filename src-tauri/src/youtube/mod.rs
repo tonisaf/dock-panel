@@ -395,7 +395,9 @@ pub async fn youtube_feed(app: AppHandle, force: bool) -> Result<FeedView, Strin
     let saved = load(&app);
     let stale = with_cache(&app, |c| now_ms() - c.refreshed > REFRESH_EVERY.as_millis() as i64);
     if !saved.channels.is_empty() && (force || stale) {
-        refresh(&app).await;
+        // New videos found here would otherwise never be announced.
+        let fresh = refresh(&app).await;
+        notify_new(&app, fresh);
     }
     let watched: HashSet<&str> = saved.watched.iter().map(String::as_str).collect();
     Ok(with_cache(&app, |cache| {
