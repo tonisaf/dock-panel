@@ -759,3 +759,36 @@ pub async fn spotify_add_to_playlist(playlist_id: String, uri: String) -> Result
         s => Err(format!("Spotify {}: {}", s.as_u16(), v["error"]["message"].as_str().unwrap_or(""))),
     }
 }
+
+// ---- covers ------------------------------------------------------------------------
+
+/// Largest cover the panel will pass through.
+const IMAGE_MAX: usize = 1 << 20;
+
+/// A Spotify cover as a `data:` URL, for when the panel's web view can't load
+/// it from the CDN directly (some networks block it there but not here).
+#[tauri::command]
+pub async fn spotify_image(url: String) -> Result<String, String> {
+    use base64::prelude::{Engine, BASE64_STANDARD};
+    let parsed = reqwest::Url::parse(&url).map_err(|e| e.to_string())?;
+    let host = parsed.host_str().unwrap_or_default();
+    if parsed.scheme() != "https" || !(host.ends_with(".scdn.co") || host.ends_with(".spotifycdn.com")) {
+        return Err("Не обложка Spotify".into());
+    }
+    let res = net::client().get(parsed).send().await.map_err(|e| e.to_string())?;
+    if !res.status().is_success() {
+        return Err(format!("HTTP {}", res.status()));
+    }
+    let mime = res
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .filter(|t| t.starts_with("image/"))
+        .unwrap_or("image/jpeg")
+        .to_string();
+    let bytes = res.bytes().await.map_err(|e| e.to_string())?;
+    if bytes.len() > IMAGE_MAX {
+        return Err("Слишком большая картинка".into());
+    }
+    Ok(format!("data:{mime};base64,{}", BASE64_STANDARD.encode(&bytes)))
+}

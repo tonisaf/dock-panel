@@ -5,6 +5,7 @@ import { Card } from "../../components/Card";
 import { usePanelStore } from "../../store";
 import { playUri, useLibrary, useSpotifyStatus } from "./api";
 import { DevicePicker } from "./DevicePicker";
+import { Cover } from "./Cover";
 
 const COLLAPSED = 7;
 
@@ -105,13 +106,7 @@ export function PlaylistsWidget() {
                 subtitle={tracks(p.tracks)}
                 busy={busyUri === p.uri}
                 onPlay={() => play(p.uri)}
-                art={
-                  p.image ? (
-                    <img src={p.image} className="size-full object-cover" draggable={false} loading="lazy" />
-                  ) : (
-                    <ListMusic className="m-auto mt-[35%] size-5 text-fg-subtle" />
-                  )
-                }
+                art={<Cover src={p.image} fallback={<ListMusic className="m-auto mt-[35%] size-5 text-fg-subtle" />} />}
               />
             ))}
           </div>

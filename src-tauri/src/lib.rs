@@ -141,6 +141,7 @@ pub fn run() {
             spotify::spotify_up_next,
             spotify::spotify_skip,
             spotify::spotify_add_to_playlist,
+            spotify::spotify_image,
             weather::weather_forecast,
             weather::weather_geocode,
             home::home_state,

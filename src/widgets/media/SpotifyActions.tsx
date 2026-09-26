@@ -6,7 +6,6 @@ import {
   ListMusic,
   ListPlus,
   Loader2,
-  Music2,
   Repeat,
   Repeat1,
   Shuffle,
@@ -31,6 +30,7 @@ import {
 } from "../spotify/api";
 import { DevicePicker } from "../spotify/DevicePicker";
 import { AnchoredMenu, menuItem } from "../spotify/Menu";
+import { Cover } from "../spotify/Cover";
 
 const GREEN = "text-[#1ed760]";
 const icon = "grid size-7 place-items-center rounded-full transition-colors hover:bg-ink/10";
@@ -289,7 +289,7 @@ function PlaylistPicker({
             {playlists.map((p) => (
               <button key={p.id} className={menuItem} disabled={!!busy} onClick={() => add(p.id, p.name)}>
                 <span className="grid size-7 shrink-0 place-items-center overflow-hidden rounded bg-ink/8">
-                  {p.image ? <img src={p.image} className="size-full object-cover" /> : <Music2 className="size-3.5 text-fg-subtle" />}
+                  <Cover src={p.image} />
                 </span>
                 <span className="min-w-0 flex-1 truncate">{p.name}</span>
                 {busy === p.id && <Loader2 className="size-3.5 animate-spin text-fg-subtle" />}
@@ -339,10 +339,8 @@ function UpNext({ trackKey, onError }: { trackKey: string; onError: (e: unknown)
             <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded bg-ink/8">
               {jumping === i ? (
                 <Loader2 className="size-3.5 animate-spin text-fg-subtle" />
-              ) : t.image ? (
-                <img src={t.image} className="size-full object-cover" />
               ) : (
-                <Music2 className="size-3.5 text-fg-subtle" />
+                <Cover src={t.image} />
               )}
             </span>
             <span className="min-w-0 flex-1">

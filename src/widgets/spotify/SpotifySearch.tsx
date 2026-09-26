@@ -6,6 +6,7 @@ import clsx from "clsx";
 import { EmptyState } from "../../components/Card";
 import { usePanelStore } from "../../store";
 import { playItem, queueTrack, searchSpotify, spotifyTerm, useSpotifyStatus, type SearchItem } from "./api";
+import { Cover } from "./Cover";
 
 /** Results for "sp <query>" typed into the panel's search bar. */
 export function useSpotifySearch() {
@@ -78,11 +79,7 @@ function Row({ item, active, onHover }: { item: SearchItem; active: boolean; onH
           item.kind === "artist" ? "rounded-full" : "rounded-md",
         )}
       >
-        {item.image ? (
-          <img src={item.image} className="size-full object-cover" draggable={false} loading="lazy" />
-        ) : (
-          <Icon className="size-4 text-fg-subtle" />
-        )}
+        <Cover src={item.image} fallback={<Icon className="size-4 text-fg-subtle" />} />
       </div>
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13.5px]">{item.name}</div>

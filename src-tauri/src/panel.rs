@@ -49,12 +49,27 @@ fn window_width() -> u32 {
 /// Resizes the window to `window_width()`; docked right, it grows leftwards
 /// so the right edge stays put.
 fn apply_width(win: &WebviewWindow) {
-    if let (Ok(scale), Ok(size), Ok(pos)) = (win.scale_factor(), win.outer_size(), win.outer_position()) {
-        let new_w = (window_width() as f64 * scale).round() as u32;
-        let _ = win.set_size(PhysicalSize::new(new_w, size.height));
-        if RIGHT.load(Ordering::SeqCst) {
-            let _ = win.set_position(PhysicalPosition::new(pos.x + size.width as i32 - new_w as i32, pos.y));
-        }
+    let (Ok(scale), Ok(inner), Ok(outer), Ok(pos)) =
+        (win.scale_factor(), win.inner_size(), win.outer_size(), win.outer_position())
+    else {
+        return;
+    };
+    let new_w = (window_width() as f64 * scale).round() as u32;
+    // `set_size` takes the inner size. Feeding it the outer height grew the
+    // window by its frame on every call, so a drag pushed the bottom off screen.
+    // The height is the monitor's, as when the panel is placed.
+    let height = win
+        .current_monitor()
+        .ok()
+        .flatten()
+        .map(|m| m.work_area().size.height.saturating_sub(2 * (MARGIN * m.scale_factor()).round() as u32))
+        .filter(|&h| h > 0)
+        .unwrap_or(inner.height);
+    let _ = win.set_size(PhysicalSize::new(new_w, height));
+    if RIGHT.load(Ordering::SeqCst) {
+        // Keep the right edge where it was.
+        let new_outer_w = new_w + outer.width.saturating_sub(inner.width);
+        let _ = win.set_position(PhysicalPosition::new(pos.x + outer.width as i32 - new_outer_w as i32, pos.y));
     }
 }
 /// Dock to the right screen edge instead of the left.
