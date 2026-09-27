@@ -172,21 +172,33 @@ function moveTo(cols: string[][], id: string, { col, index }: { col: number; ind
   return next;
 }
 
-/** Live widgets in their real columns: drag anywhere on a widget to move it, eye to hide. */
+/**
+ * Live widgets in their real columns: drag anywhere on a widget to move it, eye to hide.
+ *
+ * With `liveDrag` it's the press-and-hold move on the normal home tab instead:
+ * no frame, buttons or hidden widgets, already dragging, and the arrangement
+ * is saved the moment the mouse is released.
+ */
 function LayoutEditor({
   initial,
   count,
   onDone,
+  liveDrag,
 }: {
   initial: string[][];
   count: number;
   onDone: (cols: string[][] | null, hidden: string[]) => void;
+  liveDrag?: Drag;
 }) {
+  const live = liveDrag != null;
   const [cols, setCols] = useState(initial);
   const [hidden, setHidden] = useState(() => new Set(usePrefs.getState().hiddenWidgets));
-  const [drag, setDrag] = useState<Drag | null>(null);
+  const [drag, setDrag] = useState<Drag | null>(liveDrag ?? null);
   const colEls = useRef<(HTMLDivElement | null)[]>([]);
   const itemEls = useRef(new Map<string, HTMLDivElement>());
+  // The drop handler reads these after the last re-render.
+  const latest = useRef({ cols, hidden, onDone });
+  latest.current = { cols, hidden, onDone };
 
   // The panel was resized while editing.
   useEffect(() => setCols((prev) => reshape(prev, count)), [count]);
@@ -202,7 +214,19 @@ function LayoutEditor({
       pointer.y = e.clientY;
       place();
     };
-    const onUp = () => setDrag(null);
+    const onUp = () => {
+      setDrag(null);
+      if (!live) return;
+      // The release would also click whatever button is under the cursor; swallow that click.
+      const swallow = (e: MouseEvent) => {
+        e.stopPropagation();
+        e.preventDefault();
+      };
+      window.addEventListener("click", swallow, { capture: true, once: true });
+      setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 100);
+      const { cols, hidden, onDone } = latest.current;
+      onDone(cols, [...hidden]);
+    };
 
     // Scroll the tab while the cursor is near its top or bottom edge.
     const scroller = colEls.current[0]?.closest(".scroll-area");
@@ -228,7 +252,7 @@ function LayoutEditor({
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
     };
-  }, [dragId]);
+  }, [dragId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = (id: string) =>
     setHidden((prev) => {
@@ -249,7 +273,7 @@ function LayoutEditor({
   const button = "rounded-lg px-3 py-1 text-[12.5px] font-medium";
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2 px-1">
+      <div className={clsx("flex items-center gap-2 px-1", live && "hidden")}>
         <span className="flex-1 text-[12px] text-fg-subtle">
           Перетаскивайте виджеты{count > 1 && " между колонками"}, глаз — скрыть
         </span>
@@ -269,7 +293,7 @@ function LayoutEditor({
       </div>
 
       <LayoutGroup>
-        <div className={clsx("flex items-start gap-3", drag && "cursor-grabbing")}>
+        <div className={clsx("flex items-start gap-3", drag && "cursor-grabbing select-none")}>
           {cols.map((col, i) => (
             <div
               key={i}
@@ -277,7 +301,9 @@ function LayoutEditor({
                 colEls.current[i] = el;
               }}
               className={clsx(
-                "relative flex min-h-32 min-w-0 flex-1 flex-col gap-3 rounded-2xl",
+                "relative flex min-w-0 flex-1 flex-col gap-3 rounded-2xl",
+                // In the live move an empty column still needs room to drop into.
+                live ? "min-h-24" : "min-h-32",
                 col.length === 0 && "border-2 border-dashed border-stroke",
               )}
             >
@@ -285,6 +311,7 @@ function LayoutEditor({
                 const { component: Widget, title } = BY_ID.get(id) as WidgetDef;
                 const dragging = drag?.id === id;
                 const visible = !hidden.has(id);
+                if (live && !visible) return null;
                 return (
                   <motion.div
                     key={id}
@@ -310,15 +337,18 @@ function LayoutEditor({
                     {dragging && (
                       <div className="absolute inset-0 rounded-2xl border-2 border-dashed border-accent/70 bg-accent/8" />
                     )}
-                    {/* Blocks the widget's own buttons while editing. */}
-                    <div
-                      onPointerDown={(e) => startDrag(e, id)}
-                      className={clsx(
-                        "absolute inset-0 touch-none rounded-2xl ring-1 ring-accent/35 ring-inset",
-                        drag ? "cursor-grabbing" : "cursor-grab hover:bg-accent/5",
-                      )}
-                    />
-                    {!dragging && (
+                    {/* Blocks the widget's own buttons while editing (and while a live move is on). */}
+                    {(!live || drag) && (
+                      <div
+                        onPointerDown={(e) => startDrag(e, id)}
+                        className={clsx(
+                          "absolute inset-0 touch-none rounded-2xl",
+                          !live && "ring-1 ring-accent/35 ring-inset",
+                          drag ? "cursor-grabbing" : "cursor-grab hover:bg-accent/5",
+                        )}
+                      />
+                    )}
+                    {!dragging && !live && (
                       <div className="absolute top-2 right-2">
                         <EyeButton visible={visible} onClick={() => toggle(id)} />
                       </div>
@@ -334,6 +364,52 @@ function LayoutEditor({
       {drag && <DragGhost drag={drag} />}
     </div>
   );
+}
+
+/** How long to hold the mouse on a widget before it lifts off for moving. */
+const HOLD_MS = 400;
+/** Moving further than this before then is a scroll or a text selection, not a hold. */
+const HOLD_SLOP = 6;
+
+/** Controls where holding the mouse means using them, not moving the widget. */
+function isField(target: EventTarget | null) {
+  const el = target instanceof Element ? target : null;
+  return !!el?.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [data-no-hold]");
+}
+
+/**
+ * Press and hold on a widget to lift it: calls `onLift` with the grab point
+ * once the mouse has stayed down (and nearly still) for HOLD_MS.
+ */
+function useHoldToLift(onLift: (id: string, grab: Drag) => void) {
+  const cancel = useRef<(() => void) | null>(null);
+  useEffect(() => () => cancel.current?.(), []);
+  return (e: ReactPointerEvent<HTMLElement>, id: string) => {
+    if (e.button !== 0 || isField(e.target)) return;
+    cancel.current?.();
+    const el = e.currentTarget;
+    const start = { x: e.clientX, y: e.clientY };
+    const onMove = (m: PointerEvent) => {
+      if (Math.hypot(m.clientX - start.x, m.clientY - start.y) > HOLD_SLOP) stop();
+    };
+    const timer = setTimeout(() => {
+      stop();
+      const r = el.getBoundingClientRect();
+      window.getSelection()?.removeAllRanges();
+      onLift(id, { id, dx: start.x - r.left, dy: start.y - r.top, width: r.width, x: start.x, y: start.y });
+    }, HOLD_MS);
+    const stop = () => {
+      clearTimeout(timer);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      cancel.current = null;
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+    cancel.current = stop;
+  };
 }
 
 function useNow() {
@@ -354,6 +430,8 @@ export function HomeTab() {
   const hidden = usePrefs((s) => s.hiddenWidgets);
   const setWidgetLayout = usePrefs((s) => s.setWidgetLayout);
   const [editing, setEditing] = useState<string[][] | null>(null);
+  // A widget lifted by press-and-hold, with the columns it moves between.
+  const [moving, setMoving] = useState<{ cols: string[][]; drag: Drag } | null>(null);
   const time = now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
   const date = now.toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
   const visible = (id: string) => !hidden.includes(id);
@@ -366,11 +444,25 @@ export function HomeTab() {
     setWidgetLayout(cols ? cols.flat() : order, hiddenIds, cols);
     setEditing(null);
   };
+  const finishMoving = (cols: string[][] | null, hiddenIds: string[]) => {
+    setWidgetLayout(cols ? cols.flat() : order, hiddenIds, cols);
+    setMoving(null);
+  };
+
+  const hold = useHoldToLift((_, drag) => {
+    const el = containerRef.current;
+    setMoving({ cols: arranged ?? (el ? measureColumns(el, count, order) : [order]), drag });
+  });
 
   const slot = (id: string) => {
     const Widget = BY_ID.get(id)!.component;
     return (
-      <div key={id} data-widget={id} className="mb-3 break-inside-avoid">
+      <div
+        key={id}
+        data-widget={id}
+        onPointerDown={(e) => hold(e, id)}
+        className="mb-3 break-inside-avoid"
+      >
         <Widget />
       </div>
     );
@@ -383,7 +475,7 @@ export function HomeTab() {
           <div className="font-display text-[52px] leading-none font-semibold tracking-tight tabular-nums">{time}</div>
           <div className="mt-1.5 text-[14px] text-fg-muted first-letter:uppercase">{date}</div>
         </div>
-        {!editing && (
+        {!editing && !moving && (
           <button
             onClick={startEditing}
             title="Расставить виджеты"
@@ -397,6 +489,8 @@ export function HomeTab() {
       <div ref={containerRef}>
         {editing ? (
           <LayoutEditor initial={editing} count={count} onDone={finishEditing} />
+        ) : moving ? (
+          <LayoutEditor initial={moving.cols} count={count} onDone={finishMoving} liveDrag={moving.drag} />
         ) : arranged ? (
           <div className="flex items-start gap-3">
             {arranged.map((col, i) => (
