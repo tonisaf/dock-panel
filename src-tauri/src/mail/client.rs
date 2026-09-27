@@ -7,6 +7,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
+use imap_proto::NameAttribute;
 use mail_parser::{Address, MessageParser, MimeHeaders};
 use native_tls::{TlsConnector, TlsStream};
 use serde::{Deserialize, Serialize};
@@ -54,7 +55,8 @@ pub fn known_server(email: &str) -> Option<(&'static str, u16)> {
 
 fn friendly(e: imap::Error) -> String {
     match e {
-        imap::Error::No(msg) | imap::Error::Bad(msg) => {
+        imap::Error::No(imap::error::No { information: msg, .. })
+        | imap::Error::Bad(imap::error::Bad { information: msg, .. }) => {
             let lower = msg.to_lowercase();
             if lower.contains("auth") || lower.contains("credentials") || lower.contains("password") || lower.contains("login") {
                 "Почта не приняла пароль. Нужен пароль приложения, а в Яндексе ещё и включённый доступ по IMAP.".into()
@@ -228,16 +230,11 @@ pub fn web_url(account: &Account, message_id: Option<&str>) -> String {
 }
 
 /// A folder by its special-use flag (RFC 6154), e.g. `\Trash`.
-pub fn special_folder(s: &mut Session, flags: &[&str]) -> imap::Result<Option<String>> {
+pub fn special_folder(s: &mut Session, flags: &[NameAttribute<'static>]) -> imap::Result<Option<String>> {
     let names = s.list(Some(""), Some("*"))?;
     Ok(names
         .iter()
-        .find(|n| {
-            n.attributes().iter().any(|a| match a {
-                imap::types::NameAttribute::Custom(c) => flags.iter().any(|f| c.eq_ignore_ascii_case(f)),
-                _ => false,
-            })
-        })
+        .find(|n| n.attributes().iter().any(|a| flags.contains(a)))
         .map(|n| n.name().to_string()))
 }
 
@@ -371,7 +368,7 @@ pub fn act(account: &Account, uid: u32, action: Action) -> Result<(), String> {
             Action::Unread => drop(s.uid_store(&uid, "-FLAGS.SILENT (\\Seen)")?),
             Action::Archive => {
                 // Gmail: "All Mail" (leaving the inbox is archiving); others: their archive folder.
-                let folder = match special_folder(s, &["\\All", "\\Archive"])? {
+                let folder = match special_folder(s, &[NameAttribute::All, NameAttribute::Archive])? {
                     Some(f) => f,
                     None => {
                         let _ = s.create("Archive");
@@ -380,7 +377,7 @@ pub fn act(account: &Account, uid: u32, action: Action) -> Result<(), String> {
                 };
                 s.uid_mv(&uid, &folder)?;
             }
-            Action::Delete => match special_folder(s, &["\\Trash"])? {
+            Action::Delete => match special_folder(s, &[NameAttribute::Trash])? {
                 Some(trash) => s.uid_mv(&uid, &trash)?,
                 None => {
                     s.uid_store(&uid, "+FLAGS.SILENT (\\Deleted)")?;
