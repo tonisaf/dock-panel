@@ -1,6 +1,6 @@
 [package]
 name = "dock-panel"
-version = "0.2.9"
+version = "0.2.10"
 description = "Slide-out launcher panel with widgets"
 authors = ["tonis"]
 edition = "2021"
