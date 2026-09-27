@@ -135,7 +135,13 @@ export function PomodoroWidget() {
             <span className={clsx("font-display text-[28px] leading-none font-semibold tabular-nums", !s.running && started && "opacity-60")}>
               {clock(left)}
             </span>
-            <span className="mt-1.5 flex items-center gap-1 text-[11.5px] text-fg-subtle group-hover:text-fg">
+            {/* The action, not the state: while running it only shows under the pointer. */}
+            <span
+              className={clsx(
+                "mt-1.5 flex items-center gap-1 text-[11.5px] text-fg-subtle transition-opacity group-hover:text-fg",
+                s.running && "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100",
+              )}
+            >
               {s.running ? <Pause className="size-3" /> : <Play className="size-3" />}
               {s.running ? "пауза" : started ? "продолжить" : "старт"}
             </span>

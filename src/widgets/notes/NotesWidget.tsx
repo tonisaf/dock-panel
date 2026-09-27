@@ -1,7 +1,7 @@
 import { CloudOff, Pin, Plus, StickyNote } from "lucide-react";
 import { Card } from "../../components/Card";
 import { usePanelStore } from "../../store";
-import { ago, useNotes } from "../../notes/api";
+import { ago, showPin, useNotes } from "../../notes/api";
 
 const SHOWN = 5;
 
@@ -47,7 +47,7 @@ export function NotesWidget() {
                 {n.icon && <span className="shrink-0">{n.icon}</span>}
                 <span className="min-w-0 flex-1 truncate">{n.title || "Без названия"}</span>
                 {n.local && <CloudOff className="size-3 shrink-0 text-fg-subtle" />}
-                {n.pinned && <Pin className="size-3 shrink-0 text-fg-subtle" />}
+                {showPin(n) && <Pin className="size-3 shrink-0 text-fg-subtle" />}
                 <span className="shrink-0 text-[11px] text-fg-subtle">{ago(n.edited)}</span>
               </div>
               {n.preview && <div className="truncate text-[11.5px] text-fg-subtle">{n.preview}</div>}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Loader2, Pin, PinOff, Plus } from "lucide-react";
+import { Check, Loader2, Pin, Plus } from "lucide-react";
 import clsx from "clsx";
 import { AnchoredMenu, menuItem } from "../widgets/spotify/Menu";
 import { tagStyle, useNotesActions, type Note, type Tag } from "./api";
@@ -7,7 +7,6 @@ import { tagStyle, useNotesActions, type Note, type Tag } from "./api";
 /** The pin checkbox of the database, as a button. */
 export function PinButton({ note }: { note: Note }) {
   const { setProps } = useNotesActions();
-  const Icon = note.pinned ? PinOff : Pin;
   return (
     <button
       onClick={() => setProps(note.id, { pinned: !note.pinned }).catch(console.error)}
@@ -17,7 +16,8 @@ export function PinButton({ note }: { note: Note }) {
         note.pinned ? "text-accent" : "text-fg-subtle",
       )}
     >
-      <Icon className="size-3.5" />
+      {/* Filled while pinned, as in the list. */}
+      <Pin className="size-3.5" fill={note.pinned ? "currentColor" : "none"} />
     </button>
   );
 }

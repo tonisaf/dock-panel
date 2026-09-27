@@ -89,20 +89,10 @@ export function useCreateTask() {
   });
 }
 
-const NOTION_COLORS: Record<string, string> = {
-  default: "rgb(255 255 255 / 0.55)",
-  gray: "#9b9a97",
-  brown: "#ba856f",
-  orange: "#f5a55b",
-  yellow: "#e9c46a",
-  green: "#6fcf97",
-  blue: "#6ea8fe",
-  purple: "#b794f4",
-  pink: "#f28fb5",
-  red: "#ff7b72",
-};
+const NOTION_COLOR_NAMES = new Set(["gray", "brown", "orange", "yellow", "green", "blue", "purple", "pink", "red"]);
 
-export const notionColor = (color: string) => NOTION_COLORS[color] ?? NOTION_COLORS.default;
+/** A Notion colour name as CSS, per theme (see `--notion-*` in index.css). */
+export const notionColor = (color: string) => `var(--notion-${NOTION_COLOR_NAMES.has(color) ? color : "default"})`;
 
 /** "Сегодня", "Завтра", "25 сен", with overdue flagged. */
 export function describeDue(due: string, now = new Date()) {

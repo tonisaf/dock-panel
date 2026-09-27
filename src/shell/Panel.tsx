@@ -129,8 +129,8 @@ export function Panel() {
                     className="scroll-area -mx-1 min-h-0 flex-1 px-1"
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    transition={{ duration: 0.15 }}
+                    exit={{ opacity: 0, transition: { duration: 0.05 } }}
+                    transition={{ duration: 0.14, ease: "easeOut" }}
                   >
                     <SideView />
                   </motion.main>
@@ -146,8 +146,8 @@ export function Panel() {
                   className="scroll-area -mx-1 min-h-0 flex-1 px-1"
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -4 }}
-                  transition={{ duration: 0.15 }}
+                  exit={{ opacity: 0, transition: { duration: 0.05 } }}
+                  transition={{ duration: 0.14, ease: "easeOut" }}
                 >
                   <View />
                 </motion.main>

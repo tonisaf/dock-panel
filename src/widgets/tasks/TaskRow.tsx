@@ -6,6 +6,7 @@ import clsx from "clsx";
 import { usePanelStore } from "../../store";
 import { describeDue, notionColor, type Badge, type Task } from "./api";
 import { TaskEditor } from "./TaskEditor";
+import { Collapse } from "../../components/Collapse";
 
 function Chip({ badge }: { badge: Badge }) {
   const color = notionColor(badge.color);
@@ -73,35 +74,40 @@ export function TaskRow({
       </button>
 
       <div className="min-w-0 flex-1">
-        <button
-          onClick={compact ? open : () => setEditing(!editing)}
-          title={compact ? "Открыть в Notion" : "Изменить"}
-          className={clsx(
-            "block w-full text-left leading-snug hover:underline",
-            compact ? "truncate text-[13px]" : "text-[13.5px]",
-            checked && "text-fg-subtle line-through",
-          )}
-        >
-          {task.title || "Без названия"}
-        </button>
-        {(due || task.priority || task.tag || task.inProgress) && (
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            {task.priority && <Chip badge={task.priority} />}
-            {!compact && task.tag && <Chip badge={task.tag} />}
-            {task.inProgress && task.status && <Chip badge={task.status} />}
-            {due && (
-              <span
-                className={clsx(
-                  "flex items-center gap-1 text-[11px]",
-                  due.overdue ? "text-danger" : due.soon ? "text-warn" : "text-fg-subtle",
-                )}
-              >
-                <CalendarDays className="size-3" /> {due.label}
-              </span>
+        {/* While editing, the card's own fields show the title and badges. */}
+        <Collapse open={!editing}>
+          <button
+            onClick={compact ? open : () => setEditing(!editing)}
+            title={compact ? "Открыть в Notion" : "Изменить"}
+            className={clsx(
+              "block w-full text-left leading-snug hover:underline",
+              compact ? "truncate text-[13px]" : "text-[13.5px]",
+              checked && "text-fg-subtle line-through",
             )}
-          </div>
-        )}
-        {editing && <TaskEditor task={task} onClose={() => setEditing(false)} />}
+          >
+            {task.title || "Без названия"}
+          </button>
+          {(due || task.priority || task.tag || task.inProgress) && (
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              {task.priority && <Chip badge={task.priority} />}
+              {!compact && task.tag && <Chip badge={task.tag} />}
+              {task.inProgress && task.status && <Chip badge={task.status} />}
+              {due && (
+                <span
+                  className={clsx(
+                    "flex items-center gap-1 text-[11px]",
+                    due.overdue ? "text-danger" : due.soon ? "text-warn" : "text-fg-subtle",
+                  )}
+                >
+                  <CalendarDays className="size-3" /> {due.label}
+                </span>
+              )}
+            </div>
+          )}
+        </Collapse>
+        <Collapse open={editing}>
+          <TaskEditor task={task} onClose={() => setEditing(false)} />
+        </Collapse>
       </div>
     </motion.div>
   );

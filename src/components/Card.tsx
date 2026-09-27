@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { ChevronDown, type LucideIcon } from "lucide-react";
 import clsx from "clsx";
+import { Collapse } from "./Collapse";
 
 export function Card({
   title,
@@ -66,7 +67,13 @@ export function Card({
           )}
         </header>
       )}
-      {!(collapsible && collapsed) && children}
+      {collapsible ? (
+        <Collapse open={!collapsed} className="-mx-2 px-2">
+          {children}
+        </Collapse>
+      ) : (
+        children
+      )}
     </section>
   );
 }

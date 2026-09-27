@@ -8,7 +8,7 @@ import { usePrefs } from "../lib/prefs";
 import { usePanelStore } from "../store";
 import { Blocks, OpenInNotion } from "../notes/NoteView";
 import { NoteEditor, PinButton, TagEditor } from "../notes/NoteEditor";
-import { ago, tagStyle, useNotePage, useNotes, useNotesActions, type Note, type NotesState } from "../notes/api";
+import { ago, showPin, tagStyle, useNotePage, useNotes, useNotesActions, type Note, type NotesState } from "../notes/api";
 
 function Status({ s, onRefresh }: { s: NotesState; onRefresh: () => void }) {
   const text = s.syncing
@@ -93,7 +93,7 @@ function Row({ n, active, onOpen }: { n: Note; active: boolean; onOpen: () => vo
         {n.icon && <span className="shrink-0">{n.icon}</span>}
         <span className="min-w-0 flex-1 truncate font-medium">{n.title || "Без названия"}</span>
         {n.local && <span title="Ещё не в Notion"><CloudOff className="size-3.5 shrink-0 text-fg-subtle" /></span>}
-        {n.pinned && <Pin className="size-3.5 shrink-0 text-fg-subtle" />}
+        {showPin(n) && <Pin className="size-3.5 shrink-0 text-fg-subtle" />}
         <span className="shrink-0 text-[11px] text-fg-subtle tabular-nums">{ago(n.edited)}</span>
       </div>
       {n.preview && <p className="line-clamp-2 text-[12px] leading-snug text-fg-subtle">{n.preview}</p>}

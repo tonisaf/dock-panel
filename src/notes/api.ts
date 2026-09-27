@@ -156,6 +156,9 @@ export function useNotesActions() {
   };
 }
 
+/** Whether to add the pin glyph: not when the note's own icon already is a pin. */
+export const showPin = (n: Note) => n.pinned && n.icon !== "📌" && n.icon !== "📍";
+
 export const imageSrc = (b: Block) => (b.file ? convertFileSrc(b.file, "noteimg") : b.url);
 
 /** "5 мин назад", "вчера", "12 сент." */
@@ -173,18 +176,10 @@ export function ago(iso: string | number) {
   return d.toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
 }
 
-/** Notion's colour names as CSS, readable on both themes. */
-export const NOTION_COLORS: Record<string, string> = {
-  gray: "#9b9a97",
-  brown: "#a27763",
-  orange: "#d9730d",
-  yellow: "#cb912f",
-  green: "#448361",
-  blue: "#337ea9",
-  purple: "#9065b0",
-  pink: "#c14c8a",
-  red: "#d44c47",
-};
+/** Notion's colour names as CSS, per theme (see `--notion-*` in index.css). */
+export const NOTION_COLORS: Record<string, string> = Object.fromEntries(
+  ["gray", "brown", "orange", "yellow", "green", "blue", "purple", "pink", "red"].map((c) => [c, `var(--notion-${c})`]),
+);
 
 export function tagStyle(color: string) {
   const c = NOTION_COLORS[color.replace(/_background$/, "")];

@@ -41,6 +41,47 @@
   --color-danger: #b91c1c;
 }
 
+/* Notion's option colours (tags, priorities, text colour), readable on each
+   theme: light pastels on dark, deeper tones on light. */
+:root {
+  --notion-default: rgb(255 255 255 / 0.55);
+  --notion-gray: #9b9a97;
+  --notion-brown: #ba856f;
+  --notion-orange: #f5a55b;
+  --notion-yellow: #e9c46a;
+  --notion-green: #6fcf97;
+  --notion-blue: #6ea8fe;
+  --notion-purple: #b794f4;
+  --notion-pink: #f28fb5;
+  --notion-red: #ff7b72;
+}
+
+[data-theme="light"] {
+  --notion-default: rgb(18 18 26 / 0.6);
+  --notion-gray: #6b6a67;
+  --notion-brown: #8a5a44;
+  --notion-orange: #b4540a;
+  --notion-yellow: #a16207;
+  --notion-green: #23724b;
+  --notion-blue: #1d5fa8;
+  --notion-purple: #6b3fb0;
+  --notion-pink: #a8286e;
+  --notion-red: #c0312b;
+}
+
+/* Windows' "Animation effects" off: no slides, pulses or spins from CSS either
+   (Motion's own animations follow MotionConfig in main.tsx). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* The window itself is acrylic. Windows 11 ignores the acrylic tint color, so
    a bright wallpaper washes it out; this dark scrim keeps text readable on any
    backdrop while the blur still shows through. */

@@ -68,7 +68,7 @@ export function TaskEditor({ task, onClose }: { task: Task; onClose: () => void 
 
   return (
     <div
-      className="mt-1.5 flex flex-col gap-2.5 rounded-xl border border-stroke bg-surface p-2.5"
+      className="flex flex-col gap-2.5 rounded-xl border border-stroke bg-surface p-2.5"
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.stopPropagation();

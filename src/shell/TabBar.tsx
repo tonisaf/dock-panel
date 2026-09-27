@@ -22,8 +22,9 @@ export function TabBar({ exclude, active: activeTab }: { exclude?: TabId; active
             key={id}
             onClick={() => setTab(id)}
             title={`${label}  (Ctrl+${i + 1})`}
+            aria-label={label}
             className={clsx(
-              "relative flex min-w-0 flex-auto flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-[11px] font-medium outline-none transition-colors",
+              "relative flex min-w-0 flex-auto flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-[11px] font-medium outline-none transition-colors @max-[600px]:py-2",
               active ? "text-fg" : "text-fg-muted hover:text-fg",
             )}
           >
@@ -42,10 +43,8 @@ export function TabBar({ exclude, active: activeTab }: { exclude?: TabId; active
                 </span>
               )}
             </span>
-            {/* Eight labels need a tighter font on the narrowest panel; tabs size to their labels. */}
-            <span className="relative max-w-full truncate @max-[480px]:text-[10px] @max-[480px]:tracking-tight">
-              {label}
-            </span>
+            {/* Eight labels don't fit a narrow panel: there the tabs are icons, named in their tooltip. */}
+            <span className="relative max-w-full truncate @max-[600px]:hidden">{label}</span>
           </button>
         );
       })}

@@ -9,6 +9,7 @@ import { UpdateSettings } from "../components/UpdateSettings";
 import { MAX_WIDTH, MIN_WIDTH, WIDTH_PRESETS, usePanelSettings, usePanelWidth, type Edge } from "../lib/panelWidth";
 import { usePrefs, type ThemeMode } from "../lib/prefs";
 import { Toggle } from "../components/Toggle";
+import { Collapse } from "../components/Collapse";
 import { prettyAccelerator, toAccelerator } from "../lib/accelerator";
 import { MailSettings } from "../components/MailSettings";
 import { GcalSettings } from "../components/GcalSettings";
@@ -302,7 +303,9 @@ function Group({
           className={clsx("size-4 shrink-0 text-fg-subtle transition-transform", !status && "ml-auto", !collapsed && "rotate-180")}
         />
       </button>
-      {!collapsed && <div className="border-t border-stroke">{children}</div>}
+      <Collapse open={!collapsed}>
+        <div className="border-t border-stroke">{children}</div>
+      </Collapse>
     </div>
   );
 }
