@@ -358,6 +358,12 @@ fn place_on_cursor_monitor(app: &AppHandle, win: &WebviewWindow) {
         area.position.x + margin
     };
     let _ = win.set_position(PhysicalPosition::new(x, area.position.y + margin));
+    // Tauri moved it onto the right monitor (and its DPI); now line the visible
+    // edge up with the margins, which the invisible resize borders would skew.
+    #[cfg(windows)]
+    if let Ok(hwnd) = win.hwnd() {
+        native::place_visible(hwnd.0 as _, x, area.position.y + margin, width as i32, height as i32);
+    }
 }
 
 #[tauri::command]
@@ -508,12 +514,14 @@ pub fn panel_set_width(app: AppHandle, width: u32, persist: bool) -> u32 {
 
 #[cfg(windows)]
 mod native {
-    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Foundation::{HWND, RECT};
     use windows::Win32::Graphics::Dwm::{
-        DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+        DwmGetWindowAttribute, DwmSetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_WINDOW_CORNER_PREFERENCE,
+        DWMWCP_ROUND,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+        GetWindowLongPtrW, GetWindowRect, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, SWP_NOACTIVATE, SWP_NOZORDER,
+        WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
     };
 
     pub fn style(raw: *mut core::ffi::c_void) {
@@ -530,6 +538,52 @@ mod native {
             let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
             let ex = (ex | WS_EX_TOOLWINDOW.0 as isize) & !(WS_EX_APPWINDOW.0 as isize);
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex);
+        }
+    }
+
+    /// The invisible resize borders around the window (left, top, right,
+    /// bottom), learnt from DWM whenever it can tell and remembered, since a
+    /// hidden window may not report them.
+    static FRAME: std::sync::Mutex<Option<(i32, i32, i32, i32)>> = std::sync::Mutex::new(None);
+
+    fn frame(hwnd: HWND) -> (i32, i32, i32, i32) {
+        let mut cached = FRAME.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let (mut outer, mut visible) = (RECT::default(), RECT::default());
+            let known = GetWindowRect(hwnd, &mut outer).is_ok()
+                && DwmGetWindowAttribute(
+                    hwnd,
+                    DWMWA_EXTENDED_FRAME_BOUNDS,
+                    &mut visible as *mut _ as _,
+                    std::mem::size_of::<RECT>() as u32,
+                )
+                .is_ok()
+                && visible.right > visible.left;
+            if known {
+                let borders = (
+                    visible.left - outer.left,
+                    visible.top - outer.top,
+                    outer.right - visible.right,
+                    outer.bottom - visible.bottom,
+                );
+                // Sane borders only: a minimised or mid-move window reports nonsense.
+                if [borders.0, borders.1, borders.2, borders.3].iter().all(|b| (0..=32).contains(b)) {
+                    *cached = Some(borders);
+                }
+            }
+        }
+        cached.unwrap_or((0, 0, 0, 0))
+    }
+
+    /// Places the window so its *visible* edge is the given rectangle
+    /// (physical pixels): Windows 10/11 windows carry invisible resize borders
+    /// around it, which otherwise shift it inwards on one side and past the
+    /// screen edge on the other.
+    pub fn place_visible(raw: *mut core::ffi::c_void, x: i32, y: i32, w: i32, h: i32) {
+        let hwnd = HWND(raw);
+        let (l, t, r, b) = frame(hwnd);
+        unsafe {
+            let _ = SetWindowPos(hwnd, None, x - l, y - t, w + l + r, h + t + b, SWP_NOZORDER | SWP_NOACTIVATE);
         }
     }
 }
