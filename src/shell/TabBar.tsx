@@ -1,16 +1,22 @@
 import { motion } from "motion/react";
 import clsx from "clsx";
-import { TABS, usePanelStore } from "../store";
+import { TABS, usePanelStore, type TabId } from "../store";
 import { useUnread } from "../mail/api";
 
-export function TabBar() {
+/**
+ * The tab switcher. In full screen it drives the right side only: home is
+ * always on the left, so it's left out (`exclude`) and `active` is that side's tab.
+ */
+export function TabBar({ exclude, active: activeTab }: { exclude?: TabId; active?: TabId } = {}) {
   const { tab, setTab } = usePanelStore();
   const unread = useUnread().data?.total ?? 0;
+  const current = activeTab ?? tab;
 
   return (
     <nav className="@container flex shrink-0 gap-1 rounded-xl border border-stroke bg-surface p-1">
       {TABS.map(({ id, label, icon: Icon }, i) => {
-        const active = id === tab;
+        if (id === exclude) return null;
+        const active = id === current;
         return (
           <button
             key={id}

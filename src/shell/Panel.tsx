@@ -41,13 +41,20 @@ const TAB_VIEWS = {
  */
 export function Panel() {
   const searchRef = useRef<HTMLInputElement>(null);
-  const { open, setOpen, tab, setTab, setQuery } = usePanelStore();
+  const { open, setOpen, tab, setTab, setQuery, full, sideTab } = usePanelStore();
   const queryClient = useQueryClient();
   // Keep the app list warm so the Apps tab and search are instant.
   useApps();
   useAppearance();
   // Slide in from the docked edge.
   const dir = usePanelSettings().edge === "right" ? 1 : -1;
+
+  // The window's mode lives in Rust (it survives a page reload); start from it.
+  useEffect(() => {
+    invoke<boolean>("panel_fullscreen")
+      .then((full) => usePanelStore.setState({ full }))
+      .catch(console.error);
+  }, []);
 
   useEffect(() => {
     const unlisten = [
@@ -87,6 +94,7 @@ export function Panel() {
   }, [setOpen, setTab]);
 
   const View = TAB_VIEWS[tab];
+  const SideView = TAB_VIEWS[sideTab === "home" ? "apps" : sideTab];
 
   return (
     <AnimatePresence onExitComplete={() => invoke("hide_panel")}>
@@ -105,22 +113,48 @@ export function Panel() {
             <SearchBar ref={searchRef} />
             <WindowButtons />
           </div>
-          <TabBar />
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.main
-              key={tab}
-              className="scroll-area -mx-1 min-h-0 flex-1 px-1"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.15 }}
-            >
-              <View />
-            </motion.main>
-          </AnimatePresence>
+          {full ? (
+            // Full screen: home stays on the left, the other tabs switch on the right.
+            <div className="flex min-h-0 flex-1 gap-4">
+              <main className="scroll-area -mx-1 min-h-0 w-[52%] min-w-[360px] shrink-0 px-1">
+                <HomeTab />
+              </main>
+              <div className="flex min-w-0 flex-1 flex-col gap-3">
+                <TabBar exclude="home" active={sideTab} />
+                <AnimatePresence mode="wait" initial={false}>
+                  <motion.main
+                    key={sideTab}
+                    className="scroll-area -mx-1 min-h-0 flex-1 px-1"
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    <SideView />
+                  </motion.main>
+                </AnimatePresence>
+              </div>
+            </div>
+          ) : (
+            <>
+              <TabBar />
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.main
+                  key={tab}
+                  className="scroll-area -mx-1 min-h-0 flex-1 px-1"
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.15 }}
+                >
+                  <View />
+                </motion.main>
+              </AnimatePresence>
+            </>
+          )}
           <AppContextMenu />
           <DropToPin />
-          <ResizeHandle />
+          {!full && <ResizeHandle />}
         </motion.div>
       )}
     </AnimatePresence>

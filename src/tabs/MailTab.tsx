@@ -420,7 +420,9 @@ export function MailTab() {
   const queryClient = useQueryClient();
   const setTab = usePanelStore((s) => s.setTab);
   const mailToOpen = usePanelStore((s) => s.mailToOpen);
-  const baseWidth = usePanelSettings().width;
+  const panelWidth = usePanelSettings().width;
+  // Full screen has room for the letter next to the list without growing.
+  const baseWidth = usePanelStore((s) => s.full) ? Number.POSITIVE_INFINITY : panelWidth;
   const { data: settings } = useMailSettings();
   const accounts = settings?.accounts ?? [];
   const [account, setAccount] = useState<string | null>(null);

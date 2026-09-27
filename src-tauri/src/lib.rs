@@ -82,6 +82,8 @@ pub fn run() {
             panel::panel_set_shortcut,
             panel::panel_suspend_shortcut,
             panel::panel_set_width,
+            panel::panel_set_fullscreen,
+            panel::panel_fullscreen,
             panel::panel_set_extra_width,
             panel::panel_set_pinned,
             panel::panel_set_taskbar_button,

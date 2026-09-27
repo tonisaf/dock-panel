@@ -46,9 +46,36 @@ fn window_width() -> u32 {
     WIDTH.load(Ordering::SeqCst) + EXTRA.load(Ordering::SeqCst)
 }
 
+/// Full-screen mode: the window spans the whole width of its monitor (home on
+/// the left, the other tabs on the right). Kept while the app runs.
+static FULL: AtomicBool = AtomicBool::new(false);
+
+/// Switches full-screen mode and re-places the window; returns the new state.
+#[tauri::command]
+pub fn panel_set_fullscreen(app: AppHandle, on: bool) -> bool {
+    FULL.store(on, Ordering::SeqCst);
+    if on {
+        // The letter pane's extra width means nothing on a full-width window.
+        RESIZE_GENERATION.fetch_add(1, Ordering::SeqCst);
+        EXTRA.store(0, Ordering::SeqCst);
+    }
+    if let Some(win) = window(&app) {
+        place_on_cursor_monitor(&app, &win);
+    }
+    on
+}
+
+#[tauri::command]
+pub fn panel_fullscreen() -> bool {
+    FULL.load(Ordering::SeqCst)
+}
+
 /// Resizes the window to `window_width()`; docked right, it grows leftwards
 /// so the right edge stays put.
 fn apply_width(win: &WebviewWindow) {
+    if FULL.load(Ordering::SeqCst) {
+        return;
+    }
     let (Ok(scale), Ok(inner), Ok(outer), Ok(pos)) =
         (win.scale_factor(), win.inner_size(), win.outer_size(), win.outer_position())
     else {
@@ -180,6 +207,9 @@ pub fn show(app: &AppHandle) {
 /// returns once it has; a newer call takes over a running animation.
 #[tauri::command]
 pub async fn panel_set_extra_width(app: AppHandle, extra: u32, animate: Option<bool>) -> u32 {
+    if FULL.load(Ordering::SeqCst) {
+        return 0;
+    }
     let Some(win) = window(&app) else { return 0 };
     let room = win
         .current_monitor()
@@ -313,7 +343,12 @@ fn place_on_cursor_monitor(app: &AppHandle, win: &WebviewWindow) {
     let scale = monitor.scale_factor();
     let area = monitor.work_area();
     let margin = (MARGIN * scale).round() as i32;
-    let width = ((window_width() as f64 * scale).round() as u32).min(area.size.width.saturating_sub(2 * margin as u32));
+    let full_width = area.size.width.saturating_sub(2 * margin as u32);
+    let width = if FULL.load(Ordering::SeqCst) {
+        full_width
+    } else {
+        ((window_width() as f64 * scale).round() as u32).min(full_width)
+    };
     let height = area.size.height.saturating_sub(2 * margin as u32);
 
     let _ = win.set_size(PhysicalSize::new(width, height));

@@ -44,6 +44,10 @@ interface PanelState {
   mailToOpen: MailToOpen | null;
   /** Pinned: the panel stays open until hidden explicitly. */
   pinned: boolean;
+  /** Full screen: home on the left, the other tabs on the right. */
+  full: boolean;
+  /** The right side's tab in full screen: the last tab other than home. */
+  sideTab: TabId;
   /**
    * Opening always works; closing is the panel's own "done here" (Esc, after
    * launching something) and is ignored while pinned. Use `hide` to force it.
@@ -57,6 +61,7 @@ interface PanelState {
   /** Closes the panel even when pinned: the hide button, the hotkey, the tray. */
   hide: () => void;
   setPinned: (pinned: boolean) => void;
+  setFull: (full: boolean) => void;
 }
 
 export const usePanelStore = create<PanelState>((set, get) => ({
@@ -67,6 +72,8 @@ export const usePanelStore = create<PanelState>((set, get) => ({
   menu: null,
   mailToOpen: null,
   pinned: false,
+  full: false,
+  sideTab: "apps",
   setOpen: (open) => {
     if (!open && get().pinned) return;
     set(open ? { open } : { open, menu: null });
@@ -76,7 +83,11 @@ export const usePanelStore = create<PanelState>((set, get) => ({
     set({ pinned });
     invoke("panel_set_pinned", { on: pinned }).catch(console.error);
   },
-  setTab: (tab) => set({ tab }),
+  setTab: (tab) => set(tab === "home" ? { tab } : { tab, sideTab: tab }),
+  setFull: (full) => {
+    set({ full });
+    invoke("panel_set_fullscreen", { on: full }).catch(console.error);
+  },
   setQuery: (query) => set({ query, selected: 0 }),
   setSelected: (selected) => set({ selected }),
   setMenu: (menu) => set({ menu }),
