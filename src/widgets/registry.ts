@@ -15,6 +15,7 @@ import { MonitorsWidget } from "./monitors/MonitorsWidget";
 import { AgentsWidget } from "./agents/AgentsWidget";
 import { AskWidget } from "./ask/AskWidget";
 import { DiscordWidget } from "./discord/DiscordWidget";
+import { PomodoroWidget } from "./pomodoro/PomodoroWidget";
 
 export interface WidgetDef {
   id: string;
@@ -39,6 +40,7 @@ export const WIDGETS: WidgetDef[] = [
   { id: "ai", title: "Лимиты AI", component: AiLimitsWidget },
   { id: "agents", title: "Агенты", component: AgentsWidget },
   { id: "ask", title: "Спросить Claude", component: AskWidget },
+  { id: "pomodoro", title: "Помодоро", component: PomodoroWidget },
   { id: "vpn", title: "VPN", component: VpnWidget },
   { id: "home", title: "Дом", component: HomeWidget },
   { id: "monitors", title: "Мониторы", component: MonitorsWidget },

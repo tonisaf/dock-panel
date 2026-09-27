@@ -205,6 +205,8 @@ function TaskbarButtonRow() {
     setTaskbarAgents,
     taskbarMic,
     setTaskbarMic,
+    taskbarPomodoro,
+    setTaskbarPomodoro,
   } = usePanelSettings();
   return (
     <>
@@ -234,6 +236,11 @@ function TaskbarButtonRow() {
       {taskbarButton && (
         <Row label="Микрофон Discord на кнопке" hint="Пока вы в голосовом канале; клик включает и выключает микрофон">
           <Toggle on={taskbarMic} onChange={setTaskbarMic} />
+        </Row>
+      )}
+      {taskbarButton && (
+        <Row label="Помодоро на кнопке" hint="Оставшееся время, пока идёт фокус или перерыв">
+          <Toggle on={taskbarPomodoro} onChange={setTaskbarPomodoro} />
         </Row>
       )}
     </>

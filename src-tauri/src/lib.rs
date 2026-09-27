@@ -16,6 +16,7 @@ mod notion;
 mod oauth;
 mod panel;
 mod player;
+mod pomodoro;
 mod secrets;
 mod spotify;
 mod system;
@@ -72,6 +73,7 @@ pub fn run() {
             agents::init(handle);
             youtube::init(handle);
             discord::init(handle);
+            pomodoro::init(handle);
             updater::init(handle);
             apps::start_icon_worker(app.path().app_cache_dir()?.join("icons"));
             let registered = shortcut
@@ -100,6 +102,14 @@ pub fn run() {
             panel::panel_set_taskbar_tasks,
             panel::panel_set_taskbar_agents,
             panel::panel_set_taskbar_mic,
+            panel::panel_set_taskbar_pomodoro,
+            pomodoro::pomodoro_state,
+            pomodoro::pomodoro_start,
+            pomodoro::pomodoro_pause,
+            pomodoro::pomodoro_reset,
+            pomodoro::pomodoro_skip,
+            pomodoro::pomodoro_set_phase,
+            pomodoro::pomodoro_set_settings,
             apps::list_apps,
             apps::launch_app,
             apps::pick_files,

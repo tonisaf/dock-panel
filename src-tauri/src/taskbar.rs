@@ -25,6 +25,15 @@ static MAIL: AtomicBool = AtomicBool::new(true);
 static TASKS: AtomicBool = AtomicBool::new(true);
 static AGENTS: AtomicBool = AtomicBool::new(true);
 static MIC: AtomicBool = AtomicBool::new(true);
+static POMODORO: AtomicBool = AtomicBool::new(true);
+
+pub fn pomodoro_enabled() -> bool {
+    POMODORO.load(Ordering::SeqCst)
+}
+
+pub fn set_pomodoro_enabled(on: bool) {
+    POMODORO.store(on, Ordering::SeqCst);
+}
 
 pub fn mic_enabled() -> bool {
     MIC.load(Ordering::SeqCst)
@@ -112,7 +121,7 @@ mod native {
         WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
     };
 
-    use crate::{agents, discord, gcal, mail, media, panel};
+    use crate::{agents, discord, gcal, mail, media, panel, pomodoro};
 
     /// winuser.h; the windows crate only exports it with the Controls feature.
     const WM_MOUSELEAVE: u32 = 0x02A3;
@@ -209,6 +218,7 @@ mod native {
     enum Hit {
         Panel,
         Mic,
+        Pomodoro,
         Mail,
         Tasks,
         Agents,
@@ -229,6 +239,7 @@ mod native {
     struct Layout {
         panel: Zone,
         mic: Option<Zone>,
+        pomodoro: Option<Zone>,
         mail: Option<Zone>,
         tasks: Option<Zone>,
         agents: Option<Zone>,
@@ -245,6 +256,7 @@ mod native {
             [
                 (Some(self.panel), Hit::Panel),
                 (self.mic, Hit::Mic),
+                (self.pomodoro, Hit::Pomodoro),
                 (self.mail, Hit::Mail),
                 (self.tasks, Hit::Tasks),
                 (self.agents, Hit::Agents),
@@ -258,7 +270,7 @@ mod native {
         }
 
         fn width(&self) -> i32 {
-            [Some(self.panel), self.mic, self.mail, self.tasks, self.agents, self.info, self.prev, self.toggle, self.next]
+            [Some(self.panel), self.mic, self.pomodoro, self.mail, self.tasks, self.agents, self.info, self.prev, self.toggle, self.next]
                 .into_iter()
                 .flatten()
                 .map(|z| z.x + z.w)
@@ -279,6 +291,8 @@ mod native {
         media: Option<Media>,
         /// Discord microphone `(muted, speaking)` while in a voice channel.
         mic: Option<(bool, bool)>,
+        /// Pomodoro `(focus, seconds left, running)` while a phase is under way.
+        pomodoro: Option<(bool, u64, bool)>,
         /// Unread letters; the counter shows while this is above zero.
         unread: usize,
         /// Google tasks due today or overdue; that counter shows while above zero.
@@ -515,6 +529,11 @@ mod native {
                             }
                         }
                         Some(Hit::Mic) => discord::toggle_mute(),
+                        Some(Hit::Pomodoro) => {
+                            if let Some(app) = APP.get() {
+                                panel::show_tab(app, "home");
+                            }
+                        }
                         Some(Hit::Mail) => {
                             if let Some(app) = APP.get() {
                                 panel::show_tab(app, "mail");
@@ -600,19 +619,33 @@ mod native {
         if count > 99 { "99+".into() } else { count.to_string() }
     }
 
+    /// "24:59".
+    fn clock_label(secs: u64) -> String {
+        format!("{}:{:02}", secs / 60, secs % 60)
+    }
+
     /// A counter (mail, tasks) is its glyph and number side by side on one plate.
     fn counter_w(count: usize, scale: f64) -> i32 {
-        let number = text::width(&badge_label(count), px(TITLE_PX, scale), 600);
+        label_w(&badge_label(count), scale)
+    }
+
+    fn label_w(label: &str, scale: f64) -> i32 {
+        let number = text::width(label, px(TITLE_PX, scale), 600);
         px(COUNTER_PAD + GLYPH + COUNTER_GAP + COUNTER_PAD, scale) + number
     }
 
-    fn layout(scale: f64, media: Option<&Media>, mic: bool, unread: usize, due: usize, waiting: usize) -> Layout {
+    fn layout(scale: f64, media: Option<&Media>, mic: bool, timer: Option<&str>, unread: usize, due: usize, waiting: usize) -> Layout {
         let mut l = Layout { panel: Zone { x: 0, w: px(BUTTON_W, scale) }, ..Default::default() };
         let gap = px(GAP, scale);
         let mut x = l.panel.w + gap;
         if mic {
             let w = px(BUTTON_W, scale);
             l.mic = Some(Zone { x, w });
+            x += w + gap;
+        }
+        if let Some(label) = timer {
+            let w = label_w(label, scale);
+            l.pomodoro = Some(Zone { x, w });
             x += w + gap;
         }
         if unread > 0 {
@@ -673,10 +706,13 @@ mod native {
             let due = if super::tasks_enabled() { gcal::due_today() } else { 0 };
             let waiting = if super::agents_enabled() { agents::waiting_count() } else { 0 };
             let mic = if super::mic_enabled() { discord::mic_state() } else { None };
+            let timer = if super::pomodoro_enabled() { pomodoro::taskbar_state() } else { None };
+            let timer_label = timer.map(|(_, secs, _)| clock_label(secs));
             // Text is measured only when the track (or a counter's label) changes.
             let same_track = s.drawn.as_ref().is_some_and(|d| {
                 d.scale == scale
                     && d.mic.is_some() == mic.is_some()
+                    && d.pomodoro.map(|(_, secs, _)| clock_label(secs)) == timer_label
                     && badge_label(d.unread) == badge_label(unread)
                     && badge_label(d.due) == badge_label(due)
                     && badge_label(d.waiting) == badge_label(waiting)
@@ -685,11 +721,11 @@ mod native {
             });
             let layout = match &s.drawn {
                 Some(d) if same_track => d.layout.clone(),
-                _ => layout(scale, media.as_ref(), mic.is_some(), unread, due, waiting),
+                _ => layout(scale, media.as_ref(), mic.is_some(), timer_label.as_deref(), unread, due, waiting),
             };
             s.layout = layout.clone();
             let look =
-                Look { x, y, h, scale, light, hover: s.hover, pressed: s.pressed, media, mic, unread, due, waiting, layout };
+                Look { x, y, h, scale, light, hover: s.hover, pressed: s.pressed, media, mic, pomodoro: timer, unread, due, waiting, layout };
             if s.drawn.as_ref() != Some(&look) && draw(hwnd, &look, s.icon.as_ref()).is_some() {
                 s.drawn = Some(look);
             }
@@ -803,7 +839,8 @@ mod native {
         }
 
         /// A circle outline of radius `r` (to the stroke's middle), antialiased.
-        fn ring(&mut self, (cx, cy): (f64, f64), r: f64, stroke: f64, tone: f64, alpha: f64) {
+        fn ring(&mut self, (cx, cy): (f64, f64), r: f64, stroke: f64, ink: impl Into<Ink>, alpha: f64) {
+            let ink = ink.into();
             let reach = r + stroke;
             let (x0, y0) = ((cx - reach).floor().max(0.0) as usize, (cy - reach).floor().max(0.0) as usize);
             let (x1, y1) = ((cx + reach).ceil() as usize, (cy + reach).ceil() as usize);
@@ -812,7 +849,7 @@ mod native {
                     let d = ((x as f64 + 0.5 - cx).powi(2) + (y as f64 + 0.5 - cy).powi(2)).sqrt();
                     let cover = (stroke / 2.0 + 0.5 - (d - r).abs()).clamp(0.0, 1.0) * alpha;
                     if cover > 0.0 {
-                        self.blend(x, y, (tone * cover, tone * cover, tone * cover, 255.0 * cover));
+                        self.blend(x, y, ink.at(cover));
                     }
                 }
             }
@@ -909,12 +946,13 @@ mod native {
         }
 
         /// Tints an alpha mask (e.g. rendered text) into the canvas at (ox, oy).
-        fn mask(&mut self, mask: &[u8], (ox, oy, mw, mh): (usize, usize, usize, usize), tone: f64, alpha: f64) {
+        fn mask(&mut self, mask: &[u8], (ox, oy, mw, mh): (usize, usize, usize, usize), ink: impl Into<Ink>, alpha: f64) {
+            let ink = ink.into();
             for y in 0..mh {
                 for x in 0..mw {
                     let c = mask[y * mw + x] as f64 / 255.0 * alpha;
                     if c > 0.0 {
-                        self.blend(ox + x, oy + y, (tone * c, tone * c, tone * c, 255.0 * c));
+                        self.blend(ox + x, oy + y, ink.at(c));
                     }
                 }
             }
@@ -1120,6 +1158,7 @@ mod native {
         let zones = [
             (Some(l.panel), Hit::Panel),
             (l.mic, Hit::Mic),
+            (l.pomodoro, Hit::Pomodoro),
             (l.mail, Hit::Mail),
             (l.tasks, Hit::Tasks),
             (l.agents, Hit::Agents),
@@ -1179,6 +1218,30 @@ mod native {
             if muted {
                 c.polyline(&[at(-9.0, -9.0), at(9.0, 9.0)], stroke, ink, INK);
             }
+        }
+
+        // Pomodoro: a stopwatch and the time left; red in focus, green on a break, dim while paused.
+        if let (Some((focus, secs, running)), Some(z)) = (look.pomodoro, l.pomodoro) {
+            let ink = match (focus, look.light) {
+                (true, true) => RED_LIGHT,
+                (true, false) => RED_DARK,
+                (false, true) => GREEN_LIGHT,
+                (false, false) => GREEN_DARK,
+            };
+            let (ink, alpha) = if running { (ink, INK) } else { (Ink::from(fg), INK_DIM) };
+            let cy = mid + nudge(Hit::Pomodoro);
+            let gx = z.x as f64 + COUNTER_PAD * s + GLYPH * s / 2.0;
+            // Lucide's "timer" at 18 DIPs: dial, crown, hand.
+            let at = |x: f64, y: f64| (gx + x * s, cy + y * s);
+            let (dx, dy) = at(0.0, 1.5);
+            c.ring((dx, dy), 6.0 * s, stroke, ink, alpha);
+            c.polyline(&[at(-1.5, -7.5), at(1.5, -7.5)], stroke, ink, alpha);
+            c.polyline(&[at(0.0, 1.5), at(2.25, -0.75)], stroke, ink, alpha);
+            let tx = z.x + px(COUNTER_PAD + GLYPH + COUNTER_GAP, s);
+            let (tw, line) = (z.x + z.w - px(COUNTER_PAD, s) - tx + 2, px(LINE, s));
+            let mask = text::mask(&clock_label(secs), px(TITLE_PX, s), 600, tw, line);
+            let top = (cy - line as f64 / 2.0).round() as usize;
+            c.mask(&mask, (tx as usize, top, tw as usize, line as usize), ink, alpha);
         }
 
         // Counters: an outline glyph in an 18-DIP box, then the number.
@@ -1348,7 +1411,9 @@ mod native {
             let (unread, due, waiting) = (73, 7, 2);
             // Light rows show a muted microphone, dark ones a live one.
             let mic = Some((light, !light));
-            let layout = layout(scale, Some(&media), true, unread, due, waiting);
+            // Light rows: focus running; dark rows: a paused break.
+            let pomodoro = Some((light, 754, light));
+            let layout = layout(scale, Some(&media), true, Some(&clock_label(754)), unread, due, waiting);
             Look {
                 x: 0,
                 y: 0,
@@ -1359,6 +1424,7 @@ mod native {
                 pressed: None,
                 media: Some(media),
                 mic,
+                pomodoro,
                 unread,
                 due,
                 waiting,

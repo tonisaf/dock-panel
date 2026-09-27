@@ -30,10 +30,12 @@ export interface PanelSettings {
   taskbarAgents: boolean;
   /** Discord microphone while in a voice channel. */
   taskbarMic: boolean;
+  /** Pomodoro countdown while a phase is under way. */
+  taskbarPomodoro: boolean;
 }
 
 const KEY = ["panel-settings"];
-const DEFAULTS: PanelSettings = { width: 440, edge: "left", shortcut: "Ctrl+Space", taskbarButton: true, taskbarPlayer: true, taskbarMail: true, taskbarTasks: true, taskbarAgents: true, taskbarMic: true };
+const DEFAULTS: PanelSettings = { width: 440, edge: "left", shortcut: "Ctrl+Space", taskbarButton: true, taskbarPlayer: true, taskbarMail: true, taskbarTasks: true, taskbarAgents: true, taskbarMic: true, taskbarPomodoro: true };
 
 export function usePanelSettings() {
   const queryClient = useQueryClient();
@@ -60,6 +62,8 @@ export function usePanelSettings() {
     setTaskbarAgents: async (on: boolean) =>
       update(await invoke<PanelSettings>("panel_set_taskbar_agents", { on })),
     setTaskbarMic: async (on: boolean) => update(await invoke<PanelSettings>("panel_set_taskbar_mic", { on })),
+    setTaskbarPomodoro: async (on: boolean) =>
+      update(await invoke<PanelSettings>("panel_set_taskbar_pomodoro", { on })),
     suspendShortcut: (suspend: boolean) => invoke("panel_suspend_shortcut", { suspend }),
   };
 }
