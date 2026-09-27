@@ -154,6 +154,7 @@ pub fn init(app: &AppHandle) -> String {
     crate::taskbar::set_mail_enabled(saved["taskbarMail"].as_bool().unwrap_or(true));
     crate::taskbar::set_tasks_enabled(saved["taskbarTasks"].as_bool().unwrap_or(true));
     crate::taskbar::set_agents_enabled(saved["taskbarAgents"].as_bool().unwrap_or(true));
+    crate::taskbar::set_mic_enabled(saved["taskbarMic"].as_bool().unwrap_or(true));
     let shortcut = shortcut_text();
 
     let Some(win) = window(app) else { return shortcut };
@@ -395,6 +396,9 @@ pub struct PanelSettings {
     /// Show the count of Claude / Codex sessions waiting for the user.
     #[serde(rename = "taskbarAgents")]
     taskbar_agents: bool,
+    /// Show the Discord microphone while the user is in a voice channel.
+    #[serde(rename = "taskbarMic")]
+    taskbar_mic: bool,
 }
 
 fn current_settings() -> PanelSettings {
@@ -407,6 +411,7 @@ fn current_settings() -> PanelSettings {
         taskbar_mail: crate::taskbar::mail_enabled(),
         taskbar_tasks: crate::taskbar::tasks_enabled(),
         taskbar_agents: crate::taskbar::agents_enabled(),
+        taskbar_mic: crate::taskbar::mic_enabled(),
     }
 }
 
@@ -448,6 +453,13 @@ pub fn panel_set_taskbar_player(app: AppHandle, on: bool) -> PanelSettings {
 #[tauri::command]
 pub fn panel_set_taskbar_mail(app: AppHandle, on: bool) -> PanelSettings {
     crate::taskbar::set_mail_enabled(on);
+    save_settings(&app);
+    current_settings()
+}
+
+#[tauri::command]
+pub fn panel_set_taskbar_mic(app: AppHandle, on: bool) -> PanelSettings {
+    crate::taskbar::set_mic_enabled(on);
     save_settings(&app);
     current_settings()
 }

@@ -959,6 +959,7 @@ dependencies = [
  "tauri-plugin-store",
  "tauri-plugin-updater",
  "tauri-winrt-notification",
+ "tokio",
  "window-vibrancy",
  "windows 0.62.2",
  "windows-numerics 0.3.1",

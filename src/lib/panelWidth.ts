@@ -28,10 +28,12 @@ export interface PanelSettings {
   taskbarTasks: boolean;
   /** Counter of Claude / Codex sessions waiting for the user. */
   taskbarAgents: boolean;
+  /** Discord microphone while in a voice channel. */
+  taskbarMic: boolean;
 }
 
 const KEY = ["panel-settings"];
-const DEFAULTS: PanelSettings = { width: 440, edge: "left", shortcut: "Ctrl+Space", taskbarButton: true, taskbarPlayer: true, taskbarMail: true, taskbarTasks: true, taskbarAgents: true };
+const DEFAULTS: PanelSettings = { width: 440, edge: "left", shortcut: "Ctrl+Space", taskbarButton: true, taskbarPlayer: true, taskbarMail: true, taskbarTasks: true, taskbarAgents: true, taskbarMic: true };
 
 export function usePanelSettings() {
   const queryClient = useQueryClient();
@@ -57,6 +59,7 @@ export function usePanelSettings() {
       update(await invoke<PanelSettings>("panel_set_taskbar_tasks", { on })),
     setTaskbarAgents: async (on: boolean) =>
       update(await invoke<PanelSettings>("panel_set_taskbar_agents", { on })),
+    setTaskbarMic: async (on: boolean) => update(await invoke<PanelSettings>("panel_set_taskbar_mic", { on })),
     suspendShortcut: (suspend: boolean) => invoke("panel_suspend_shortcut", { suspend }),
   };
 }

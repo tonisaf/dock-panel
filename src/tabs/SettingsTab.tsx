@@ -9,15 +9,18 @@ import { UpdateSettings } from "../components/UpdateSettings";
 import { MAX_WIDTH, MIN_WIDTH, WIDTH_PRESETS, usePanelSettings, usePanelWidth, type Edge } from "../lib/panelWidth";
 import { usePrefs, type ThemeMode } from "../lib/prefs";
 import { Toggle } from "../components/Toggle";
+import { prettyAccelerator, toAccelerator } from "../lib/accelerator";
 import { MailSettings } from "../components/MailSettings";
 import { GcalSettings } from "../components/GcalSettings";
 import { YoutubeSettings } from "../components/YoutubeSettings";
 import { YandexSettings } from "../components/YandexSettings";
+import { DiscordSettings } from "../components/DiscordSettings";
 import {
   CalendarDays,
   ChevronDown,
   CloudSun,
   Download,
+  Headphones,
   House,
   Link2,
   Mail,
@@ -33,6 +36,7 @@ import { useNotionStatus } from "../widgets/tasks/api";
 import { useSpotifyStatus } from "../widgets/spotify/api";
 import { useYoutubeSettings } from "../widgets/youtube/api";
 import { useYandexStatus } from "../widgets/home/api";
+import { useDiscord } from "../discord/api";
 import { useUpdateStatus } from "../lib/updates";
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
@@ -119,20 +123,6 @@ function Segmented<T extends string>({ value, options, onChange }: { value: T; o
   );
 }
 
-const MODIFIER_CODES = new Set(["ControlLeft", "ControlRight", "AltLeft", "AltRight", "ShiftLeft", "ShiftRight", "MetaLeft", "MetaRight"]);
-
-/** KeyboardEvent -> accelerator ("Ctrl+Alt+A"), or null while only modifiers are held. */
-function toAccelerator(e: KeyboardEvent): string | null {
-  if (MODIFIER_CODES.has(e.code)) return null;
-  const key = e.code.replace(/^Key/, "").replace(/^Digit/, "");
-  const mods = [e.ctrlKey && "Ctrl", e.altKey && "Alt", e.shiftKey && "Shift", e.metaKey && "Super"].filter(Boolean);
-  // Bare keys would swallow normal typing; function keys are the exception.
-  if (mods.length === 0 && !/^F\d{1,2}$/.test(key)) return null;
-  return [...mods, key].join("+");
-}
-
-const pretty = (accel: string) => accel.replace(/Super/g, "Win").replace(/\+/g, " + ");
-
 function ShortcutRow() {
   const { shortcut, setShortcut, suspendShortcut } = usePanelSettings();
   const [recording, setRecording] = useState(false);
@@ -177,7 +167,7 @@ function ShortcutRow() {
             recording ? "animate-pulse border-accent bg-accent/15 text-fg" : "border-stroke bg-surface text-fg-muted hover:text-fg",
           )}
         >
-          {recording ? "…" : pretty(shortcut)}
+          {recording ? "…" : prettyAccelerator(shortcut)}
         </button>
       </div>
       {error && <p className="mt-1.5 text-[12px] text-warn">{error}</p>}
@@ -213,6 +203,8 @@ function TaskbarButtonRow() {
     setTaskbarTasks,
     taskbarAgents,
     setTaskbarAgents,
+    taskbarMic,
+    setTaskbarMic,
   } = usePanelSettings();
   return (
     <>
@@ -237,6 +229,11 @@ function TaskbarButtonRow() {
       {taskbarButton && (
         <Row label="Агенты на кнопке" hint="Сколько сессий Claude и Codex закончили работу и ждут вас">
           <Toggle on={taskbarAgents} onChange={setTaskbarAgents} />
+        </Row>
+      )}
+      {taskbarButton && (
+        <Row label="Микрофон Discord на кнопке" hint="Пока вы в голосовом канале; клик включает и выключает микрофон">
+          <Toggle on={taskbarMic} onChange={setTaskbarMic} />
         </Row>
       )}
     </>
@@ -311,6 +308,7 @@ function Integrations() {
   const spotify = useSpotifyStatus().data;
   const youtube = useYoutubeSettings().data;
   const yandex = useYandexStatus().data;
+  const discord = useDiscord().data;
   const location = usePrefs((s) => s.location);
   const update = useUpdateStatus().data;
 
@@ -358,6 +356,19 @@ function Integrations() {
               : { status: "не подключено" }))}
       >
         <YandexSettings />
+      </Group>
+      <Group
+        id="discord"
+        icon={Headphones}
+        title="Discord"
+        {...(discord &&
+          (discord.error
+            ? { status: "ошибка", tone: "warn" as Tone }
+            : discord.configured
+              ? { status: discord.connected ? discord.user?.name || "подключено" : "Discord не запущен", tone: (discord.connected ? "ok" : "off") as Tone }
+              : { status: "не подключено" }))}
+      >
+        <DiscordSettings />
       </Group>
       <Group
         id="youtube"

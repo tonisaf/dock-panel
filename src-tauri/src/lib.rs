@@ -4,6 +4,7 @@ mod ask;
 mod alerts;
 mod apps;
 mod calendar;
+mod discord;
 mod gcal;
 mod home;
 mod claude_web;
@@ -42,9 +43,14 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                // The panel toggle is the only global shortcut we register.
-                .with_handler(|app, _shortcut, event| {
-                    if event.state() == ShortcutState::Pressed {
+                // The panel toggle, and the Discord microphone toggle if set.
+                .with_handler(|app, shortcut, event| {
+                    if event.state() != ShortcutState::Pressed {
+                        return;
+                    }
+                    if discord::is_mute_shortcut(shortcut) {
+                        discord::toggle_mute();
+                    } else {
                         panel::toggle(app);
                     }
                 })
@@ -65,6 +71,7 @@ pub fn run() {
             gcal::init();
             agents::init(handle);
             youtube::init(handle);
+            discord::init(handle);
             updater::init(handle);
             apps::start_icon_worker(app.path().app_cache_dir()?.join("icons"));
             let registered = shortcut
@@ -92,6 +99,7 @@ pub fn run() {
             panel::panel_set_taskbar_mail,
             panel::panel_set_taskbar_tasks,
             panel::panel_set_taskbar_agents,
+            panel::panel_set_taskbar_mic,
             apps::list_apps,
             apps::launch_app,
             apps::pick_files,
@@ -193,6 +201,16 @@ pub fn run() {
             youtube::youtube_set_options,
             youtube::youtube_set_watched,
             youtube::youtube_feed,
+            discord::discord_state,
+            discord::discord_login,
+            discord::discord_logout,
+            discord::discord_guilds,
+            discord::discord_channels,
+            discord::discord_set_watched,
+            discord::discord_set_notify,
+            discord::discord_voice,
+            discord::discord_join,
+            discord::discord_set_mute_shortcut,
             vpn::vpn_status,
             vpn::vpn_toggle,
             vpn::vpn_open,

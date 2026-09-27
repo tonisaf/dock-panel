@@ -24,6 +24,15 @@ static PLAYER: AtomicBool = AtomicBool::new(true);
 static MAIL: AtomicBool = AtomicBool::new(true);
 static TASKS: AtomicBool = AtomicBool::new(true);
 static AGENTS: AtomicBool = AtomicBool::new(true);
+static MIC: AtomicBool = AtomicBool::new(true);
+
+pub fn mic_enabled() -> bool {
+    MIC.load(Ordering::SeqCst)
+}
+
+pub fn set_mic_enabled(on: bool) {
+    MIC.store(on, Ordering::SeqCst);
+}
 
 pub fn agents_enabled() -> bool {
     AGENTS.load(Ordering::SeqCst)
@@ -103,7 +112,7 @@ mod native {
         WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
     };
 
-    use crate::{agents, gcal, mail, media, panel};
+    use crate::{agents, discord, gcal, mail, media, panel};
 
     /// winuser.h; the windows crate only exports it with the Controls feature.
     const WM_MOUSELEAVE: u32 = 0x02A3;
@@ -141,6 +150,11 @@ mod native {
     /// Opacity of glyphs and primary text; secondary text is dimmer.
     const INK: f64 = 0.9;
     const INK_DIM: f64 = 0.62;
+    /// Windows 11's critical and success colours, for a muted and a live microphone.
+    const RED_LIGHT: Ink = Ink(196.0, 43.0, 28.0);
+    const RED_DARK: Ink = Ink(255.0, 153.0, 164.0);
+    const GREEN_LIGHT: Ink = Ink(15.0, 123.0, 15.0);
+    const GREEN_DARK: Ink = Ink(108.0, 203.0, 95.0);
 
     #[derive(Clone, Copy)]
     enum Glyph {
@@ -174,9 +188,27 @@ mod native {
         cover: Option<Arc<Vec<u8>>>,
     }
 
+    /// A colour, straight RGB 0-255; a bare `f64` is that shade of grey.
+    #[derive(Clone, Copy)]
+    struct Ink(f64, f64, f64);
+
+    impl From<f64> for Ink {
+        fn from(tone: f64) -> Self {
+            Ink(tone, tone, tone)
+        }
+    }
+
+    impl Ink {
+        /// Premultiplied BGRA at `cover` (0-1).
+        fn at(self, cover: f64) -> (f64, f64, f64, f64) {
+            (self.2 * cover, self.1 * cover, self.0 * cover, 255.0 * cover)
+        }
+    }
+
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     enum Hit {
         Panel,
+        Mic,
         Mail,
         Tasks,
         Agents,
@@ -196,6 +228,7 @@ mod native {
     #[derive(Clone, PartialEq, Default)]
     struct Layout {
         panel: Zone,
+        mic: Option<Zone>,
         mail: Option<Zone>,
         tasks: Option<Zone>,
         agents: Option<Zone>,
@@ -211,6 +244,7 @@ mod native {
             let inside = |z: &Zone| x >= z.x && x < z.x + z.w;
             [
                 (Some(self.panel), Hit::Panel),
+                (self.mic, Hit::Mic),
                 (self.mail, Hit::Mail),
                 (self.tasks, Hit::Tasks),
                 (self.agents, Hit::Agents),
@@ -224,7 +258,7 @@ mod native {
         }
 
         fn width(&self) -> i32 {
-            [Some(self.panel), self.mail, self.tasks, self.agents, self.info, self.prev, self.toggle, self.next]
+            [Some(self.panel), self.mic, self.mail, self.tasks, self.agents, self.info, self.prev, self.toggle, self.next]
                 .into_iter()
                 .flatten()
                 .map(|z| z.x + z.w)
@@ -243,6 +277,8 @@ mod native {
         hover: Option<Hit>,
         pressed: Option<Hit>,
         media: Option<Media>,
+        /// Discord microphone `(muted, speaking)` while in a voice channel.
+        mic: Option<(bool, bool)>,
         /// Unread letters; the counter shows while this is above zero.
         unread: usize,
         /// Google tasks due today or overdue; that counter shows while above zero.
@@ -478,6 +514,7 @@ mod native {
                                 panel::toggle(app);
                             }
                         }
+                        Some(Hit::Mic) => discord::toggle_mute(),
                         Some(Hit::Mail) => {
                             if let Some(app) = APP.get() {
                                 panel::show_tab(app, "mail");
@@ -569,10 +606,15 @@ mod native {
         px(COUNTER_PAD + GLYPH + COUNTER_GAP + COUNTER_PAD, scale) + number
     }
 
-    fn layout(scale: f64, media: Option<&Media>, unread: usize, due: usize, waiting: usize) -> Layout {
+    fn layout(scale: f64, media: Option<&Media>, mic: bool, unread: usize, due: usize, waiting: usize) -> Layout {
         let mut l = Layout { panel: Zone { x: 0, w: px(BUTTON_W, scale) }, ..Default::default() };
         let gap = px(GAP, scale);
         let mut x = l.panel.w + gap;
+        if mic {
+            let w = px(BUTTON_W, scale);
+            l.mic = Some(Zone { x, w });
+            x += w + gap;
+        }
         if unread > 0 {
             let w = counter_w(unread, scale);
             l.mail = Some(Zone { x, w });
@@ -630,9 +672,11 @@ mod native {
             let unread = if super::mail_enabled() { mail::unread_total() } else { 0 };
             let due = if super::tasks_enabled() { gcal::due_today() } else { 0 };
             let waiting = if super::agents_enabled() { agents::waiting_count() } else { 0 };
+            let mic = if super::mic_enabled() { discord::mic_state() } else { None };
             // Text is measured only when the track (or a counter's label) changes.
             let same_track = s.drawn.as_ref().is_some_and(|d| {
                 d.scale == scale
+                    && d.mic.is_some() == mic.is_some()
                     && badge_label(d.unread) == badge_label(unread)
                     && badge_label(d.due) == badge_label(due)
                     && badge_label(d.waiting) == badge_label(waiting)
@@ -641,11 +685,11 @@ mod native {
             });
             let layout = match &s.drawn {
                 Some(d) if same_track => d.layout.clone(),
-                _ => layout(scale, media.as_ref(), unread, due, waiting),
+                _ => layout(scale, media.as_ref(), mic.is_some(), unread, due, waiting),
             };
             s.layout = layout.clone();
             let look =
-                Look { x, y, h, scale, light, hover: s.hover, pressed: s.pressed, media, unread, due, waiting, layout };
+                Look { x, y, h, scale, light, hover: s.hover, pressed: s.pressed, media, mic, unread, due, waiting, layout };
             if s.drawn.as_ref() != Some(&look) && draw(hwnd, &look, s.icon.as_ref()).is_some() {
                 s.drawn = Some(look);
             }
@@ -724,21 +768,23 @@ mod native {
             (0.5 - ((dx * dx + dy * dy).sqrt() - r)).clamp(0.0, 1.0)
         }
 
-        fn round_rect(&mut self, rect: (f64, f64, f64, f64), r: f64, tone: f64, alpha: f64) {
+        fn round_rect(&mut self, rect: (f64, f64, f64, f64), r: f64, ink: impl Into<Ink>, alpha: f64) {
+            let ink = ink.into();
             let (x0, y0) = (rect.0.floor().max(0.0) as usize, rect.1.floor().max(0.0) as usize);
             let (x1, y1) = ((rect.0 + rect.2).ceil() as usize, (rect.1 + rect.3).ceil() as usize);
             for y in y0..y1.min(self.h) {
                 for x in x0..x1.min(self.w) {
                     let c = Self::round_cover(x as f64 + 0.5, y as f64 + 0.5, rect, r) * alpha;
                     if c > 0.0 {
-                        self.blend(x, y, (tone * c, tone * c, tone * c, 255.0 * c));
+                        self.blend(x, y, ink.at(c));
                     }
                 }
             }
         }
 
         /// The outline of a rounded rectangle, the stroke inside its edge.
-        fn round_rect_outline(&mut self, rect: (f64, f64, f64, f64), r: f64, stroke: f64, tone: f64, alpha: f64) {
+        fn round_rect_outline(&mut self, rect: (f64, f64, f64, f64), r: f64, stroke: f64, ink: impl Into<Ink>, alpha: f64) {
+            let ink = ink.into();
             let (cx, cy) = (rect.0 + rect.2 / 2.0, rect.1 + rect.3 / 2.0);
             let (x0, y0) = (rect.0.floor().max(0.0) as usize, rect.1.floor().max(0.0) as usize);
             let (x1, y1) = ((rect.0 + rect.2).ceil() as usize, (rect.1 + rect.3).ceil() as usize);
@@ -750,7 +796,7 @@ mod native {
                     let d = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + qx.max(qy).min(0.0) - r;
                     let cover = (stroke / 2.0 + 0.5 - (d + stroke / 2.0).abs()).clamp(0.0, 1.0) * alpha;
                     if cover > 0.0 {
-                        self.blend(x, y, (tone * cover, tone * cover, tone * cover, 255.0 * cover));
+                        self.blend(x, y, ink.at(cover));
                     }
                 }
             }
@@ -774,7 +820,8 @@ mod native {
 
         /// A stroke of width `w` through `points`, with round caps and joins.
         /// Coverage is taken per pixel over the whole path, so joins don't double up.
-        fn polyline(&mut self, points: &[(f64, f64)], w: f64, tone: f64, alpha: f64) {
+        fn polyline(&mut self, points: &[(f64, f64)], w: f64, ink: impl Into<Ink>, alpha: f64) {
+            let ink = ink.into();
             let seg_dist = |(px, py): (f64, f64), a: (f64, f64), b: (f64, f64)| {
                 let (dx, dy) = (b.0 - a.0, b.1 - a.1);
                 let t = (((px - a.0) * dx + (py - a.1) * dy) / (dx * dx + dy * dy).max(f64::EPSILON)).clamp(0.0, 1.0);
@@ -790,7 +837,7 @@ mod native {
                     let d = points.windows(2).map(|s| seg_dist(p, s[0], s[1])).fold(f64::MAX, f64::min);
                     let cover = (w / 2.0 + 0.5 - d).clamp(0.0, 1.0) * alpha;
                     if cover > 0.0 {
-                        self.blend(x, y, (tone * cover, tone * cover, tone * cover, 255.0 * cover));
+                        self.blend(x, y, ink.at(cover));
                     }
                 }
             }
@@ -1072,6 +1119,7 @@ mod native {
         let plate_h = (PLATE_H * s).min(h as f64);
         let zones = [
             (Some(l.panel), Hit::Panel),
+            (l.mic, Hit::Mic),
             (l.mail, Hit::Mail),
             (l.tasks, Hit::Tasks),
             (l.agents, Hit::Agents),
@@ -1102,8 +1150,38 @@ mod native {
             });
         }
 
-        // Counters: an outline glyph in an 18-DIP box, then the number.
         let stroke = STROKE * s;
+
+        // Discord microphone: red and struck through when muted, green while the user speaks.
+        if let (Some((muted, speaking)), Some(z)) = (look.mic, l.mic) {
+            let (cx, cy) = ((z.x + z.w / 2) as f64, mid + nudge(Hit::Mic));
+            let ink = match (muted, speaking, look.light) {
+                (true, _, true) => RED_LIGHT,
+                (true, _, false) => RED_DARK,
+                (false, true, true) => GREEN_LIGHT,
+                (false, true, false) => GREEN_DARK,
+                (false, false, _) => Ink::from(fg),
+            };
+            // Lucide's "mic" (24-unit grid, centred), scaled so it stands as tall as its neighbours.
+            let k = 0.85;
+            let at = |x: f64, y: f64| (cx + x * k * s, cy + y * k * s);
+            let (x0, y0) = at(-3.0, -10.0);
+            c.round_rect_outline((x0, y0, 6.0 * k * s, 13.0 * k * s), 3.0 * k * s, stroke, ink, INK);
+            let r = 7.0;
+            let mut cradle = vec![at(r, -2.0)];
+            cradle.extend((0..=12).map(|i| {
+                let a = std::f64::consts::PI * i as f64 / 12.0;
+                at(r * a.cos(), r * a.sin())
+            }));
+            cradle.push(at(-r, -2.0));
+            c.polyline(&cradle, stroke, ink, INK);
+            c.polyline(&[at(0.0, r), at(0.0, 10.0)], stroke, ink, INK);
+            if muted {
+                c.polyline(&[at(-9.0, -9.0), at(9.0, 9.0)], stroke, ink, INK);
+            }
+        }
+
+        // Counters: an outline glyph in an 18-DIP box, then the number.
         let counter = |c: &mut Canvas, z: Zone, hit: Hit, count: usize, glyph: &dyn Fn(&mut Canvas, (f64, f64))| {
             let cy = mid + nudge(hit);
             let gx = z.x as f64 + COUNTER_PAD * s + GLYPH * s / 2.0;
@@ -1268,7 +1346,9 @@ mod native {
                 cover: Some(cover()),
             };
             let (unread, due, waiting) = (73, 7, 2);
-            let layout = layout(scale, Some(&media), unread, due, waiting);
+            // Light rows show a muted microphone, dark ones a live one.
+            let mic = Some((light, !light));
+            let layout = layout(scale, Some(&media), true, unread, due, waiting);
             Look {
                 x: 0,
                 y: 0,
@@ -1278,6 +1358,7 @@ mod native {
                 hover,
                 pressed: None,
                 media: Some(media),
+                mic,
                 unread,
                 due,
                 waiting,

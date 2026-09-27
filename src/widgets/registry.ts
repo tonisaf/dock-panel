@@ -14,6 +14,7 @@ import { HomeWidget } from "./home/HomeWidget";
 import { MonitorsWidget } from "./monitors/MonitorsWidget";
 import { AgentsWidget } from "./agents/AgentsWidget";
 import { AskWidget } from "./ask/AskWidget";
+import { DiscordWidget } from "./discord/DiscordWidget";
 
 export interface WidgetDef {
   id: string;
@@ -33,6 +34,7 @@ export const WIDGETS: WidgetDef[] = [
   { id: "playlists", title: "Плейлисты", component: PlaylistsWidget },
   { id: "mail", title: "Почта", component: MailWidget },
   { id: "youtube", title: "YouTube", component: YoutubeWidget },
+  { id: "discord", title: "Discord", component: DiscordWidget },
   { id: "tasks", title: "Задачи", component: TasksWidget },
   { id: "ai", title: "Лимиты AI", component: AiLimitsWidget },
   { id: "agents", title: "Агенты", component: AgentsWidget },
