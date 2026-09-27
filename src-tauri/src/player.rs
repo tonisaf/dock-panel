@@ -197,7 +197,13 @@ pub fn player_play(
         .arg("--keep-open=no")
         .arg(format!("--geometry={geometry}"))
         .arg(format!("--input-ipc-server={PIPE}"))
-        .arg(format!("--script-opts=ytdl_hook-ytdl_path={}", ytdlp.display()))
+        // A slim one-line control bar that shows on hover only; no title or
+        // window buttons drawn on top of the video.
+        .arg(format!(
+            "--script-opts=ytdl_hook-ytdl_path={},osc-layout=slimbottombar,osc-windowcontrols=no,osc-hidetimeout=700,osc-fadeduration=150,osc-deadzonesize=0.6",
+            ytdlp.display()
+        ))
+        .arg("--osd-bar=no")
         .arg("--ytdl-format=bestvideo[height<=?1080]+bestaudio/best")
         .arg(format!("--title=${{media-title}} — {channel}"));
     if let Some(s) = start {
