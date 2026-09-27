@@ -5,6 +5,7 @@ import { Check, CalendarDays } from "lucide-react";
 import clsx from "clsx";
 import { usePanelStore } from "../../store";
 import { describeDue, notionColor, type Badge, type Task } from "./api";
+import { TaskEditor } from "./TaskEditor";
 
 function Chip({ badge }: { badge: Badge }) {
   const color = notionColor(badge.color);
@@ -30,6 +31,8 @@ export function TaskRow({
   compact?: boolean;
 }) {
   const [checked, setChecked] = useState(false);
+  // In the tasks tab a click opens the editor; the compact widget row opens Notion.
+  const [editing, setEditing] = useState(false);
   const due = task.due ? describeDue(task.due) : null;
 
   const complete = () => {
@@ -71,7 +74,8 @@ export function TaskRow({
 
       <div className="min-w-0 flex-1">
         <button
-          onClick={open}
+          onClick={compact ? open : () => setEditing(!editing)}
+          title={compact ? "Открыть в Notion" : "Изменить"}
           className={clsx(
             "block w-full text-left leading-snug hover:underline",
             compact ? "truncate text-[13px]" : "text-[13.5px]",
@@ -97,6 +101,7 @@ export function TaskRow({
             )}
           </div>
         )}
+        {editing && <TaskEditor task={task} onClose={() => setEditing(false)} />}
       </div>
     </motion.div>
   );

@@ -40,6 +40,16 @@ export interface NotesState {
   error: string | null;
   /** Changes waiting for Notion. */
   pending: number;
+  /** The database's tag options, and whether it has tags and a pin checkbox. */
+  tagOptions: Tag[];
+  canTag: boolean;
+  canPin: boolean;
+}
+
+export interface NoteProps {
+  title?: string;
+  tags?: string[];
+  pinned?: boolean;
 }
 
 export interface Span {
@@ -128,6 +138,17 @@ export function useNotesActions() {
     sync: async (force: boolean) => put(await invoke<NotesState>("notes_sync", { force })),
     setSource: async (source: NotesSource | null) => put(await invoke<NotesState>("notes_set_source", { source })),
     create: (title: string, body: string) => invoke<Note>("notes_create", { title, body }),
+    /** The note as editable text: "# ", "- ", "1. ", "[ ] ", "> ", indentation for nesting. */
+    text: (id: string) => invoke<string>("notes_text", { id }),
+    edit: async (note: Note, text: string) => {
+      const blocks = await invoke<Block[]>("notes_edit", { id: note.id, text });
+      queryClient.setQueryData([...pageKey(note.id), note.edited], blocks);
+      await queryClient.invalidateQueries({ queryKey: KEY });
+    },
+    setProps: async (id: string, props: NoteProps) => {
+      await invoke<Note>("notes_set_props", { id, ...props });
+      await queryClient.invalidateQueries({ queryKey: KEY });
+    },
     toggle: async (note: Note, blockId: string, checked: boolean) => {
       const blocks = await invoke<Block[]>("notes_toggle", { pageId: note.id, blockId, checked });
       queryClient.setQueryData([...pageKey(note.id), note.edited], blocks);

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, CloudOff, Loader2, Pin, Plus, RefreshCw, StickyNote, X } from "lucide-react";
+import { ArrowLeft, CloudOff, Loader2, Pencil, Pin, Plus, RefreshCw, StickyNote, X } from "lucide-react";
 import clsx from "clsx";
 import { EmptyState } from "../components/Card";
 import { SplitView, useSidePane } from "../components/SidePane";
@@ -7,6 +7,7 @@ import { usePanelSettings } from "../lib/panelWidth";
 import { usePrefs } from "../lib/prefs";
 import { usePanelStore } from "../store";
 import { Blocks, OpenInNotion } from "../notes/NoteView";
+import { NoteEditor, PinButton, TagEditor } from "../notes/NoteEditor";
 import { ago, tagStyle, useNotePage, useNotes, useNotesActions, type Note, type NotesState } from "../notes/api";
 
 function Status({ s, onRefresh }: { s: NotesState; onRefresh: () => void }) {
@@ -109,10 +110,22 @@ function Row({ n, active, onOpen }: { n: Note; active: boolean; onOpen: () => vo
   );
 }
 
-function Reader({ note, split, onBack }: { note: Note; split: boolean; onBack: () => void }) {
+function Reader({ note, state, split, onBack }: { note: Note; state: NotesState; split: boolean; onBack: () => void }) {
   const { data: blocks, isPending, error } = useNotePage(note);
   const { toggle } = useNotesActions();
   const [toggleError, setToggleError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+
+  if (editing) {
+    return (
+      <article className="flex flex-col gap-2 pt-0.5">
+        <div className="flex items-center gap-1.5 text-[12px] text-fg-subtle">
+          <Pencil className="size-3.5" /> Редактирование{note.local ? "" : " · в Notion уйдут только изменения"}
+        </div>
+        <NoteEditor note={note} onDone={() => setEditing(false)} />
+      </article>
+    );
+  }
   return (
     <article className="flex flex-col gap-3 pb-4">
       <header className="flex items-start gap-1.5">
@@ -127,7 +140,21 @@ function Reader({ note, split, onBack }: { note: Note; split: boolean; onBack: (
           <div className="mt-0.5 text-[11.5px] text-fg-subtle">
             {note.local ? "Ещё не отправлена в Notion" : `Изменена ${ago(note.edited)}`}
           </div>
+          {state.canTag && !note.local && (
+            <div className="mt-1.5">
+              <TagEditor note={note} options={state.tagOptions} />
+            </div>
+          )}
         </div>
+        <button
+          onClick={() => setEditing(true)}
+          disabled={isPending || !!error}
+          title="Редактировать"
+          className="grid size-7 shrink-0 place-items-center rounded-lg text-fg-subtle hover:bg-ink/10 hover:text-fg disabled:opacity-40"
+        >
+          <Pencil className="size-3.5" />
+        </button>
+        {state.canPin && !note.local && <PinButton note={note} />}
         <OpenInNotion url={note.url} />
       </header>
       {toggleError && <p className="text-[12px] text-warn">{toggleError}</p>}
@@ -210,7 +237,7 @@ export function NotesTab() {
   if (!s) return null;
 
   const close = () => void pane.close();
-  const reader = reading && <Reader key={reading.id} note={reading} split={pane.mode === "split"} onBack={close} />;
+  const reader = reading && <Reader key={reading.id} note={reading} state={s} split={pane.mode === "split"} onBack={close} />;
   if (reader && pane.mode === "full") return reader;
 
   const list = (

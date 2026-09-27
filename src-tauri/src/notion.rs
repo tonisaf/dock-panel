@@ -1,5 +1,5 @@
 //! Notion tasks: list open tasks from one data source, complete them, add new
-//! ones. Uses an internal integration token kept in Windows Credential
+//! ones, edit their title, status, due date, priority and tag, delete them. Uses an internal integration token kept in Windows Credential
 //! Manager; it never reaches the webview.
 //!
 //! Any task database works: the title, status (or checkbox), due date,
@@ -59,6 +59,7 @@ pub(crate) async fn call(token: &str, method: Method, path: &str, body: Option<V
 #[derive(Clone)]
 struct StatusProp {
     name: String,
+    options: Vec<Badge>,
     /// Options of the "Complete" group; the first non-archive one marks a task done.
     done: Vec<String>,
     in_progress: Vec<String>,
@@ -72,6 +73,8 @@ struct Schema {
     date: Option<String>,
     priority: Option<String>,
     tag: Option<String>,
+    priority_options: Vec<Badge>,
+    tag_options: Vec<Badge>,
 }
 
 impl Schema {
@@ -116,7 +119,8 @@ fn detect(ds: &Value) -> Result<Schema, String> {
                 .filter_map(|id| options.get(id.as_str()?).map(|n| n.to_string()))
                 .collect()
         };
-        StatusProp { name, done: group("Complete"), in_progress: group("In progress") }
+        let all = p["status"]["options"].as_array().into_iter().flatten().filter_map(badge).collect();
+        StatusProp { name, options: all, done: group("Complete"), in_progress: group("In progress") }
     });
 
     let checkbox = if status.is_none() {
@@ -127,8 +131,17 @@ fn detect(ds: &Value) -> Result<Schema, String> {
     let date = prefer("date", &["due", "срок", "дедлайн", "deadline", "дата"]).map(|(n, _)| n);
     let priority = of_type("select").find(|(n, _)| matches_any(n, &["priority", "приоритет"])).map(|(n, _)| n);
     let tag = of_type("select").find(|(n, _)| Some(n) != priority.as_ref()).map(|(n, _)| n);
+    let options = |name: &Option<String>| -> Vec<Badge> {
+        name.as_ref()
+            .and_then(|n| props[n]["select"]["options"].as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(badge)
+            .collect()
+    };
+    let (priority_options, tag_options) = (options(&priority), options(&tag));
 
-    Ok(Schema { title, status, checkbox, date, priority, tag })
+    Ok(Schema { title, status, checkbox, date, priority, tag, priority_options, tag_options })
 }
 
 static SCHEMAS: Mutex<Option<HashMap<String, (Instant, Schema)>>> = Mutex::new(None);
@@ -156,7 +169,7 @@ async fn schema(token: &str, source_id: &str) -> Result<Schema, String> {
 
 // ---- mapping ----------------------------------------------------------------------
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct Badge {
     name: String,
     color: String,
@@ -371,10 +384,106 @@ pub async fn notion_create(source_id: String, title: String) -> Result<Task, Str
     Ok(to_task(&page, &schema))
 }
 
+/// What a task's editor can offer: the database's options, and which fields it has.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskSchema {
+    statuses: Vec<Badge>,
+    priorities: Vec<Badge>,
+    tags: Vec<Badge>,
+    has_status: bool,
+    has_due: bool,
+    has_priority: bool,
+    has_tag: bool,
+}
+
+#[tauri::command]
+pub async fn notion_task_schema(source_id: String) -> Result<TaskSchema, String> {
+    let token = token()?;
+    let s = schema(&token, &source_id).await?;
+    Ok(TaskSchema {
+        statuses: s.status.as_ref().map(|st| st.options.clone()).unwrap_or_default(),
+        priorities: s.priority_options.clone(),
+        tags: s.tag_options.clone(),
+        has_status: s.status.is_some(),
+        has_due: s.date.is_some(),
+        has_priority: s.priority.is_some(),
+        has_tag: s.tag.is_some(),
+    })
+}
+
+/// A present field, even when it is null (null clears it); an absent one stays `None`.
+fn present<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    serde::Deserialize::deserialize(d).map(Some)
+}
+
+/// Fields to change; left out ones stay, `null` clears (due, priority, tag).
+#[derive(serde::Deserialize)]
+pub struct TaskChange {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    /// ISO date or datetime.
+    #[serde(default, deserialize_with = "present")]
+    due: Option<Value>,
+    #[serde(default, deserialize_with = "present")]
+    priority: Option<Value>,
+    #[serde(default, deserialize_with = "present")]
+    tag: Option<Value>,
+}
+
+#[tauri::command]
+pub async fn notion_update(source_id: String, page_id: String, change: TaskChange) -> Result<Task, String> {
+    let token = token()?;
+    let schema = schema(&token, &source_id).await?;
+    let mut props = serde_json::Map::new();
+    if let Some(t) = &change.title {
+        props.insert(schema.title.clone(), json!({ "title": [{ "text": { "content": t.trim() } }] }));
+    }
+    if let (Some(st), Some(prop)) = (&change.status, &schema.status) {
+        props.insert(prop.name.clone(), json!({ "status": { "name": st } }));
+    }
+    if let (Some(due), Some(prop)) = (&change.due, &schema.date) {
+        let value = match due.as_str().filter(|d| !d.is_empty()) {
+            Some(d) => json!({ "start": d }),
+            None => Value::Null,
+        };
+        props.insert(prop.clone(), json!({ "date": value }));
+    }
+    for (value, prop) in [(&change.priority, &schema.priority), (&change.tag, &schema.tag)] {
+        if let (Some(v), Some(prop)) = (value, prop) {
+            let select = match v.as_str().filter(|s| !s.is_empty()) {
+                Some(name) => json!({ "name": name }),
+                None => Value::Null,
+            };
+            props.insert(prop.clone(), json!({ "select": select }));
+        }
+    }
+    let page = call(&token, Method::PATCH, &format!("/pages/{page_id}"), Some(json!({ "properties": props }))).await?;
+    Ok(to_task(&page, &schema))
+}
+
+/// Moves the task to Notion's trash (restorable there for 30 days).
+#[tauri::command]
+pub async fn notion_delete(page_id: String) -> Result<(), String> {
+    let token = token()?;
+    call(&token, Method::PATCH, &format!("/pages/{page_id}"), Some(json!({ "in_trash": true }))).await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::detect;
+    use super::{detect, TaskChange};
     use serde_json::json;
+
+    #[test]
+    fn a_null_field_clears_and_a_missing_one_stays() {
+        let c: TaskChange = serde_json::from_value(json!({ "due": null, "priority": "Высокий" })).unwrap();
+        assert_eq!(c.due, Some(serde_json::Value::Null));
+        assert_eq!(c.priority, Some(json!("Высокий")));
+        assert!(c.tag.is_none() && c.title.is_none() && c.status.is_none());
+    }
 
     #[test]
     fn detects_wickflow_like_schema() {
@@ -398,7 +507,9 @@ mod tests {
         let s = detect(&ds).unwrap();
         assert_eq!(s.title, "Task name");
         assert_eq!(s.done_option(), Some("Done"));
-        assert_eq!(s.status.unwrap().in_progress, vec!["In progress"]);
+        let status = s.status.clone().unwrap();
+        assert_eq!(status.in_progress, vec!["In progress"]);
+        assert_eq!(status.options.len(), 4);
         assert_eq!(s.date.as_deref(), Some("Due"));
         assert_eq!(s.priority.as_deref(), Some("Приоритет"));
         assert_eq!(s.tag.as_deref(), Some("Область"));

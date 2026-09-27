@@ -121,3 +121,60 @@ export function describeDue(due: string, now = new Date()) {
   const overdue = hasTime ? date.getTime() < now.getTime() : days < 0;
   return { label: label + time, overdue, soon: !overdue && days <= 1 };
 }
+
+export interface TaskSchema {
+  statuses: Badge[];
+  priorities: Badge[];
+  tags: Badge[];
+  hasStatus: boolean;
+  hasDue: boolean;
+  hasPriority: boolean;
+  hasTag: boolean;
+}
+
+export function useTaskSchema(enabled: boolean) {
+  const source = usePrefs((s) => s.notionSource);
+  return useQuery({
+    queryKey: ["notion-task-schema", source?.id],
+    queryFn: () => invoke<TaskSchema>("notion_task_schema", { sourceId: source!.id }),
+    enabled: enabled && !!source,
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** Fields to change; `null` clears due, priority or tag. */
+export interface TaskChange {
+  title?: string;
+  status?: string;
+  due?: string | null;
+  priority?: string | null;
+  tag?: string | null;
+}
+
+/** Edits and deletion, shown in the list at once and put right by Notion's answer. */
+export function useTaskActions() {
+  const queryClient = useQueryClient();
+  const source = usePrefs((s) => s.notionSource);
+  const key = ["notion-tasks", source?.id];
+  const patch = (fn: (tasks: Task[]) => Task[]) =>
+    queryClient.setQueryData<TaskList>(key, (prev) => (prev ? { ...prev, tasks: fn(prev.tasks) } : prev));
+
+  return {
+    update: async (task: Task, change: TaskChange) => {
+      const updated = await invoke<Task>("notion_update", { sourceId: source!.id, pageId: task.id, change });
+      patch((tasks) => tasks.map((t) => (t.id === task.id ? updated : t)));
+      // A status in the "Complete" group takes the task off the list.
+      if (change.status) queryClient.invalidateQueries({ queryKey: key });
+      return updated;
+    },
+    remove: async (task: Task) => {
+      patch((tasks) => tasks.filter((t) => t.id !== task.id));
+      try {
+        await invoke("notion_delete", { pageId: task.id });
+      } catch (e) {
+        queryClient.invalidateQueries({ queryKey: key });
+        throw e;
+      }
+    },
+  };
+}
