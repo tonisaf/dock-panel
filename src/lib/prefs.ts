@@ -38,6 +38,8 @@ interface PrefsState {
   widgetColumns: Record<string, string[][]>;
   /** Width of the mail list while a letter is open next to it; null for the default. */
   mailListWidth: number | null;
+  /** The same for the notes list next to an open note. */
+  notesListWidth: number | null;
   /** Collapsed state of collapsible blocks (widgets, `settings.*` groups), by id; each picks its own default. */
   collapsedWidgets: Record<string, boolean>;
   togglePin: (id: string) => void;
@@ -51,6 +53,7 @@ interface PrefsState {
   /** `columns` saves an arrangement for that many columns; null drops all of them (back to auto). */
   setWidgetLayout: (order: string[], hidden: string[], columns: string[][] | null) => void;
   setMailListWidth: (width: number) => void;
+  setNotesListWidth: (width: number) => void;
   setWidgetCollapsed: (id: string, collapsed: boolean) => void;
 }
 
@@ -72,6 +75,7 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   hiddenWidgets: [],
   widgetColumns: {},
   mailListWidth: null,
+  notesListWidth: null,
   collapsedWidgets: {},
   togglePin: (id) => {
     const current = get().pinned;
@@ -113,6 +117,10 @@ export const usePrefs = create<PrefsState>((set, get) => ({
     set({ mailListWidth });
     persist("mailListWidth", mailListWidth);
   },
+  setNotesListWidth: (notesListWidth) => {
+    set({ notesListWidth });
+    persist("notesListWidth", notesListWidth);
+  },
   setWidgetCollapsed: (id, collapsed) => {
     const collapsedWidgets = { ...get().collapsedWidgets, [id]: collapsed };
     set({ collapsedWidgets });
@@ -141,6 +149,7 @@ load("prefs.json", { defaults: {}, autoSave: 300 })
       hiddenWidgets: (await s.get<string[]>("hiddenWidgets")) ?? [],
       widgetColumns: (await s.get<Record<string, string[][]>>("widgetColumns")) ?? {},
       mailListWidth: (await s.get<number>("mailListWidth")) ?? null,
+      notesListWidth: (await s.get<number>("notesListWidth")) ?? null,
       collapsedWidgets: (await s.get<Record<string, boolean>>("collapsedWidgets")) ?? {},
     });
   })

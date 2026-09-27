@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
-import { SearchX } from "lucide-react";
+import { SearchX, StickyNote } from "lucide-react";
+import clsx from "clsx";
+import { useNoteSearch } from "../notes/api";
 import { useApps, useAppsById, usePinnedEntries, useSearchResults, type AppEntry } from "../lib/apps";
 import { usePrefs } from "../lib/prefs";
 import { usePanelStore } from "../store";
@@ -25,14 +27,15 @@ function Section({ title, action, children }: { title: string; action?: ReactNod
 
 function SearchResults() {
   const results = useSearchResults();
-  const { selected, setSelected } = usePanelStore();
+  const { selected, setSelected, query, openNote } = usePanelStore();
+  const notes = useNoteSearch(query).data ?? [];
   const rows = useRef<(HTMLButtonElement | null)[]>([]);
 
   useEffect(() => {
     rows.current[selected]?.scrollIntoView({ block: "nearest" });
   }, [selected]);
 
-  if (results.length === 0) {
+  if (results.length === 0 && notes.length === 0) {
     return <EmptyState icon={SearchX} title="Ничего не найдено" text="Попробуйте другое название или первые буквы слов." />;
   }
   return (
@@ -48,6 +51,29 @@ function SearchResults() {
           onHover={() => i !== selected && setSelected(i)}
         />
       ))}
+      {notes.length > 0 && <h3 className="px-1 pt-2 pb-1 text-[12px] font-medium text-fg-subtle">Заметки</h3>}
+      {notes.map((n, j) => {
+        const i = results.length + j;
+        return (
+          <button
+            key={n.id}
+            ref={(el) => {
+              rows.current[i] = el;
+            }}
+            onClick={() => openNote(n.id)}
+            onMouseMove={() => i !== selected && setSelected(i)}
+            className={clsx("flex items-center gap-3 rounded-xl px-2.5 py-2 text-left", i === selected ? "bg-ink/10" : "hover:bg-ink/5")}
+          >
+            <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-ink/6 text-[15px]">
+              {n.icon ?? <StickyNote className="size-4 text-fg-subtle" />}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[13.5px]">{n.title || "Без названия"}</span>
+              <span className="block truncate text-[12px] text-fg-subtle">{n.snippet}</span>
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }

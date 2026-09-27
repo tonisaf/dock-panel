@@ -2,10 +2,11 @@ import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Database, ExternalLink, Loader2 } from "lucide-react";
+import { Check, Database, ExternalLink, Loader2, StickyNote } from "lucide-react";
 import clsx from "clsx";
 import { usePrefs } from "../lib/prefs";
 import { useNotionStatus } from "../widgets/tasks/api";
+import { useNotes, useNotesActions } from "../notes/api";
 
 interface Source {
   id: string;
@@ -29,6 +30,7 @@ function Connect() {
       await invoke("notion_set_token", { token });
       setToken("");
       await queryClient.invalidateQueries({ queryKey: ["notion-status"] });
+    await queryClient.invalidateQueries({ queryKey: ["notes"] });
     } catch (e) {
       setError(String(e));
     } finally {
@@ -116,6 +118,51 @@ function SourcePicker() {
   );
 }
 
+/** The notes database: kept by the backend, which caches it for offline reading. */
+function NotesSourcePicker() {
+  const { data: notes } = useNotes();
+  const { setSource } = useNotesActions();
+  const { data } = useQuery({
+    queryKey: ["notion-sources"],
+    queryFn: () => invoke<Source[]>("notion_list_sources"),
+    staleTime: 60_000,
+  });
+  const current = notes?.source?.id;
+
+  return (
+    <div className="flex flex-col gap-1 p-2">
+      <div className="flex items-center justify-between px-1.5 pt-1 pb-1">
+        <span className="text-[12px] text-fg-subtle">База заметок · хранится на компьютере для работы без интернета</span>
+        {current && (
+          <button onClick={() => setSource(null).catch(console.error)} className="text-[12px] text-fg-subtle hover:text-fg">
+            Не выбирать
+          </button>
+        )}
+      </div>
+      {data?.map((s) => {
+        const active = current === s.id;
+        return (
+          <button
+            key={s.id}
+            onClick={() => !active && setSource(s).catch(console.error)}
+            className={clsx("flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[13px]", active ? "bg-ink/10" : "hover:bg-ink/6")}
+          >
+            <StickyNote className="size-3.5 shrink-0 text-fg-subtle" />
+            <span className="min-w-0 flex-1 truncate">{s.title}</span>
+            {active && <Check className="size-4 text-accent" />}
+          </button>
+        );
+      })}
+      {current && notes && (
+        <p className="px-1.5 pt-1 text-[11.5px] leading-relaxed text-fg-subtle">
+          {notes.syncing ? "Синхронизирую…" : `${notes.notes.length} заметок в кэше`}
+          {notes.error && <span className="text-warn"> · {notes.error}</span>}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function NotionSettings() {
   const queryClient = useQueryClient();
   const setNotionSource = usePrefs((s) => s.setNotionSource);
@@ -146,6 +193,7 @@ export function NotionSettings() {
         </button>
       </div>
       <SourcePicker />
+      <NotesSourcePicker />
     </div>
   );
 }

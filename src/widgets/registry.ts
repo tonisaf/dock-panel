@@ -16,6 +16,7 @@ import { AgentsWidget } from "./agents/AgentsWidget";
 import { AskWidget } from "./ask/AskWidget";
 import { DiscordWidget } from "./discord/DiscordWidget";
 import { PomodoroWidget } from "./pomodoro/PomodoroWidget";
+import { NotesWidget } from "./notes/NotesWidget";
 
 export interface WidgetDef {
   id: string;
@@ -37,6 +38,7 @@ export const WIDGETS: WidgetDef[] = [
   { id: "youtube", title: "YouTube", component: YoutubeWidget },
   { id: "discord", title: "Discord", component: DiscordWidget },
   { id: "tasks", title: "Задачи", component: TasksWidget },
+  { id: "notes", title: "Заметки", component: NotesWidget },
   { id: "ai", title: "Лимиты AI", component: AiLimitsWidget },
   { id: "agents", title: "Агенты", component: AgentsWidget },
   { id: "ask", title: "Спросить Claude", component: AskWidget },

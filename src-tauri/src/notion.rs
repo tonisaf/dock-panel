@@ -24,13 +24,13 @@ const PAGE_SIZE: u32 = 50;
 
 const SECRET: &str = "DockPanel/notion";
 
-fn token() -> Result<String, String> {
+pub(crate) fn token() -> Result<String, String> {
     secrets::read(SECRET).ok_or_else(|| "Notion не подключён".to_string())
 }
 
 // ---- HTTP -----------------------------------------------------------------------
 
-async fn call(token: &str, method: Method, path: &str, body: Option<Value>) -> Result<Value, String> {
+pub(crate) async fn call(token: &str, method: Method, path: &str, body: Option<Value>) -> Result<Value, String> {
     let mut req = net::client()
         .request(method, format!("{API}{path}"))
         .bearer_auth(token)
@@ -176,7 +176,7 @@ pub struct Task {
     tag: Option<Badge>,
 }
 
-fn plain_text(rich: &Value) -> String {
+pub(crate) fn plain_text(rich: &Value) -> String {
     rich.as_array()
         .into_iter()
         .flatten()

@@ -1,8 +1,8 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import { AppWindow, CalendarDays, CheckSquare, LayoutGrid, Mail, Settings, Sparkles, type LucideIcon } from "lucide-react";
+import { AppWindow, CalendarDays, CheckSquare, LayoutGrid, Mail, Settings, Sparkles, StickyNote, type LucideIcon } from "lucide-react";
 
-export type TabId = "home" | "apps" | "tasks" | "mail" | "calendar" | "ai" | "settings";
+export type TabId = "home" | "apps" | "tasks" | "mail" | "calendar" | "ai" | "notes" | "settings";
 
 export const TABS: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: "home", label: "Главная", icon: LayoutGrid },
@@ -11,6 +11,7 @@ export const TABS: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: "mail", label: "Почта", icon: Mail },
   { id: "calendar", label: "Календарь", icon: CalendarDays },
   { id: "ai", label: "AI", icon: Sparkles },
+  { id: "notes", label: "Заметки", icon: StickyNote },
   { id: "settings", label: "Настройки", icon: Settings },
 ];
 
@@ -42,6 +43,8 @@ interface PanelState {
   menu: ContextMenuState | null;
   /** A letter to open in the mail tab, e.g. from a clicked notification. */
   mailToOpen: MailToOpen | null;
+  /** A note to open in the notes tab (from search or the widget); "new" opens the composer. */
+  noteToOpen: string | null;
   /** Pinned: the panel stays open until hidden explicitly. */
   pinned: boolean;
   /** Full screen: home on the left, the other tabs on the right. */
@@ -58,6 +61,8 @@ interface PanelState {
   setSelected: (selected: number) => void;
   setMenu: (menu: ContextMenuState | null) => void;
   setMailToOpen: (letter: MailToOpen | null) => void;
+  /** Switches to the notes tab and opens the note. */
+  openNote: (id: string | null) => void;
   /** Closes the panel even when pinned: the hide button, the hotkey, the tray. */
   hide: () => void;
   setPinned: (pinned: boolean) => void;
@@ -71,6 +76,7 @@ export const usePanelStore = create<PanelState>((set, get) => ({
   selected: 0,
   menu: null,
   mailToOpen: null,
+  noteToOpen: null,
   pinned: false,
   full: false,
   sideTab: "apps",
@@ -92,4 +98,8 @@ export const usePanelStore = create<PanelState>((set, get) => ({
   setSelected: (selected) => set({ selected }),
   setMenu: (menu) => set({ menu }),
   setMailToOpen: (mailToOpen) => set({ mailToOpen }),
+  openNote: (noteToOpen) => {
+    set({ noteToOpen, query: "", selected: 0 });
+    if (noteToOpen) get().setTab("notes");
+  },
 }));

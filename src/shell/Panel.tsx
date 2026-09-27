@@ -18,6 +18,7 @@ import { HomeTab } from "../tabs/HomeTab";
 import { AppsTab } from "../tabs/AppsTab";
 import { TasksTab } from "../tabs/TasksTab";
 import { AiTab } from "../tabs/AiTab";
+import { NotesTab } from "../tabs/NotesTab";
 import { SettingsTab } from "../tabs/SettingsTab";
 import { MailTab } from "../tabs/MailTab";
 import { CalendarTab } from "../gcal/CalendarTab";
@@ -31,6 +32,7 @@ const TAB_VIEWS = {
   mail: MailTab,
   calendar: CalendarTab,
   ai: AiTab,
+  notes: NotesTab,
   settings: SettingsTab,
 };
 

@@ -12,6 +12,7 @@ mod mail;
 mod media;
 mod monitors;
 mod net;
+mod notes;
 mod notion;
 mod oauth;
 mod panel;
@@ -57,6 +58,7 @@ pub fn run() {
                 })
                 .build(),
         )
+        .register_uri_scheme_protocol("noteimg", |_ctx, request| notes::image_response(&request))
         .register_asynchronous_uri_scheme_protocol("appicon", |_ctx, request, responder| {
             apps::handle_icon_request(request, responder);
         })
@@ -74,6 +76,7 @@ pub fn run() {
             youtube::init(handle);
             discord::init(handle);
             pomodoro::init(handle);
+            notes::init(handle);
             updater::init(handle);
             apps::start_icon_worker(app.path().app_cache_dir()?.join("icons"));
             let registered = shortcut
@@ -103,6 +106,13 @@ pub fn run() {
             panel::panel_set_taskbar_agents,
             panel::panel_set_taskbar_mic,
             panel::panel_set_taskbar_pomodoro,
+            notes::notes_state,
+            notes::notes_set_source,
+            notes::notes_sync,
+            notes::notes_page,
+            notes::notes_toggle,
+            notes::notes_create,
+            notes::notes_search,
             pomodoro::pomodoro_state,
             pomodoro::pomodoro_start,
             pomodoro::pomodoro_pause,

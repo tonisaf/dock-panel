@@ -3,13 +3,16 @@ import { Search } from "lucide-react";
 import { launchApp, useSearchResults } from "../lib/apps";
 import { usePanelStore } from "../store";
 import { activateSpotifyItem, useSpotifySearch } from "../widgets/spotify/SpotifySearch";
+import { useNoteSearch } from "../notes/api";
 
 export const SearchBar = forwardRef<HTMLInputElement>(function SearchBar(_, ref) {
-  const { query, setQuery, tab, setTab, selected, setSelected } = usePanelStore();
+  const { query, setQuery, tab, setTab, selected, setSelected, openNote } = usePanelStore();
   const apps = useSearchResults();
   const spotify = useSpotifySearch();
+  // Notes come after the apps in the results.
+  const notes = useNoteSearch(spotify.term ? "" : query).data ?? [];
   // "sp <query>" searches Spotify instead of apps.
-  const count = spotify.term ? spotify.results.length : apps.length;
+  const count = spotify.term ? spotify.results.length : apps.length + notes.length;
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (!count) return;
@@ -23,7 +26,8 @@ export const SearchBar = forwardRef<HTMLInputElement>(function SearchBar(_, ref)
       if (spotify.term && (spotify.typing || spotify.isFetching)) return;
       const i = Math.min(selected, count - 1);
       if (spotify.term) activateSpotifyItem(spotify.results[i], e.shiftKey);
-      else launchApp(apps[i].id);
+      else if (i < apps.length) launchApp(apps[i].id);
+      else openNote(notes[i - apps.length].id);
     }
   };
 
@@ -40,7 +44,7 @@ export const SearchBar = forwardRef<HTMLInputElement>(function SearchBar(_, ref)
           if (e.target.value && tab !== "apps") setTab("apps");
         }}
         onKeyDown={onKeyDown}
-        placeholder="Приложения и файлы · sp … — Spotify"
+        placeholder="Приложения, файлы, заметки · sp … — Spotify"
         spellCheck={false}
         className="h-full flex-1 bg-transparent text-[15px] outline-none placeholder:text-fg-subtle"
       />

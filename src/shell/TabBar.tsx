@@ -42,7 +42,7 @@ export function TabBar({ exclude, active: activeTab }: { exclude?: TabId; active
                 </span>
               )}
             </span>
-            {/* Seven labels need a tighter font on the narrowest panel; tabs size to their labels. */}
+            {/* Eight labels need a tighter font on the narrowest panel; tabs size to their labels. */}
             <span className="relative max-w-full truncate @max-[480px]:text-[10px] @max-[480px]:tracking-tight">
               {label}
             </span>
