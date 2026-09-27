@@ -1,12 +1,15 @@
-//! "Дом" widget: Yeelight lamps and Google Cast speakers, all over the local
-//! network, no cloud. Found devices are remembered in `home.json`, so the
-//! widget shows them at once and only searches again when one goes missing
-//! (a new IP from the router) or the user asks.
+//! "Дом" widget: Yeelight lamps and Google Cast speakers over the local
+//! network, plus the lights of the Yandex smart home through its cloud API
+//! (brands without a local protocol, e.g. Kojima). Found local devices are
+//! remembered in `home.json`, so the widget shows them at once and only
+//! searches again when one goes missing (a new IP from the router) or the user
+//! asks.
 
 mod cast;
+pub mod yandex;
 mod yeelight;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -27,7 +30,13 @@ struct Saved {
     speakers: HashMap<String, cast::Known>,
     /// Names given in the panel; Yeelight lamps don't report the app's names.
     names: HashMap<String, String>,
+    /// Yandex lights the user forgot; Yandex would list them again otherwise.
+    #[serde(default)]
+    hidden: HashSet<String>,
 }
+
+/// Yandex lights get this prefix in their panel ID.
+const YANDEX: &str = "yandex:";
 
 static LAST_SCAN: Mutex<Option<Instant>> = Mutex::new(None);
 
@@ -132,6 +141,22 @@ fn lamp(saved: &Saved, id: &str, known: &yeelight::Known, state: Option<yeelight
     }
 }
 
+fn yandex_lamp(saved: &Saved, dev: yandex::Device) -> Lamp {
+    let id = format!("{YANDEX}{}", dev.id);
+    Lamp {
+        name: saved.names.get(&id).cloned().unwrap_or(dev.name),
+        id,
+        model: dev.room.unwrap_or_default(),
+        supports_ct: dev.supports_ct,
+        supports_rgb: dev.supports_rgb,
+        bg_supports_ct: false,
+        bg_supports_rgb: false,
+        ct_min: dev.ct_min,
+        ct_max: dev.ct_max,
+        state: dev.state,
+    }
+}
+
 fn speaker(saved: &Saved, id: &str, known: &cast::Known, state: Option<cast::SpeakerState>) -> Speaker {
     Speaker {
         id: id.to_string(),
@@ -188,13 +213,34 @@ async fn blocking<R: Send + 'static>(f: impl FnOnce() -> Result<R, String> + Sen
 }
 
 /// Every known device with its current state; `rescan` searches the network first.
+/// Yandex lights are left out while Yandex can't be reached; its settings show why.
 #[tauri::command]
 pub async fn home_state(app: AppHandle, rescan: bool) -> Result<HomeState, String> {
-    blocking(move || state_blocking(&app, rescan)).await
+    let local = {
+        let app = app.clone();
+        blocking(move || state_blocking(&app, rescan))
+    };
+    let (local, remote) = futures_util::join!(local, yandex::devices());
+    let mut state = local?;
+    if let Ok(devices) = remote {
+        let saved = load(&app);
+        state.lamps.extend(
+            devices
+                .into_iter()
+                .filter(|d| !saved.hidden.contains(&d.id))
+                .map(|d| yandex_lamp(&saved, d)),
+        );
+        state.lamps.sort_by_cached_key(|l| l.name.to_lowercase());
+    }
+    Ok(state)
 }
 
 #[tauri::command]
 pub async fn home_lamp_set(app: AppHandle, id: String, change: yeelight::Change) -> Result<Lamp, String> {
+    if let Some(yandex_id) = id.strip_prefix(YANDEX) {
+        let dev = yandex::apply(yandex_id, &change).await?;
+        return Ok(yandex_lamp(&load(&app), dev));
+    }
     blocking(move || {
         let saved = load(&app);
         let known = saved.lamps.get(&id).ok_or("лампа не найдена")?;
@@ -239,6 +285,9 @@ pub async fn home_forget(app: AppHandle, id: String) -> Result<(), String> {
         saved.lamps.remove(&id);
         saved.speakers.remove(&id);
         saved.names.remove(&id);
+        if let Some(yandex_id) = id.strip_prefix(YANDEX) {
+            saved.hidden.insert(yandex_id.to_string());
+        }
         save(&app, &saved)
     })
     .await

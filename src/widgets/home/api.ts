@@ -139,6 +139,35 @@ export function useHomeActions() {
   };
 }
 
+export interface YandexStatus {
+  connected: boolean;
+  /** Lights in the Yandex home. */
+  lamps: number;
+  error: string | null;
+}
+
+const YANDEX_KEY = ["yandex-status"];
+
+export function useYandexStatus() {
+  return useQuery({ queryKey: YANDEX_KEY, queryFn: () => invoke<YandexStatus>("yandex_status"), staleTime: 5 * 60_000 });
+}
+
+export function useYandexActions() {
+  const queryClient = useQueryClient();
+  const refresh = () =>
+    Promise.all([queryClient.invalidateQueries({ queryKey: YANDEX_KEY }), queryClient.invalidateQueries({ queryKey: KEY })]);
+  return {
+    login: async (clientId: string, clientSecret: string) => {
+      await invoke<number>("yandex_login", { clientId, clientSecret });
+      await refresh();
+    },
+    logout: async () => {
+      await invoke("yandex_logout");
+      await refresh();
+    },
+  };
+}
+
 /** Approximate sRGB of black-body light (Tanner Helland's fit), for the lamp icon and slider. */
 export function kelvinToRgb(kelvin: number): [number, number, number] {
   const t = kelvin / 100;

@@ -12,6 +12,7 @@ import {
   SkipBack,
   SkipForward,
   Speaker as SpeakerIcon,
+  EyeOff,
   Trash2,
   Volume2,
   VolumeX,
@@ -91,10 +92,17 @@ function RowTools({ id, name, offline, onRename }: { id: string; name: string; o
       <button className={tool} onClick={onRename}>
         <Pencil className="size-3" /> Переименовать
       </button>
-      {offline && (
-        <button className={tool} onClick={() => forget(id).catch(report)} title={`Забыть «${name}»`}>
-          <Trash2 className="size-3" /> Забыть
+      {/* Yandex would list its lights again, so for them this hides instead. */}
+      {id.startsWith("yandex:") ? (
+        <button className={tool} onClick={() => forget(id).catch(report)} title={`Скрыть «${name}» из панели`}>
+          <EyeOff className="size-3" /> Скрыть
         </button>
+      ) : (
+        offline && (
+          <button className={tool} onClick={() => forget(id).catch(report)} title={`Забыть «${name}»`}>
+            <Trash2 className="size-3" /> Забыть
+          </button>
+        )
       )}
     </div>
   );

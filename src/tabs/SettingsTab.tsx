@@ -12,11 +12,13 @@ import { Toggle } from "../components/Toggle";
 import { MailSettings } from "../components/MailSettings";
 import { GcalSettings } from "../components/GcalSettings";
 import { YoutubeSettings } from "../components/YoutubeSettings";
+import { YandexSettings } from "../components/YandexSettings";
 import {
   CalendarDays,
   ChevronDown,
   CloudSun,
   Download,
+  House,
   Link2,
   Mail,
   Music,
@@ -30,6 +32,7 @@ import { useCalendars as useIcalCalendars } from "../widgets/calendar/api";
 import { useNotionStatus } from "../widgets/tasks/api";
 import { useSpotifyStatus } from "../widgets/spotify/api";
 import { useYoutubeSettings } from "../widgets/youtube/api";
+import { useYandexStatus } from "../widgets/home/api";
 import { useUpdateStatus } from "../lib/updates";
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
@@ -307,6 +310,7 @@ function Integrations() {
   const notion = useNotionStatus().data;
   const spotify = useSpotifyStatus().data;
   const youtube = useYoutubeSettings().data;
+  const yandex = useYandexStatus().data;
   const location = usePrefs((s) => s.location);
   const update = useUpdateStatus().data;
 
@@ -341,6 +345,19 @@ function Integrations() {
       </Group>
       <Group id="spotify" icon={Music} title="Spotify" {...connected(spotify, spotify?.user)}>
         <SpotifySettings />
+      </Group>
+      <Group
+        id="yandex"
+        icon={House}
+        title="Дом с Алисой"
+        {...(yandex &&
+          (yandex.error
+            ? { status: "ошибка", tone: "warn" as Tone }
+            : yandex.connected
+              ? { status: plural(yandex.lamps, ["лампа", "лампы", "ламп"]), tone: "ok" as Tone }
+              : { status: "не подключено" }))}
+      >
+        <YandexSettings />
       </Group>
       <Group
         id="youtube"
