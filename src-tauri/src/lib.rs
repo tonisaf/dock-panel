@@ -14,6 +14,7 @@ mod net;
 mod notion;
 mod oauth;
 mod panel;
+mod player;
 mod secrets;
 mod spotify;
 mod system;
@@ -164,6 +165,8 @@ pub fn run() {
             monitors::monitors_blackout,
             agents::agents_list,
             ask::ask_start,
+            player::player_play,
+            player::player_available,
             ask::ask_cancel,
             ask::clipboard_text,
             agents::agents_dismiss,

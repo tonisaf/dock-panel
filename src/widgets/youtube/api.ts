@@ -77,7 +77,22 @@ export function useYoutubeActions() {
   return {
     refresh: async () => queryClient.setQueryData(FEED, await invoke<FeedView>("youtube_feed", { force: true })),
 
-    open: (v: Video) => {
+    /**
+     * Plays in the panel's mpv window (no ads; marked watched at 90 %), or
+     * opens the browser when mpv or yt-dlp isn't installed.
+     */
+    open: (v: Video, start?: number) => {
+      invoke("player_play", { id: v.id, url: v.url, title: v.title, channel: v.channelTitle, start: start ?? null }).catch(
+        () => {
+          setWatchedLocally(v.id, true);
+          invoke("youtube_set_watched", { id: v.id, watched: true }).catch(console.error);
+          openUrl(v.url).catch(console.error);
+        },
+      );
+    },
+
+    /** The video on YouTube's site, e.g. for comments or the account's history. */
+    openInBrowser: (v: Video) => {
       setWatchedLocally(v.id, true);
       invoke("youtube_set_watched", { id: v.id, watched: true }).catch(console.error);
       openUrl(v.url).catch(console.error);

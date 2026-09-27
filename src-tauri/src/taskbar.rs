@@ -289,6 +289,26 @@ mod native {
         let mut cover_tries = 0;
         loop {
             let wanted = super::enabled() && super::player_enabled();
+            // The panel's own YouTube player (mpv) isn't a system media session: show it first.
+            if let Some((title, channel, playing)) = wanted.then(crate::player::now_playing).flatten() {
+                *MEDIA.lock().unwrap_or_else(|e| e.into_inner()) = Some(Media {
+                    title,
+                    artist: channel,
+                    playing,
+                    can_prev: false,
+                    can_next: false,
+                    cover: None,
+                });
+                key = (String::new(), String::new());
+                cover = None;
+                for _ in 0..(MEDIA_POLL.as_millis() / 50) {
+                    std::thread::sleep(Duration::from_millis(50));
+                    if POKE.swap(false, Ordering::SeqCst) {
+                        break;
+                    }
+                }
+                continue;
+            }
             let now = if wanted { media::win::now_playing().ok().flatten() } else { None };
             let next = now.filter(|n| !n.title.is_empty()).map(|n| {
                 let new_key = (n.title.clone(), n.artist.clone());
@@ -333,7 +353,9 @@ mod native {
             }
         }
         std::thread::spawn(move || {
-            let _ = media::win::control(action);
+            if !(action == "toggle" && crate::player::toggle()) {
+                let _ = media::win::control(action);
+            }
             std::thread::sleep(Duration::from_millis(300));
             POKE.store(true, Ordering::SeqCst);
         });

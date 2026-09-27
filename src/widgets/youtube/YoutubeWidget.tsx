@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, RefreshCw, SquarePlay, Undo2 } from "lucide-react";
+import { Check, ExternalLink, RefreshCw, SquarePlay, Undo2 } from "lucide-react";
 import clsx from "clsx";
 import { Card } from "../../components/Card";
 import { usePanelStore } from "../../store";
@@ -49,7 +49,7 @@ function Thumb({ video }: { video: Video }) {
 }
 
 function Row({ video }: { video: Video }) {
-  const { open, setWatched } = useYoutubeActions();
+  const { open, openInBrowser, setWatched } = useYoutubeActions();
   const fresh = !video.watched && Date.now() - video.published < NEW_FOR_MS;
   const when =
     video.live === "upcoming" && video.starts
@@ -77,13 +77,22 @@ function Row({ video }: { video: Video }) {
           <div className="mt-0.5 truncate text-[11px] text-fg-subtle">{meta}</div>
         </div>
       </button>
-      <button
-        onClick={() => setWatched(video, !video.watched)}
-        title={video.watched ? "Отметить непросмотренным" : "Отметить просмотренным"}
-        className="absolute top-1 right-1 hidden size-6 place-items-center rounded-md bg-popover text-fg-muted shadow group-hover:grid hover:text-fg"
-      >
-        {video.watched ? <Undo2 className="size-3.5" /> : <Check className="size-3.5" />}
-      </button>
+      <div className="absolute top-1 right-1 hidden gap-1 group-hover:flex">
+        <button
+          onClick={() => openInBrowser(video)}
+          title="Открыть в браузере"
+          className="grid size-6 place-items-center rounded-md bg-popover text-fg-muted shadow hover:text-fg"
+        >
+          <ExternalLink className="size-3.5" />
+        </button>
+        <button
+          onClick={() => setWatched(video, !video.watched)}
+          title={video.watched ? "Отметить непросмотренным" : "Отметить просмотренным"}
+          className="grid size-6 place-items-center rounded-md bg-popover text-fg-muted shadow hover:text-fg"
+        >
+          {video.watched ? <Undo2 className="size-3.5" /> : <Check className="size-3.5" />}
+        </button>
+      </div>
     </div>
   );
 }
