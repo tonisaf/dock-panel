@@ -6,6 +6,7 @@
 // then creates a GitHub release in the (private) repo with the installer, its
 // signature and latest.json. The updater reads latest.json through the GitHub
 // API, so its installer URL is the asset's API URL, not the browser one.
+// GitHub calls are retried, and the release stays a draft until it is complete.
 
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, mkdtempSync } from "node:fs";
@@ -22,7 +23,7 @@ if (!/^\d+\.\d+\.\d+$/.test(version ?? "")) {
 }
 
 function run(cmd, args, opts = {}) {
-  const r = spawnSync(cmd, args, { stdio: "inherit", shell: process.platform === "win32" && cmd === "pnpm", ...opts });
+  const r = spawnSync(cmd, args, { stdio: "inherit", ...opts });
   if (r.status !== 0) {
     console.error(`\n✗ ${cmd} ${args.join(" ")} failed`);
     process.exit(r.status ?? 1);
@@ -34,6 +35,34 @@ function capture(cmd, args) {
   if (r.status !== 0) throw new Error(`${cmd} ${args.join(" ")}: ${r.stderr}`);
   return r.stdout.trim();
 }
+
+// pnpm on Windows is a .cmd shim, which Node only spawns through a shell (and
+// then warns that the args are not escaped). `pnpm release` sets npm_execpath
+// to pnpm's own entry point, so run that directly.
+function pnpm(args, opts) {
+  const entry = process.env.npm_execpath;
+  if (entry && /\.[cm]?js$/.test(entry)) run(process.execPath, [entry, ...args], opts);
+  else if (entry) run(entry, args, opts);
+  else run("pnpm", args, { shell: process.platform === "win32", ...opts });
+}
+
+// GitHub calls fail now and then (network, 5xx); every one below is safe to repeat.
+function retry(label, fn) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return fn();
+    } catch (e) {
+      if (attempt === 4) {
+        console.error(`\n✗ ${label} failed: ${e.message}`);
+        process.exit(1);
+      }
+      console.warn(`… ${label} failed (attempt ${attempt}), retrying`);
+      spawnSync(process.execPath, ["-e", `setTimeout(() => {}, ${attempt * 3000})`]);
+    }
+  }
+}
+
+const gh = (args) => capture("gh", [...args, "--repo", REPO]);
 
 // ---- preflight -------------------------------------------------------------------
 if (capture("git", ["status", "--porcelain"])) {
@@ -62,7 +91,7 @@ const cargo = readFileSync("src-tauri/Cargo.toml", "utf8");
 writeFileSync("src-tauri/Cargo.toml", cargo.replace(/^version = "[^"]+"/m, `version = "${version}"`));
 
 // ---- build (signed) --------------------------------------------------------------
-run("pnpm", ["tauri", "build"], {
+pnpm(["tauri", "build"], {
   env: {
     ...process.env,
     TAURI_SIGNING_PRIVATE_KEY: readFileSync(KEY_PATH, "utf8"),
@@ -85,25 +114,35 @@ const tag = `v${version}`;
 run("git", ["add", "package.json", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "src-tauri/Cargo.lock"]);
 run("git", ["commit", "-m", `Release ${tag}`]);
 run("git", ["tag", "-a", tag, "-m", `Dock Panel ${version}`]);
-run("git", ["push", "--follow-tags"]);
+retry("git push", () => capture("git", ["push", "--follow-tags"]));
 
 // ---- GitHub release --------------------------------------------------------------
-run("gh", [
-  "release", "create", tag, installer, signature,
-  "--repo", REPO,
-  "--title", `Dock Panel ${version}`,
-  "--notes", notes || `Dock Panel ${version}`,
-  "--latest",
-]);
+// Created as a draft and published only once latest.json is there: installed
+// copies look at the latest published release, and one without the manifest
+// would look broken to them.
+const exists = () => {
+  try {
+    gh(["release", "view", tag, "--json", "tagName"]);
+    return true;
+  } catch {
+    return false;
+  }
+};
+retry("create release", () => {
+  if (!exists()) {
+    gh(["release", "create", tag, "--draft", "--verify-tag", "--title", `Dock Panel ${version}`, "--notes", notes || `Dock Panel ${version}`]);
+  }
+});
+retry("upload installer", () => gh(["release", "upload", tag, installer, signature, "--clobber"]));
 
-const release = JSON.parse(capture("gh", ["api", `repos/${REPO}/releases/tags/${tag}`]));
-const asset = release.assets.find((a) => a.name.endsWith(`_${version}_x64-setup.exe`));
+const assets = retry("read release", () => JSON.parse(gh(["release", "view", tag, "--json", "assets"])).assets);
+const asset = assets.find((a) => a.name.endsWith(`_${version}_x64-setup.exe`));
 if (!asset) {
   console.error("✗ Installer asset not found in the release");
   process.exit(1);
 }
 
-const platform = { signature: readFileSync(signature, "utf8").trim(), url: asset.url };
+const platform = { signature: readFileSync(signature, "utf8").trim(), url: asset.apiUrl };
 const manifest = {
   version,
   notes: notes || undefined,
@@ -112,6 +151,7 @@ const manifest = {
 };
 const manifestPath = join(mkdtempSync(join(tmpdir(), "dock-panel-")), "latest.json");
 writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
-run("gh", ["release", "upload", tag, manifestPath, "--repo", REPO]);
+retry("upload latest.json", () => gh(["release", "upload", tag, manifestPath, "--clobber"]));
+retry("publish release", () => gh(["release", "edit", tag, "--draft=false", "--latest"]));
 
-console.log(`\n✓ Released ${tag}: ${release.html_url}`);
+console.log(`\n✓ Released ${tag}: https://github.com/${REPO}/releases/tag/${tag}`);
