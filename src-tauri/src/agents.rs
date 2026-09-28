@@ -21,7 +21,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use serde_json::Value;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 const POLL: Duration = Duration::from_secs(2);
 /// Codex threads with no activity for this long drop off the list.
@@ -29,6 +29,8 @@ const CODEX_RECENT: Duration = Duration::from_secs(6 * 3600);
 /// A Codex turn silent for this long is treated as over (the app may have died mid-turn).
 const CODEX_STALE_TURN: Duration = Duration::from_secs(15 * 60);
 const SETTINGS_FILE: &str = "agents.json";
+/// Tells the windows the list changed; they poll no more.
+const CHANGED_EVENT: &str = "agents:changed";
 
 #[derive(Serialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -330,9 +332,13 @@ fn poll(app: &AppHandle) {
     }
     // Busy first, then waiting, then the rest; newest first within each.
     agents.sort_by_key(|a| (!a.busy, !a.waiting, std::cmp::Reverse(a.since)));
+    let changed = t.agents != agents || !t.first_poll_done;
     t.agents = agents;
     t.first_poll_done = true;
     drop(guard);
+    if changed {
+        let _ = app.emit(CHANGED_EVENT, ());
+    }
 
     if NOTIFY.load(Ordering::SeqCst) {
         for a in finished {
@@ -413,6 +419,14 @@ pub fn agents_dismiss(id: Option<String>) {
             a.waiting = t.waiting.contains(&a.id);
         }
     }
+    changed();
+}
+
+/// For changes made here rather than found by the poller.
+fn changed() {
+    if let Some(app) = APP.get() {
+        let _ = app.emit(CHANGED_EVENT, ());
+    }
 }
 
 #[tauri::command]
@@ -421,6 +435,7 @@ pub fn agents_set_notify(app: AppHandle, on: bool) {
     if let Some(p) = settings_path(&app) {
         let _ = std::fs::write(p, serde_json::json!({ "notify": on }).to_string());
     }
+    changed();
 }
 
 /// Brings the session's window to the front and marks it seen.

@@ -1,9 +1,19 @@
 //! "Now playing" for any player that talks to Windows' System Media Transport
 //! Controls (Spotify, browsers, Yandex Music, VLC, ...). No per-service OAuth.
 
-use serde::Serialize;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
-#[derive(Serialize)]
+use serde::Serialize;
+use tauri::{AppHandle, Emitter};
+
+/// The watcher's news for the media widgets: a new `NowPlaying` (or null).
+const CHANGED_EVENT: &str = "media:changed";
+const WATCH_EVERY: Duration = Duration::from_secs(1);
+/// A position this far off the one expected from the last report is a seek.
+const SEEK_SLACK_MS: i64 = 2000;
+
+#[derive(Serialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct NowPlaying {
     pub title: String,
@@ -33,6 +43,65 @@ async fn blocking<R: Send + 'static>(
 #[tauri::command]
 pub async fn media_now_playing() -> Result<Option<NowPlaying>, String> {
     blocking(win::now_playing).await
+}
+
+/// Media widgets on screen (in the panel and on the desktop); the watcher runs while any are.
+static WATCHERS: AtomicUsize = AtomicUsize::new(0);
+static WATCHING: AtomicBool = AtomicBool::new(false);
+
+/// A media widget appeared (`on`) or went away. While any is shown, the player
+/// is read every second here and the widgets hear only of changes: track,
+/// play/pause, controls, a seek. Its position they move on their own.
+#[tauri::command]
+pub fn media_watch(app: AppHandle, on: bool) {
+    if on {
+        WATCHERS.fetch_add(1, Ordering::SeqCst);
+        if !WATCHING.swap(true, Ordering::SeqCst) {
+            std::thread::spawn(move || watch(&app));
+        }
+    } else {
+        let _ = WATCHERS.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1));
+    }
+}
+
+fn watch(app: &AppHandle) {
+    let mut last: Option<(Option<NowPlaying>, Instant)> = None;
+    loop {
+        if WATCHERS.load(Ordering::SeqCst) == 0 {
+            WATCHING.store(false, Ordering::SeqCst);
+            // A widget may have appeared just now and found us still running.
+            if WATCHERS.load(Ordering::SeqCst) == 0 || WATCHING.swap(true, Ordering::SeqCst) {
+                return;
+            }
+        }
+        let now = win::now_playing().ok().flatten();
+        let news = match &last {
+            None => true,
+            Some((before, at)) => differs(before.as_ref(), now.as_ref(), at.elapsed()),
+        };
+        if news {
+            let _ = app.emit(CHANGED_EVENT, &now);
+            last = Some((now, Instant::now()));
+        }
+        std::thread::sleep(WATCH_EVERY);
+    }
+}
+
+/// Whether `now` is news after `before` was reported `since` ago: anything but
+/// the position moving on as it should.
+fn differs(before: Option<&NowPlaying>, now: Option<&NowPlaying>, since: Duration) -> bool {
+    let (Some(b), Some(n)) = (before, now) else { return before.is_some() != now.is_some() };
+    let same = NowPlaying { position_ms: b.position_ms, ..n.clone() };
+    if same != *b {
+        return true;
+    }
+    match (b.position_ms, n.position_ms) {
+        (Some(was), Some(is)) => {
+            let expected = was as i64 + if b.playing { since.as_millis() as i64 } else { 0 };
+            (is as i64 - expected).abs() > SEEK_SLACK_MS
+        }
+        _ => false,
+    }
 }
 
 /// Album art of the current track as a `data:` URL.

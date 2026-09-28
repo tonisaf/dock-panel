@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Activity, Bell, BellOff, Check } from "lucide-react";
 import clsx from "clsx";
-import { ago, useAgentActions, useAgents, type Agent } from "./api";
+import { ago, useAgentActions, useAgents, useMinuteTick, type Agent } from "./api";
 
 function StatusMark({ agent }: { agent: Agent }) {
   // Still, not a spinner: an agent works for minutes to hours, and an endless
@@ -16,6 +16,8 @@ function StatusMark({ agent }: { agent: Agent }) {
 }
 
 function AgentRow({ agent, compact }: { agent: Agent; compact: boolean }) {
+  // "работает 8 мин" moves on without a new list.
+  useMinuteTick();
   const { focus, dismiss } = useAgentActions();
   const [error, setError] = useState<string | null>(null);
   const status = agent.busy ? "работает" : agent.waiting ? "ждёт вас" : "свободен";

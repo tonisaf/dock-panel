@@ -64,7 +64,8 @@ export function useMailList(account: string | null, unread: boolean, enabled: bo
     initialPageParam: null as Cursors | null,
     getNextPageParam: (last) => (last.more ? last.cursors : undefined),
     enabled,
-    staleTime: 30_000,
+    // New mail arrives as mail:changed (checked every minute and on panel open).
+    staleTime: 5 * 60_000,
   });
   const pages = query.data?.pages ?? [];
   // A letter can show up on two pages when the inbox shifts in between.
@@ -96,7 +97,7 @@ export function useUnread() {
   return useQuery({
     queryKey: UNREAD,
     queryFn: () => invoke<{ total: number; byAccount: Record<string, number> }>("mail_unread"),
-    staleTime: 10_000,
+    staleTime: 5 * 60_000,
   });
 }
 

@@ -145,6 +145,7 @@ pub fn run() {
             rates::currency_rates,
             apps::pick_files,
             media::media_now_playing,
+            media::media_watch,
             media::media_thumbnail,
             media::media_control,
             media::media_seek,

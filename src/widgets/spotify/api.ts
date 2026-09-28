@@ -67,7 +67,8 @@ export function useSpotifyCurrent(trackKey: string | null, enabled: boolean) {
     queryKey: ["spotify-current", trackKey],
     queryFn: () => invoke<CurrentTrack | null>("spotify_current"),
     enabled: enabled && !!trackKey,
-    staleTime: 60_000,
+    // Liked or not: changes from here refresh it themselves.
+    staleTime: 5 * 60_000,
   });
 }
 

@@ -44,7 +44,8 @@ export function useTasks() {
     queryKey: ["notion-tasks", source?.id],
     queryFn: () => invoke<TaskList>("notion_tasks", { sourceId: source!.id }),
     enabled: !!source,
-    staleTime: 30_000,
+    // Kept across panel opens; the interval refreshes it while open.
+    staleTime: 2 * 60_000,
     refetchInterval: 60_000,
   });
 }

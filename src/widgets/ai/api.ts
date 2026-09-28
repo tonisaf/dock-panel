@@ -38,7 +38,8 @@ export function useAiLimits() {
     queryKey: ["ai-limits"],
     queryFn: () => invoke<AiLimits>("ai_limits"),
     refetchInterval: 15_000,
-    staleTime: 0,
+    // Not again on every panel open if just read (the desktop widget reads it too).
+    staleTime: 15_000,
   });
 }
 

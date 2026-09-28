@@ -23,7 +23,8 @@ export function useApps() {
   return useQuery({
     queryKey: ["apps"],
     queryFn: () => invoke<AppEntry[]>("list_apps"),
-    staleTime: 60_000,
+    // Installs are rare, and listing them walks the Start menu.
+    staleTime: 10 * 60_000,
     select: (apps) =>
       Object.keys(names).length === 0
         ? apps

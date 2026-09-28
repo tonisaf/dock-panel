@@ -172,14 +172,15 @@ export function useEvents(from: Date, to: Date, enabled: boolean) {
     queryKey: [...EVENTS, from.getTime(), to.getTime()],
     queryFn: () => invoke<GEvent[]>("gcal_events", { timeMin: rfc3339(from), timeMax: rfc3339(to) }),
     enabled,
-    staleTime: 60_000,
+    // Kept across panel opens; the interval refreshes it while open.
+    staleTime: 5 * 60_000,
     refetchInterval: 5 * 60_000,
     placeholderData: (prev) => prev,
   });
 }
 
 export function useTasks(enabled: boolean) {
-  return useQuery({ queryKey: TASKS, queryFn: () => invoke<GTask[]>("gcal_tasks"), enabled, staleTime: 60_000 });
+  return useQuery({ queryKey: TASKS, queryFn: () => invoke<GTask[]>("gcal_tasks"), enabled, staleTime: 5 * 60_000 });
 }
 
 /** Only needed while a task is being created. */

@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -23,15 +24,25 @@ export interface AgentsState {
   notify: boolean;
 }
 
-const KEY = ["agents"];
+export const AGENTS_KEY = ["agents"];
+const KEY = AGENTS_KEY;
 
+/** Refetched on `agents:changed` (see useDataEvents), not polled. */
 export function useAgents() {
   return useQuery({
     queryKey: KEY,
     queryFn: () => invoke<AgentsState>("agents_list"),
-    // The backend polls the agents' files every 2 s; this just mirrors it.
-    refetchInterval: 2_000,
+    staleTime: Infinity,
   });
+}
+
+/** Re-renders once a minute, for "5 мин"-style labels on data that doesn't change. */
+export function useMinuteTick() {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), 60_000);
+    return () => clearInterval(id);
+  }, []);
 }
 
 export function useAgentActions() {

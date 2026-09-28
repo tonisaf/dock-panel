@@ -59,7 +59,8 @@ export function useYoutubeFeed(enabled: boolean) {
     queryKey: FEED,
     queryFn: () => invoke<FeedView>("youtube_feed", { force: false }),
     enabled,
-    staleTime: 60_000,
+    // Rust refreshes the feeds every 15 min and says so (youtube:changed).
+    staleTime: 15 * 60_000,
   });
 }
 

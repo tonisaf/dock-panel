@@ -33,7 +33,8 @@ export function useMonitors() {
     queryFn: () => invoke<Monitor[]>("monitors_list"),
     // Values also change from the monitor's own buttons.
     refetchInterval: 30_000,
-    staleTime: 10_000,
+    // Asking the monitors (DDC/CI) is slow; don't on every panel open.
+    staleTime: 5 * 60_000,
   });
 }
 

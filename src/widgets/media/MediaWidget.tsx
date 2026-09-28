@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Music2, Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import clsx from "clsx";
@@ -22,7 +23,6 @@ interface NowPlaying {
   durationMs: number | null;
 }
 
-const POLL_MS = 1500;
 /** How long a seek's target is shown before trusting the player's position again. */
 const SEEK_HOLD_MS = 2500;
 
@@ -67,9 +67,19 @@ export function MediaWidget() {
   const { data: np, dataUpdatedAt } = useQuery({
     queryKey: ["media"],
     queryFn: () => invoke<NowPlaying | null>("media_now_playing"),
-    refetchInterval: POLL_MS,
-    staleTime: 0,
+    // Changes come from the watcher below, not from polling.
+    staleTime: Infinity,
   });
+  useEffect(() => {
+    invoke("media_watch", { on: true }).catch(console.error);
+    const unlisten = listen<NowPlaying | null>("media:changed", ({ payload }) =>
+      queryClient.setQueryData(["media"], payload),
+    );
+    return () => {
+      invoke("media_watch", { on: false }).catch(console.error);
+      unlisten.then((fn) => fn());
+    };
+  }, [queryClient]);
   const trackKey = np ? `${np.source}|${np.title}|${np.artist}` : null;
   const isSpotify = !!np?.source.toLowerCase().includes("spotify");
   const { data: art } = useQuery({

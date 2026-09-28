@@ -37,7 +37,8 @@ export function SystemWidget() {
   const { data } = useQuery({
     queryKey: ["system"],
     queryFn: () => invoke<SystemStats>("system_stats"),
-    refetchInterval: 2000,
+    // Often enough for a glance; each reading redraws the widget.
+    refetchInterval: 5000,
     staleTime: 0,
   });
 
