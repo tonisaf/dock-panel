@@ -9,7 +9,9 @@
 //!
 //! While a widget is dragged it rises above all windows, and a see-through
 //! overlay (`GRID_LABEL`) right below it shows the grid of its monitor and the
-//! spot it will land on.
+//! spot it will land on. The overlay is a WebView of its own, so it exists
+//! only around a drag: made when the mouse goes down on a widget (it is ready
+//! by the time the hold turns into a drag) and closed after the drop.
 //!
 //! The page sizes the window to its content (`desktop_fit`), moves it by
 //! press-and-hold (`desktop_drag`) and asks for its menu on right click.
@@ -28,9 +30,11 @@ const PREFIX: &str = "desk-";
 const EVENT: &str = "desktop:changed";
 /// The grid overlay's window; not `PREFIX`-ed, it shows no widget.
 const GRID_LABEL: &str = "deskgrid";
-/// The overlay fades out for this long before it hides.
+/// The overlay fades out for this long before it closes.
 #[cfg_attr(not(windows), allow(dead_code))]
 const GRID_FADE: Duration = Duration::from_millis(180);
+/// A press that has not become a drag by then was a click: the overlay goes.
+const GRID_UNUSED: Duration = Duration::from_millis(1500);
 /// Logical width a widget window starts at, until the page sends the user's
 /// widget width (`desktop_fit`), and the range it may ask for.
 const WIDTH: f64 = 500.0;
@@ -93,9 +97,6 @@ pub fn init(app: &AppHandle) {
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or_default();
     *placed() = saved.clone();
-    if !saved.is_empty() {
-        open_grid(app);
-    }
     for p in saved {
         if let Err(e) = open(app, &p) {
             eprintln!("desktop widget {}: {e}", p.id);
@@ -188,7 +189,7 @@ fn hwnd_of(id: &str) -> Option<isize> {
 }
 
 /// The see-through, click-through window the grid is drawn in while a widget
-/// is dragged. Made ahead, so it is ready by the first drag.
+/// is dragged.
 fn open_grid(app: &AppHandle) {
     if app.get_webview_window(GRID_LABEL).is_some() {
         return;
@@ -261,16 +262,37 @@ fn show_grid(app: &AppHandle, hwnd: isize, first: bool) {
     let _ = app.emit_to(GRID_LABEL, if first { "grid:show" } else { "grid:update" }, view);
 }
 
+/// Closes the overlay, unless a widget is being dragged over it.
+fn close_grid(app: &AppHandle) {
+    #[cfg(windows)]
+    if native::dragging() != 0 {
+        return;
+    }
+    GRID_HWND.store(0, Ordering::SeqCst);
+    if let Some(win) = app.get_webview_window(GRID_LABEL) {
+        let _ = win.destroy();
+    }
+}
+
+/// Fades the overlay out after a drop, then closes it.
 #[cfg(windows)]
 fn hide_grid(app: &AppHandle) {
     let _ = app.emit_to(GRID_LABEL, "grid:hide", ());
-    std::thread::spawn(|| {
+    let app = app.clone();
+    std::thread::spawn(move || {
         std::thread::sleep(GRID_FADE);
-        let overlay = GRID_HWND.load(Ordering::SeqCst);
-        // Unless the next drag has already begun.
-        if overlay != 0 && native::dragging() == 0 {
-            native::hide(overlay);
-        }
+        close_grid(&app);
+    });
+}
+
+/// The mouse went down on a widget: make the overlay now, so it is ready if
+/// the press turns into a drag, and close it again if it doesn't.
+#[tauri::command]
+pub async fn desktop_grid_prepare(app: AppHandle) {
+    open_grid(&app);
+    std::thread::spawn(move || {
+        std::thread::sleep(GRID_UNUSED);
+        close_grid(&app);
     });
 }
 
@@ -479,7 +501,6 @@ pub async fn desktop_set(app: AppHandle, id: String, on: bool) -> Result<Vec<Str
         .unwrap_or((100, 100));
     let p = Placed { id, x, y };
     placed().push(p.clone());
-    open_grid(&app);
     save(&app);
     open(&app, &p).map_err(|e| e.to_string())?;
     let _ = app.emit(EVENT, ids());
@@ -562,7 +583,7 @@ mod native {
     use windows::Win32::UI::WindowsAndMessaging::{
         FindWindowW, GetWindowLongPtrW, GetWindowRect, SendMessageW, SetWindowLongPtrW, SetWindowPos, ShowWindow,
         GWLP_HWNDPARENT, GWL_EXSTYLE, HWND_BOTTOM, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE,
-        SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_HIDE, SW_SHOWNOACTIVATE, WINDOWPOS, WM_ENTERSIZEMOVE,
+        SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_SHOWNOACTIVATE, WINDOWPOS, WM_ENTERSIZEMOVE,
         WM_EXITSIZEMOVE, WM_NCACTIVATE, WM_WINDOWPOSCHANGING, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     };
 
@@ -678,12 +699,6 @@ mod native {
                 area.h,
                 SWP_NOACTIVATE | SWP_SHOWWINDOW,
             );
-        }
-    }
-
-    pub fn hide(hwnd: isize) {
-        unsafe {
-            let _ = ShowWindow(HWND(hwnd as _), SW_HIDE);
         }
     }
 

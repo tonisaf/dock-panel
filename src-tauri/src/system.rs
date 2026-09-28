@@ -1,6 +1,7 @@
 //! CPU, memory, system drive and battery for the System widget.
 
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use sysinfo::{Disks, System};
@@ -26,6 +27,10 @@ pub struct SystemStats {
 
 /// CPU usage is a delta between refreshes, so the `System` must outlive calls.
 static SYSTEM: Mutex<Option<System>> = Mutex::new(None);
+/// The disk list, made once, and when its space was last read: disk use moves
+/// slowly, and the widget asks every 2 s.
+static DISKS: Mutex<Option<(Disks, Instant)>> = Mutex::new(None);
+const DISK_EVERY: Duration = Duration::from_secs(30);
 
 #[tauri::command]
 pub async fn system_stats() -> Result<SystemStats, String> {
@@ -44,7 +49,12 @@ fn collect() -> SystemStats {
     };
 
     let system_drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
-    let disks = Disks::new_with_refreshed_list();
+    let mut guard = DISKS.lock().unwrap_or_else(|e| e.into_inner());
+    let (disks, read_at) = guard.get_or_insert_with(|| (Disks::new_with_refreshed_list(), Instant::now()));
+    if read_at.elapsed() >= DISK_EVERY {
+        disks.refresh(false);
+        *read_at = Instant::now();
+    }
     let (disk_used, disk_total) = disks
         .iter()
         .find(|d| d.mount_point().to_string_lossy().starts_with(&system_drive))

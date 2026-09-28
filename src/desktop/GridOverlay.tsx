@@ -40,7 +40,11 @@ export function GridOverlay() {
         setDrag((n) => n + 1);
         setShown(true);
       }),
-      listen<GridView>("grid:update", ({ payload }) => setView(payload)),
+      // The first update, if the window was still starting at the lift.
+      listen<GridView>("grid:update", ({ payload }) => {
+        setView(payload);
+        setShown(true);
+      }),
       listen("grid:hide", () => setShown(false)),
     ];
     return () => unlisten.forEach((p) => p.then((fn) => fn()));

@@ -1,10 +1,12 @@
 import { useState } from "react";
-import { Bell, BellOff, Check, Loader2 } from "lucide-react";
+import { Activity, Bell, BellOff, Check } from "lucide-react";
 import clsx from "clsx";
 import { ago, useAgentActions, useAgents, type Agent } from "./api";
 
 function StatusMark({ agent }: { agent: Agent }) {
-  if (agent.busy) return <Loader2 className="size-3.5 shrink-0 animate-spin text-accent" />;
+  // Still, not a spinner: an agent works for minutes to hours, and an endless
+  // animation redraws the whole acrylic panel every frame all that time.
+  if (agent.busy) return <Activity className="size-3.5 shrink-0 text-accent" />;
   return (
     <span
       className={clsx("mx-[3px] size-2 shrink-0 rounded-full", agent.waiting ? "bg-accent" : "bg-ink/20")}

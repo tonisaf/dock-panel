@@ -132,7 +132,8 @@ fn refresh(app: &AppHandle) {
 
     let page: Url = FETCH_PAGE_URL.parse().expect("valid url");
     let started = match app.get_webview_window(FETCH_LABEL) {
-        // Reloading re-runs the fetch script via on_page_load.
+        // Left over from a fetch that timed out; reloading re-runs the fetch
+        // script via on_page_load.
         Some(win) => win.navigate(page).map_err(|e| e.to_string()),
         None => build_fetch_window(app, page),
     };
@@ -231,6 +232,15 @@ fn finish(app: &AppHandle, id: u64, outcome: Result<Outcome, String>) {
     if applied {
         save(app);
         let _ = app.emit(CHANGED_EVENT, ());
+        // The hidden claude.ai page costs a WebView2 renderer (~40 MB) and is
+        // needed once every few minutes: close it until the next fetch. Off
+        // this thread, which may be the page's own navigation callback.
+        let app = app.clone();
+        std::thread::spawn(move || {
+            if let Some(win) = app.get_webview_window(FETCH_LABEL) {
+                let _ = win.destroy();
+            }
+        });
     }
 }
 

@@ -51,7 +51,11 @@ export function DesktopWidget({ id }: { id: string }) {
     <div
       ref={ref}
       className="desk-widget"
-      onPointerDown={(e) => hold(e, id)}
+      onPointerDown={(e) => {
+        // The grid overlay takes a moment to start; begin before the hold ends.
+        if (e.button === 0) invoke("desktop_grid_prepare").catch(console.error);
+        hold(e, id);
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         invoke("desktop_menu").catch(console.error);

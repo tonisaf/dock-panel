@@ -43,12 +43,17 @@ const fmt = (ms: number) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
 
+/** How often the playback position moves on screen while playing. */
+const TICK_MS = 1000;
+
 /** Interpolates the playback position between polls. */
 function useLivePosition(np: NowPlaying | null | undefined, fetchedAt: number) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     if (!np?.playing) return;
-    const id = setInterval(() => setNow(Date.now()), 250);
+    // A second is enough: the bar moves a pixel or two a tick, and a smooth
+    // glide would redraw the whole acrylic panel every frame while playing.
+    const id = setInterval(() => setNow(Date.now()), TICK_MS);
     return () => clearInterval(id);
   }, [np?.playing]);
   if (np?.positionMs == null || !np.durationMs) return null;

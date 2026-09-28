@@ -116,6 +116,7 @@ pub fn run() {
             desktop::desktop_set,
             desktop::desktop_fit,
             desktop::desktop_drag,
+            desktop::desktop_grid_prepare,
             desktop::desktop_backdrop,
             desktop::desktop_menu,
             notes::notes_state,

@@ -386,17 +386,35 @@ function LayoutEditor({
   );
 }
 
-function useNow() {
+/**
+ * Time and date, redrawn when the minute changes. A component of its own: a
+ * tick in HomeTab would redraw every widget with it.
+ */
+function Clock() {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(id);
+    let timer: ReturnType<typeof setTimeout>;
+    const schedule = () => {
+      // Just past the next minute, so the display never lags a second behind.
+      timer = setTimeout(() => {
+        setNow(new Date());
+        schedule();
+      }, 60_000 - (Date.now() % 60_000) + 50);
+    };
+    schedule();
+    return () => clearTimeout(timer);
   }, []);
-  return now;
+  const time = now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  const date = now.toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
+  return (
+    <div>
+      <div className="font-display text-[52px] leading-none font-semibold tracking-tight tabular-nums">{time}</div>
+      <div className="mt-1.5 text-[14px] text-fg-muted first-letter:uppercase">{date}</div>
+    </div>
+  );
 }
 
 export function HomeTab() {
-  const now = useNow();
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetWidth = usePrefs((s) => s.widgetWidth);
   const count = useColumnCount(containerRef, widgetWidth);
@@ -407,8 +425,6 @@ export function HomeTab() {
   const [editing, setEditing] = useState<string[][] | null>(null);
   // A widget lifted by press-and-hold, with the columns it moves between.
   const [moving, setMoving] = useState<{ cols: string[][]; drag: Drag } | null>(null);
-  const time = now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-  const date = now.toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
   const visible = (id: string) => !hidden.includes(id);
 
   const startEditing = () => {
@@ -448,10 +464,7 @@ export function HomeTab() {
   return (
     <div className="flex flex-col gap-3 pb-2">
       <div className="flex items-end justify-between px-1 pt-1 pb-2">
-        <div>
-          <div className="font-display text-[52px] leading-none font-semibold tracking-tight tabular-nums">{time}</div>
-          <div className="mt-1.5 text-[14px] text-fg-muted first-letter:uppercase">{date}</div>
-        </div>
+        <Clock />
         {!editing && !moving && (
           <button
             onClick={startEditing}
