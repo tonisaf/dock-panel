@@ -6,9 +6,21 @@ import { NotionSettings } from "../components/NotionSettings";
 import { CalendarSettings } from "../components/CalendarSettings";
 import { SpotifySettings } from "../components/SpotifySettings";
 import { UpdateSettings } from "../components/UpdateSettings";
-import { MAX_WIDTH, MIN_WIDTH, WIDTH_PRESETS, usePanelSettings, usePanelWidth, type Edge } from "../lib/panelWidth";
+import {
+  MAX_WIDTH,
+  MIN_WIDTH,
+  WIDGET_MAX,
+  WIDGET_MIN,
+  columnsIn,
+  panelWidthFor,
+  usePanelSettings,
+  usePanelWidth,
+  widthPresets,
+  type Edge,
+} from "../lib/panelWidth";
 import { usePrefs, type SearchEngine, type ThemeMode } from "../lib/prefs";
 import { Toggle } from "../components/Toggle";
+import { Slider } from "../components/Slider";
 import { Collapse } from "../components/Collapse";
 import { prettyAccelerator, toAccelerator } from "../lib/accelerator";
 import { MailSettings } from "../components/MailSettings";
@@ -54,6 +66,7 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
 
 function WidthRow() {
   const { width, setWidth } = usePanelWidth();
+  const widgetWidth = usePrefs((s) => s.widgetWidth);
   const [draft, setDraft] = useState<number | null>(null);
   const value = draft ?? width;
 
@@ -86,7 +99,7 @@ function WidthRow() {
         className="w-full accent-[var(--color-accent)]"
       />
       <div className="flex gap-1.5">
-        {WIDTH_PRESETS.map((p) => (
+        {widthPresets(widgetWidth).map((p) => (
           <button
             key={p.width}
             onClick={() => setWidth(p.width, true)}
@@ -432,6 +445,33 @@ function Integrations() {
   );
 }
 
+/** Widget width, in the panel and on the desktop. The panel keeps its number of columns. */
+function WidgetWidthRow() {
+  const { width, setWidth } = usePanelWidth();
+  const { widgetWidth, setWidgetWidth } = usePrefs();
+  const [draft, setDraft] = useState<number | null>(null);
+  const commit = (next: number) => {
+    const columns = columnsIn(width, widgetWidth);
+    setWidgetWidth(next);
+    setWidth(panelWidthFor(columns, next), true).catch(console.error);
+  };
+  return (
+    <Row label="Ширина виджетов" hint={`${draft ?? widgetWidth} px · в панели и на рабочем столе`}>
+      <div className="w-36">
+        <Slider
+          label="Ширина виджетов"
+          value={widgetWidth}
+          min={WIDGET_MIN}
+          max={WIDGET_MAX}
+          step={10}
+          onDraft={setDraft}
+          onCommit={commit}
+        />
+      </div>
+    </Row>
+  );
+}
+
 function AppearanceSection() {
   const { theme, setTheme, systemAccent, setSystemAccent } = usePrefs();
   return (
@@ -449,6 +489,31 @@ function AppearanceSection() {
       </Row>
       <Row label="Акцентный цвет Windows" hint="Иначе — голубой по умолчанию">
         <Toggle on={systemAccent} onChange={setSystemAccent} />
+      </Row>
+      <WidgetWidthRow />
+    </div>
+  );
+}
+
+function DesktopSection() {
+  const { deskOpacity, setDeskOpacity, deskBlur, setDeskBlur } = usePrefs();
+  return (
+    <div className="divide-y divide-stroke rounded-2xl border border-stroke bg-surface">
+      <Row label="Непрозрачность фона" hint={`${deskOpacity}% · 0 — только текст на обоях`}>
+        <div className="w-36">
+          <Slider
+            label="Непрозрачность фона виджетов на рабочем столе"
+            value={deskOpacity}
+            min={0}
+            max={100}
+            step={5}
+            onDraft={(v) => v != null && setDeskOpacity(v)}
+            onCommit={setDeskOpacity}
+          />
+        </div>
+      </Row>
+      <Row label="Размытие обоев под виджетом">
+        <Toggle on={deskBlur} onChange={setDeskBlur} />
       </Row>
     </div>
   );
@@ -484,6 +549,8 @@ export function SettingsTab() {
       </div>
       <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Оформление</h3>
       <AppearanceSection />
+      <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Виджеты на рабочем столе</h3>
+      <DesktopSection />
       <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Интеграции</h3>
       <Integrations />
     </div>

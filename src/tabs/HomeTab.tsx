@@ -1,13 +1,14 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { LayoutGroup, motion } from "motion/react";
-import { Eye, EyeOff, SlidersHorizontal } from "lucide-react";
+import { Eye, EyeOff, Monitor, MonitorOff, SlidersHorizontal } from "lucide-react";
 import clsx from "clsx";
 import { usePrefs } from "../lib/prefs";
+import { useHoldToLift } from "../lib/hold";
+import { useDesktopWidgets } from "../lib/desktop";
 import { WIDGETS, type WidgetDef } from "../widgets/registry";
 
-/** Must match the `columns-[340px] gap-3` masonry below. */
-const COLUMN_WIDTH = 340;
+/** Must match the `gap-3` of the masonry below. */
 const GAP = 12;
 
 const BY_ID = new Map(WIDGETS.map((w) => [w.id, w]));
@@ -26,18 +27,18 @@ function useWidgetOrder() {
   }, [widgetOrder]);
 }
 
-/** How many 340px columns the masonry fits into the container. */
-function useColumnCount(ref: RefObject<HTMLDivElement | null>) {
+/** How many columns of `width`-wide widgets the masonry fits into the container. */
+function useColumnCount(ref: RefObject<HTMLDivElement | null>, width: number) {
   const [count, setCount] = useState(1);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const update = () => setCount(Math.max(1, Math.floor((el.clientWidth + GAP) / (COLUMN_WIDTH + GAP))));
+    const update = () => setCount(Math.max(1, Math.floor((el.clientWidth + GAP) / (width + GAP))));
     update();
     const observer = new ResizeObserver(update);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [ref]);
+  }, [ref, width]);
   return count;
 }
 
@@ -95,6 +96,23 @@ function EyeButton({ visible, onClick }: { visible: boolean; onClick: () => void
       className="grid size-7 place-items-center rounded-lg border border-stroke bg-popover text-fg-muted shadow-md hover:text-fg"
     >
       {visible ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+    </button>
+  );
+}
+
+/** Puts the widget on the desktop (in a window of its own) or takes it off. */
+function DesktopButton({ on, onClick }: { on: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      onPointerDown={(e) => e.stopPropagation()}
+      title={on ? "Убрать с рабочего стола" : "На рабочий стол"}
+      className={clsx(
+        "grid size-7 place-items-center rounded-lg border border-stroke bg-popover shadow-md",
+        on ? "text-accent" : "text-fg-muted hover:text-fg",
+      )}
+    >
+      {on ? <MonitorOff className="size-4" /> : <Monitor className="size-4" />}
     </button>
   );
 }
@@ -194,6 +212,7 @@ function LayoutEditor({
   const [cols, setCols] = useState(initial);
   const [hidden, setHidden] = useState(() => new Set(usePrefs.getState().hiddenWidgets));
   const [drag, setDrag] = useState<Drag | null>(liveDrag ?? null);
+  const desktop = useDesktopWidgets();
   const colEls = useRef<(HTMLDivElement | null)[]>([]);
   const itemEls = useRef(new Map<string, HTMLDivElement>());
   // The drop handler reads these after the last re-render.
@@ -275,7 +294,7 @@ function LayoutEditor({
     <div className="flex flex-col gap-3">
       <div className={clsx("flex items-center gap-2 px-1", live && "hidden")}>
         <span className="flex-1 text-[12px] text-fg-subtle">
-          Перетаскивайте виджеты{count > 1 && " между колонками"}, глаз — скрыть
+          Перетаскивайте виджеты{count > 1 && " между колонками"}, глаз — скрыть, монитор — на рабочий стол
         </span>
         <button
           onClick={() => onDone(null, [...hidden])}
@@ -349,7 +368,8 @@ function LayoutEditor({
                       />
                     )}
                     {!dragging && !live && (
-                      <div className="absolute top-2 right-2">
+                      <div className="absolute top-2 right-2 flex gap-1">
+                        <DesktopButton on={desktop.onDesktop.includes(id)} onClick={() => desktop.set(id, !desktop.onDesktop.includes(id))} />
                         <EyeButton visible={visible} onClick={() => toggle(id)} />
                       </div>
                     )}
@@ -366,52 +386,6 @@ function LayoutEditor({
   );
 }
 
-/** How long to hold the mouse on a widget before it lifts off for moving. */
-const HOLD_MS = 400;
-/** Moving further than this before then is a scroll or a text selection, not a hold. */
-const HOLD_SLOP = 6;
-
-/** Controls where holding the mouse means using them, not moving the widget. */
-function isField(target: EventTarget | null) {
-  const el = target instanceof Element ? target : null;
-  return !!el?.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [data-no-hold]");
-}
-
-/**
- * Press and hold on a widget to lift it: calls `onLift` with the grab point
- * once the mouse has stayed down (and nearly still) for HOLD_MS.
- */
-function useHoldToLift(onLift: (id: string, grab: Drag) => void) {
-  const cancel = useRef<(() => void) | null>(null);
-  useEffect(() => () => cancel.current?.(), []);
-  return (e: ReactPointerEvent<HTMLElement>, id: string) => {
-    if (e.button !== 0 || isField(e.target)) return;
-    cancel.current?.();
-    const el = e.currentTarget;
-    const start = { x: e.clientX, y: e.clientY };
-    const onMove = (m: PointerEvent) => {
-      if (Math.hypot(m.clientX - start.x, m.clientY - start.y) > HOLD_SLOP) stop();
-    };
-    const timer = setTimeout(() => {
-      stop();
-      const r = el.getBoundingClientRect();
-      window.getSelection()?.removeAllRanges();
-      onLift(id, { id, dx: start.x - r.left, dy: start.y - r.top, width: r.width, x: start.x, y: start.y });
-    }, HOLD_MS);
-    const stop = () => {
-      clearTimeout(timer);
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", stop);
-      window.removeEventListener("pointercancel", stop);
-      cancel.current = null;
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", stop);
-    window.addEventListener("pointercancel", stop);
-    cancel.current = stop;
-  };
-}
-
 function useNow() {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -424,7 +398,8 @@ function useNow() {
 export function HomeTab() {
   const now = useNow();
   const containerRef = useRef<HTMLDivElement>(null);
-  const count = useColumnCount(containerRef);
+  const widgetWidth = usePrefs((s) => s.widgetWidth);
+  const count = useColumnCount(containerRef, widgetWidth);
   const order = useWidgetOrder();
   const arranged = useArrangement(count, order);
   const hidden = usePrefs((s) => s.hiddenWidgets);
@@ -449,8 +424,10 @@ export function HomeTab() {
     setMoving(null);
   };
 
-  const hold = useHoldToLift((_, drag) => {
+  const hold = useHoldToLift((id: string, widget, start) => {
     const el = containerRef.current;
+    const r = widget.getBoundingClientRect();
+    const drag = { id, dx: start.x - r.left, dy: start.y - r.top, width: r.width, x: start.x, y: start.y };
     setMoving({ cols: arranged ?? (el ? measureColumns(el, count, order) : [order]), drag });
   });
 
@@ -501,7 +478,7 @@ export function HomeTab() {
           </div>
         ) : (
           // Masonry: a wider panel gets more widget columns instead of wider widgets.
-          <div className="columns-[340px] gap-3">{order.filter(visible).map(slot)}</div>
+          <div className="gap-3" style={{ columnWidth: widgetWidth }}>{order.filter(visible).map(slot)}</div>
         )}
       </div>
     </div>

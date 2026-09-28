@@ -107,6 +107,29 @@ body,
   overflow: hidden;
 }
 
+/* A widget alone on the desktop: its window is the card, so the card drops
+   its own frame and the window's rounded acrylic shows instead. */
+html[data-desk] .desk-widget > div > section {
+  border-color: transparent;
+  border-radius: 0;
+}
+
+/* Its background opacity is the user's (see DesktopWidget). */
+html[data-desk] {
+  background: rgb(from var(--color-scrim) r g b / var(--desk-alpha, 0.78));
+}
+
+/* The desktop grid overlay: nothing but its lines. */
+html[data-grid] {
+  background: transparent;
+}
+
+html[data-desk],
+html[data-desk] body,
+html[data-desk] #root {
+  height: auto;
+}
+
 body {
   font-family: var(--font-sans);
   color: var(--color-fg);

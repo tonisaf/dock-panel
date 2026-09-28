@@ -4,6 +4,7 @@ mod ask;
 mod alerts;
 mod apps;
 mod calendar;
+mod desktop;
 mod discord;
 mod files;
 mod gcal;
@@ -81,6 +82,7 @@ pub fn run() {
             notes::init(handle);
             files::init();
             updater::init(handle);
+            desktop::init(handle);
             apps::start_icon_worker(app.path().app_cache_dir()?.join("icons"));
             let registered = shortcut
                 .parse::<Shortcut>()
@@ -109,6 +111,13 @@ pub fn run() {
             panel::panel_set_taskbar_agents,
             panel::panel_set_taskbar_mic,
             panel::panel_set_taskbar_pomodoro,
+            panel::panel_open,
+            desktop::desktop_widgets,
+            desktop::desktop_set,
+            desktop::desktop_fit,
+            desktop::desktop_drag,
+            desktop::desktop_backdrop,
+            desktop::desktop_menu,
             notes::notes_state,
             notes::notes_set_source,
             notes::notes_sync,

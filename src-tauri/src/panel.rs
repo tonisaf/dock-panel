@@ -14,9 +14,10 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
 pub const LABEL: &str = "main";
 /// Panel width in logical pixels: default and the range the user can pick.
-pub const DEFAULT_WIDTH: u32 = 440;
+/// One column of the default 500 px widgets (see `panelWidthFor` in panelWidth.ts).
+pub const DEFAULT_WIDTH: u32 = 540;
 pub const MIN_WIDTH: u32 = 360;
-pub const MAX_WIDTH: u32 = 1280;
+pub const MAX_WIDTH: u32 = 2400;
 const SETTINGS_FILE: &str = "panel.json";
 pub const DEFAULT_SHORTCUT: &str = "Ctrl+Space";
 /// Gap between the panel and the screen edges, logical pixels.
@@ -275,6 +276,16 @@ pub fn show_tab(app: &AppHandle, tab: &str) {
         show(app);
     }
     let _ = app.emit_to(LABEL, "panel:tab", tab);
+}
+
+/// Opens the panel on a tab, and a note in it if given: clicks in the widgets
+/// on the desktop, which live in windows of their own.
+#[tauri::command]
+pub fn panel_open(app: AppHandle, tab: String, note: Option<String>) {
+    show_tab(&app, &tab);
+    if let Some(note) = note {
+        let _ = app.emit_to(LABEL, "panel:note", note);
+    }
 }
 
 /// Runs `f` (a modal dialog) with hide-on-blur off, then gives focus back to the panel.
@@ -537,7 +548,7 @@ pub fn panel_set_width(app: AppHandle, width: u32, persist: bool) -> u32 {
 }
 
 #[cfg(windows)]
-mod native {
+pub(crate) mod native {
     use windows::Win32::Foundation::{HWND, RECT};
     use windows::Win32::Graphics::Dwm::{
         DwmGetWindowAttribute, DwmSetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_WINDOW_CORNER_PREFERENCE,

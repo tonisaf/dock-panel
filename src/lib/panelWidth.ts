@@ -1,15 +1,34 @@
 import { invoke } from "@tauri-apps/api/core";
+import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
+/** Must match MIN_WIDTH / MAX_WIDTH in panel.rs. */
 export const MIN_WIDTH = 360;
-export const MAX_WIDTH = 1280;
+export const MAX_WIDTH = 2400;
 
-/** Widths that fit exactly 1, 2 and 3 widget columns (340px each, 12px gaps, 16px padding). */
-export const WIDTH_PRESETS = [
-  { label: "1 колонка", width: 440 },
-  { label: "2 колонки", width: 760 },
-  { label: "3 колонки", width: 1120 },
-];
+/** Widget width, logical px: the user's choice, its range and default. */
+export const WIDGET_MIN = 300;
+export const WIDGET_MAX = 700;
+export const WIDGET_DEFAULT = 500;
+/** Gap between widget columns (`gap-3`). */
+export const WIDGET_GAP = 12;
+/** Panel width around the columns: padding and the scrollbar. */
+const CHROME = 40;
+
+/** The panel width that fits exactly `columns` widgets `widget` wide. */
+export function panelWidthFor(columns: number, widget: number) {
+  return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, columns * widget + (columns - 1) * WIDGET_GAP + CHROME));
+}
+
+/** How many widgets `widget` wide a panel this wide fits side by side. */
+export function columnsIn(panel: number, widget: number) {
+  return Math.max(1, Math.floor((panel - CHROME + WIDGET_GAP) / (widget + WIDGET_GAP)));
+}
+
+/** Widths that fit exactly 1, 2 and 3 widget columns. */
+export function widthPresets(widget: number) {
+  return ["1 колонка", "2 колонки", "3 колонки"].map((label, i) => ({ label, width: panelWidthFor(i + 1, widget) }));
+}
 
 export type Edge = "left" | "right";
 
@@ -35,7 +54,9 @@ export interface PanelSettings {
 }
 
 const KEY = ["panel-settings"];
-const DEFAULTS: PanelSettings = { width: 440, edge: "left", shortcut: "Ctrl+Space", taskbarButton: true, taskbarPlayer: true, taskbarMail: true, taskbarTasks: true, taskbarAgents: true, taskbarMic: true, taskbarPomodoro: true };
+/** Dispatched on `window` when the settings change behind the cache's back. */
+export const PANEL_SETTINGS_CHANGED = "panel-settings-changed";
+const DEFAULTS: PanelSettings = { width: 540, edge: "left", shortcut: "Ctrl+Space", taskbarButton: true, taskbarPlayer: true, taskbarMail: true, taskbarTasks: true, taskbarAgents: true, taskbarMic: true, taskbarPomodoro: true };
 
 export function usePanelSettings() {
   const queryClient = useQueryClient();
@@ -44,6 +65,11 @@ export function usePanelSettings() {
     queryFn: () => invoke<PanelSettings>("panel_settings"),
     staleTime: Infinity,
   });
+  useEffect(() => {
+    const refetch = () => queryClient.invalidateQueries({ queryKey: KEY });
+    window.addEventListener(PANEL_SETTINGS_CHANGED, refetch);
+    return () => window.removeEventListener(PANEL_SETTINGS_CHANGED, refetch);
+  }, [queryClient]);
   const update = (s: PanelSettings) => queryClient.setQueryData(KEY, s);
 
   return {

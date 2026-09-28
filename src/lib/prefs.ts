@@ -1,5 +1,8 @@
 import { create } from "zustand";
 import { load, type Store } from "@tauri-apps/plugin-store";
+import { invoke } from "@tauri-apps/api/core";
+import { PANEL_SETTINGS_CHANGED, WIDGET_DEFAULT, columnsIn, panelWidthFor } from "./panelWidth";
+import { deskWidget, isGridOverlay } from "./desktop";
 
 export interface Usage {
   count: number;
@@ -60,6 +63,11 @@ interface PrefsState {
   folders: Record<string, PinFolder>;
   /** Collapsed state of collapsible blocks (widgets, `settings.*` groups), by id; each picks its own default. */
   collapsedWidgets: Record<string, boolean>;
+  /** Widgets on the desktop: background opacity, 0–100, over the blur if on. */
+  deskOpacity: number;
+  deskBlur: boolean;
+  /** Width of a widget, logical px, in the panel's columns and on the desktop. */
+  widgetWidth: number;
   togglePin: (id: string) => void;
   /** The pinned in a new order (folders included). */
   setPinned: (ids: string[]) => void;
@@ -86,6 +94,9 @@ interface PrefsState {
   setMailListWidth: (width: number) => void;
   setNotesListWidth: (width: number) => void;
   setWidgetCollapsed: (id: string, collapsed: boolean) => void;
+  setDeskOpacity: (opacity: number) => void;
+  setDeskBlur: (on: boolean) => void;
+  setWidgetWidth: (width: number) => void;
 }
 
 /** The folder an app is in, if any. */
@@ -132,6 +143,9 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   mailListWidth: null,
   notesListWidth: null,
   collapsedWidgets: {},
+  deskOpacity: 78,
+  deskBlur: true,
+  widgetWidth: WIDGET_DEFAULT,
   searchEngine: "google",
   hiddenApps: [],
   appNames: {},
@@ -259,6 +273,18 @@ export const usePrefs = create<PrefsState>((set, get) => ({
     set({ collapsedWidgets });
     persist("collapsedWidgets", collapsedWidgets);
   },
+  setDeskOpacity: (deskOpacity) => {
+    set({ deskOpacity });
+    persist("deskOpacity", deskOpacity);
+  },
+  setDeskBlur: (deskBlur) => {
+    set({ deskBlur });
+    persist("deskBlur", deskBlur);
+  },
+  setWidgetWidth: (widgetWidth) => {
+    set({ widgetWidth });
+    persist("widgetWidth", widgetWidth);
+  },
   setWidgetLayout: (widgetOrder, hiddenWidgets, columns) => {
     const widgetColumns = columns ? { ...get().widgetColumns, [columns.length]: columns } : {};
     set({ widgetOrder, hiddenWidgets, widgetColumns });
@@ -288,6 +314,22 @@ load("prefs.json", { defaults: {}, autoSave: 300 })
       hiddenApps: (await s.get<string[]>("hiddenApps")) ?? [],
       appNames: (await s.get<Record<string, string>>("appNames")) ?? {},
       folders: (await s.get<Record<string, PinFolder>>("folders")) ?? {},
+      deskOpacity: (await s.get<number>("deskOpacity")) ?? 78,
+      deskBlur: (await s.get<boolean>("deskBlur")) ?? true,
+      widgetWidth: (await s.get<number>("widgetWidth")) ?? WIDGET_DEFAULT,
+    });
+    // Widgets were 340 px wide before the setting: keep the panel's number of
+    // columns with the new default width. Once, from the panel window.
+    if (!(await s.has("widgetWidth")) && !deskWidget && !isGridOverlay) {
+      persist("widgetWidth", WIDGET_DEFAULT);
+      const { width } = await invoke<{ width: number }>("panel_settings");
+      await invoke("panel_set_width", { width: panelWidthFor(columnsIn(width, 340), WIDGET_DEFAULT), persist: true });
+      window.dispatchEvent(new Event(PANEL_SETTINGS_CHANGED));
+    }
+    // The panel and the widgets on the desktop are separate windows sharing
+    // this store: take in what the others change.
+    await s.onChange((key, value) => {
+      if (value !== undefined && key in usePrefs.getState()) usePrefs.setState({ [key]: value } as Partial<PrefsState>);
     });
   })
   .catch((e) => console.error("prefs load failed", e));

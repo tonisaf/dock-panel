@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import { deskWidget } from "./lib/desktop";
 import { AppWindow, CalendarDays, CheckSquare, LayoutGrid, Mail, Settings, Sparkles, StickyNote, type LucideIcon } from "lucide-react";
 
 export type TabId = "home" | "apps" | "tasks" | "mail" | "calendar" | "ai" | "notes" | "settings";
@@ -81,6 +82,8 @@ export const usePanelStore = create<PanelState>((set, get) => ({
   full: false,
   sideTab: "apps",
   setOpen: (open) => {
+    // A widget on the desktop has no panel of its own to close.
+    if (deskWidget) return;
     if (!open && get().pinned) return;
     set(open ? { open } : { open, menu: null });
   },
@@ -89,7 +92,11 @@ export const usePanelStore = create<PanelState>((set, get) => ({
     set({ pinned });
     invoke("panel_set_pinned", { on: pinned }).catch(console.error);
   },
-  setTab: (tab) => set(tab === "home" ? { tab } : { tab, sideTab: tab }),
+  setTab: (tab) => {
+    // From a widget on the desktop: open the panel there.
+    if (deskWidget) invoke("panel_open", { tab }).catch(console.error);
+    else set(tab === "home" ? { tab } : { tab, sideTab: tab });
+  },
   setFull: (full) => {
     set({ full });
     invoke("panel_set_fullscreen", { on: full }).catch(console.error);
@@ -99,6 +106,10 @@ export const usePanelStore = create<PanelState>((set, get) => ({
   setMenu: (menu) => set({ menu }),
   setMailToOpen: (mailToOpen) => set({ mailToOpen }),
   openNote: (noteToOpen) => {
+    if (deskWidget) {
+      invoke("panel_open", { tab: "notes", note: noteToOpen }).catch(console.error);
+      return;
+    }
     set({ noteToOpen, query: "", selected: 0 });
     if (noteToOpen) get().setTab("notes");
   },

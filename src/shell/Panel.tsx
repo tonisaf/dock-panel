@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -22,8 +21,7 @@ import { NotesTab } from "../tabs/NotesTab";
 import { SettingsTab } from "../tabs/SettingsTab";
 import { MailTab } from "../tabs/MailTab";
 import { CalendarTab } from "../gcal/CalendarTab";
-import { invalidateMail } from "../mail/api";
-import { invalidateYoutube } from "../widgets/youtube/api";
+import { useDataEvents } from "../lib/dataEvents";
 
 const TAB_VIEWS = {
   home: HomeTab,
@@ -44,10 +42,10 @@ const TAB_VIEWS = {
 export function Panel() {
   const searchRef = useRef<HTMLInputElement>(null);
   const { open, setOpen, tab, setTab, setQuery, full, sideTab } = usePanelStore();
-  const queryClient = useQueryClient();
   // Keep the app list warm so the Apps tab and search are instant.
   useApps();
   useAppearance();
+  useDataEvents();
   // Slide in from the docked edge.
   const dir = usePanelSettings().edge === "right" ? 1 : -1;
 
@@ -66,17 +64,16 @@ export function Panel() {
         // Fresh unread counts right away instead of at the next minute tick.
         invoke("mail_refresh").catch(console.error);
       }),
-      listen("mail:changed", () => invalidateMail(queryClient)),
-      listen("youtube:changed", () => invalidateYoutube(queryClient)),
       // Taskbar counter and notification clicks open a tab (and maybe a letter).
       listen<TabId>("panel:tab", ({ payload }) => setTab(payload)),
+      // A note clicked in the notes widget on the desktop.
+      listen<string>("panel:note", ({ payload }) => usePanelStore.getState().openNote(payload)),
       listen<MailToOpen>("mail:open", ({ payload }) => usePanelStore.getState().setMailToOpen(payload)),
       // Rust decided (hotkey, tray, click elsewhere when not pinned): hide even if pinned.
       listen("panel:hide", () => usePanelStore.getState().hide()),
-      listen("ai-limits:changed", () => queryClient.invalidateQueries({ queryKey: ["ai-limits"] })),
     ];
     return () => unlisten.forEach((p) => p.then((fn) => fn()));
-  }, [setOpen, setQuery, setTab, queryClient]);
+  }, [setOpen, setQuery, setTab]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
