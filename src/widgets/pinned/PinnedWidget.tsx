@@ -1,6 +1,6 @@
 import { Pin } from "lucide-react";
 import { Card } from "../../components/Card";
-import { AppGrid } from "../../components/AppTile";
+import { PinnedGrid } from "../../components/PinnedGrid";
 import { PinFromDisk } from "../../components/PinFromDisk";
 import { usePinnedEntries } from "../../lib/apps";
 
@@ -12,7 +12,7 @@ export function PinnedWidget() {
   return (
     <Card title="Закреплённые" icon={Pin} className="hover:bg-surface" action={<PinFromDisk />}>
       {pinned.length > 0 ? (
-        <AppGrid apps={pinned} />
+        <PinnedGrid entries={pinned} />
       ) : (
         <p className="text-[12px] leading-relaxed text-fg-subtle">
           Закрепите приложение правым кликом во вкладке «Приложения», а файл или папку — кнопками выше или

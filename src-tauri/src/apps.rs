@@ -60,6 +60,81 @@ pub async fn launch_app(id: String) -> Result<(), String> {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentDoc {
+    name: String,
+    path: String,
+}
+
+/// What the context menu offers beyond launching.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppInfo {
+    /// The program file, for "file location" and running elevated; `None` for Store apps.
+    exe_path: Option<String>,
+    /// Files the app opened lately (its jump list).
+    recent: Vec<RecentDoc>,
+    /// Windows keeps no recent files ("Show recently opened items" is off).
+    tracking_off: bool,
+}
+
+/// Windows' "Show recently opened items in Start, Jump Lists and File Explorer".
+fn recent_tracking_off() -> bool {
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+    let mut value = 1u32;
+    let mut size = 4u32;
+    let found = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            windows::core::w!("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced"),
+            windows::core::w!("Start_TrackDocs"),
+            RRF_RT_REG_DWORD,
+            None,
+            Some(&mut value as *mut u32 as *mut _),
+            Some(&mut size),
+        )
+    };
+    found.is_ok() && value == 0
+}
+
+#[tauri::command]
+pub async fn app_info(id: String) -> AppInfo {
+    let (exe_path, recent) = on_sta(move || (win::exe_path(&id), win::recent_documents(&id, 8)));
+    AppInfo {
+        exe_path,
+        recent: recent.into_iter().map(|(name, path)| RecentDoc { name, path }).collect(),
+        tracking_off: recent_tracking_off(),
+    }
+}
+
+/// Runs the app as administrator; Windows asks for consent.
+#[tauri::command]
+pub async fn launch_app_admin(id: String) -> Result<(), String> {
+    if on_sta(move || win::launch_as(&id, "runas", None)) {
+        Ok(())
+    } else {
+        Err("Запуск от имени администратора отменён или не удался".into())
+    }
+}
+
+/// Opens one of the app's recent files in that app (or with its default app when the program file is unknown).
+#[tauri::command]
+pub async fn open_recent(id: String, path: String) -> Result<(), String> {
+    let ok = on_sta(move || {
+        if win::exe_path(&id).is_some() && !id.starts_with(FILE_PREFIX) {
+            win::launch_as(&id, "open", Some(&path))
+        } else {
+            win::launch(&format!("{FILE_PREFIX}{path}"))
+        }
+    });
+    if ok {
+        Ok(())
+    } else {
+        Err("Не удалось открыть файл".into())
+    }
+}
+
 /// Native picker for files (or folders) to pin. Returns `file:` ids; empty if cancelled.
 #[tauri::command]
 pub async fn pick_files(app: AppHandle, folders: bool) -> Result<Vec<String>, String> {
@@ -204,6 +279,12 @@ mod win {
         FOS_PICKFOLDERS, SIGDN, SIGDN_FILESYSPATH, SIGDN_NORMALDISPLAY, SIGDN_PARENTRELATIVEPARSING,
         SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY,
     };
+    use windows::core::Interface;
+    use windows::Win32::Storage::EnhancedStorage::{PKEY_AppUserModel_ID, PKEY_Link_TargetParsingPath};
+    use windows::Win32::UI::Shell::Common::IObjectArray;
+    use windows::Win32::UI::Shell::{
+        ApplicationDocumentLists, IApplicationDocumentLists, IShellItem2, SHGetKnownFolderPath, ADLT_RECENT, KNOWN_FOLDER_FLAG,
+    };
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
     pub struct ComGuard;
@@ -265,6 +346,93 @@ mod win {
         let dir = dir.as_ref().map_or(PCWSTR::null(), |d| PCWSTR(d.as_ptr()));
         let result = unsafe { ShellExecuteW(None, w!("open"), &target, PCWSTR::null(), dir, SW_SHOWNORMAL) };
         // ShellExecute reports success as a value greater than 32.
+        result.0 as isize > 32
+    }
+
+    fn item(id: &str) -> Option<IShellItem> {
+        unsafe { SHCreateItemFromParsingName(&HSTRING::from(super::shell_target(id)), None).ok() }
+    }
+
+    fn string_prop(item: &IShellItem, key: &windows::Win32::Foundation::PROPERTYKEY) -> Option<String> {
+        unsafe {
+            let item2: IShellItem2 = item.cast().ok()?;
+            let p = item2.GetString(key).ok()?;
+            let s = p.to_string().ok();
+            CoTaskMemFree(Some(p.0 as _));
+            s.filter(|s| !s.is_empty())
+        }
+    }
+
+    /// The program file behind an app: a shortcut's target, a known-folder path
+    /// spelled out, or the pinned file itself. `None` for Store apps.
+    pub fn exe_path(id: &str) -> Option<String> {
+        if let Some(path) = id.strip_prefix(super::FILE_PREFIX) {
+            return Some(path.to_string());
+        }
+        let item = item(id)?;
+        if let Some(target) = string_prop(&item, &PKEY_Link_TargetParsingPath) {
+            return Some(target);
+        }
+        // Classic apps without a shortcut are listed by "{KNOWNFOLDERID}\relative\path".
+        let (folder, rest) = id.strip_prefix('{')?.split_once('}')?;
+        let guid = windows::core::GUID::try_from(folder).ok()?;
+        unsafe {
+            let base = SHGetKnownFolderPath(&guid, KNOWN_FOLDER_FLAG(0), None).ok()?;
+            let base_str = base.to_string().ok();
+            CoTaskMemFree(Some(base.0 as _));
+            Some(format!("{}{rest}", base_str?))
+        }
+        .filter(|p| std::path::Path::new(p).exists())
+    }
+
+    /// The AppUserModelID Windows files the app's jump list under.
+    fn app_user_model_id(id: &str) -> Option<String> {
+        if id.contains('!') {
+            return Some(id.to_string()); // Store apps are listed by it.
+        }
+        string_prop(&item(id)?, &PKEY_AppUserModel_ID).or_else(|| (!id.contains('\\') && !id.starts_with('{')).then(|| id.to_string()))
+    }
+
+    /// Files the app opened lately, from its jump list: `(name, path)`.
+    pub fn recent_documents(id: &str, max: u32) -> Vec<(String, String)> {
+        let Some(aumid) = app_user_model_id(id) else { return Vec::new() };
+        unsafe {
+            let Ok(lists) = CoCreateInstance::<_, IApplicationDocumentLists>(&ApplicationDocumentLists, None, CLSCTX_INPROC_SERVER) else {
+                return Vec::new();
+            };
+            if lists.SetAppID(&HSTRING::from(aumid)).is_err() {
+                return Vec::new();
+            }
+            let Ok(array) = lists.GetList::<IObjectArray>(ADLT_RECENT, max) else { return Vec::new() };
+            let count = array.GetCount().unwrap_or(0);
+            (0..count)
+                .filter_map(|i| {
+                    let item: IShellItem = array.GetAt(i).ok()?;
+                    let path = display_name(&item, SIGDN_FILESYSPATH).ok()?;
+                    let name = display_name(&item, SIGDN_NORMALDISPLAY).unwrap_or_else(|_| path.clone());
+                    Some((name, path))
+                })
+                .collect()
+        }
+    }
+
+    /// Runs the app elevated (Windows asks for consent); `file` opens a document in it.
+    pub fn launch_as(id: &str, verb: &str, file: Option<&str>) -> bool {
+        let exe = exe_path(id);
+        let target = HSTRING::from(exe.clone().unwrap_or_else(|| super::shell_target(id)));
+        let args = file.map(|f| HSTRING::from(format!("\"{f}\"")));
+        let dir = exe.as_deref().and_then(|p| std::path::Path::new(p).parent()).map(|d| HSTRING::from(d.as_os_str()));
+        let verb = HSTRING::from(verb);
+        let result = unsafe {
+            ShellExecuteW(
+                None,
+                &verb,
+                &target,
+                args.as_ref().map_or(PCWSTR::null(), |a| PCWSTR(a.as_ptr())),
+                dir.as_ref().map_or(PCWSTR::null(), |d| PCWSTR(d.as_ptr())),
+                SW_SHOWNORMAL,
+            )
+        };
         result.0 as isize > 32
     }
 

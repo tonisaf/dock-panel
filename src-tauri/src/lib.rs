@@ -5,6 +5,7 @@ mod alerts;
 mod apps;
 mod calendar;
 mod discord;
+mod files;
 mod gcal;
 mod home;
 mod claude_web;
@@ -17,6 +18,7 @@ mod notion;
 mod oauth;
 mod panel;
 mod player;
+mod rates;
 mod pomodoro;
 mod secrets;
 mod spotify;
@@ -77,6 +79,7 @@ pub fn run() {
             discord::init(handle);
             pomodoro::init(handle);
             notes::init(handle);
+            files::init();
             updater::init(handle);
             apps::start_icon_worker(app.path().app_cache_dir()?.join("icons"));
             let registered = shortcut
@@ -125,6 +128,11 @@ pub fn run() {
             pomodoro::pomodoro_set_settings,
             apps::list_apps,
             apps::launch_app,
+            apps::app_info,
+            apps::launch_app_admin,
+            apps::open_recent,
+            files::files_search,
+            rates::currency_rates,
             apps::pick_files,
             media::media_now_playing,
             media::media_thumbnail,

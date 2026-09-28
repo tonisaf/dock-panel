@@ -22,6 +22,16 @@ export interface NotionSource {
 }
 
 export type ThemeMode = "system" | "dark" | "light";
+export type SearchEngine = "google" | "yandex" | "duckduckgo";
+
+/** A group of pinned apps, shown as one tile. */
+export interface PinFolder {
+  name: string;
+  items: string[];
+}
+
+/** Pinned ids of folders: `folder:<key>`, the key into `folders`. */
+export const FOLDER_PREFIX = "folder:";
 
 interface PrefsState {
   pinned: string[];
@@ -40,9 +50,30 @@ interface PrefsState {
   mailListWidth: number | null;
   /** The same for the notes list next to an open note. */
   notesListWidth: number | null;
+  /** "Search the web" row's engine. */
+  searchEngine: SearchEngine;
+  /** Apps left out of "all apps" and search. */
+  hiddenApps: string[];
+  /** The user's own names for apps, by id. */
+  appNames: Record<string, string>;
+  /** Folders among the pinned, by key (see FOLDER_PREFIX). */
+  folders: Record<string, PinFolder>;
   /** Collapsed state of collapsible blocks (widgets, `settings.*` groups), by id; each picks its own default. */
   collapsedWidgets: Record<string, boolean>;
   togglePin: (id: string) => void;
+  /** The pinned in a new order (folders included). */
+  setPinned: (ids: string[]) => void;
+  /** Puts `id` into the folder `target` is, or makes a folder of the two. */
+  groupPinned: (id: string, target: string) => void;
+  renameFolder: (key: string, name: string) => void;
+  /** Takes an app out of its folder, back next to the folder (the folder goes when one app is left). */
+  ungroup: (id: string) => void;
+  /** All apps of the folder back among the pinned. */
+  dissolveFolder: (key: string) => void;
+  setSearchEngine: (engine: SearchEngine) => void;
+  setAppHidden: (id: string, hidden: boolean) => void;
+  /** An empty name goes back to the app's own. */
+  renameApp: (id: string, name: string) => void;
   /** Pins ids that are not pinned yet, keeping their order. */
   pinMany: (ids: string[]) => void;
   recordLaunch: (id: string) => void;
@@ -55,6 +86,30 @@ interface PrefsState {
   setMailListWidth: (width: number) => void;
   setNotesListWidth: (width: number) => void;
   setWidgetCollapsed: (id: string, collapsed: boolean) => void;
+}
+
+/** The folder an app is in, if any. */
+export function folderOf(folders: Record<string, PinFolder>, id: string) {
+  return Object.keys(folders).find((k) => folders[k].items.includes(id)) ?? null;
+}
+
+/** A folder with one app left becomes that app; an empty one goes. */
+function tidy(pinned: string[], folders: Record<string, PinFolder>) {
+  const next = { ...folders };
+  let order = pinned;
+  for (const [key, f] of Object.entries(next)) {
+    if (f.items.length > 1) continue;
+    order = order.flatMap((p) => (p === FOLDER_PREFIX + key ? f.items : [p]));
+    delete next[key];
+  }
+  return { pinned: order, folders: next };
+}
+
+/** Drops an app that `ungroup` just put back among the pinned. */
+function unpinLoose(id: string) {
+  const pinned = usePrefs.getState().pinned.filter((p) => p !== id);
+  usePrefs.setState({ pinned });
+  persist("pinned", pinned);
 }
 
 /** User preferences, persisted to `prefs.json` in the app data dir. */
@@ -77,11 +132,89 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   mailListWidth: null,
   notesListWidth: null,
   collapsedWidgets: {},
+  searchEngine: "google",
+  hiddenApps: [],
+  appNames: {},
+  folders: {},
   togglePin: (id) => {
+    if (folderOf(get().folders, id)) {
+      // Unpinning an app in a folder takes it out of both.
+      get().ungroup(id);
+      unpinLoose(id);
+      return;
+    }
     const current = get().pinned;
     const pinned = current.includes(id) ? current.filter((p) => p !== id) : [...current, id];
     set({ pinned });
     persist("pinned", pinned);
+  },
+  setPinned: (pinned) => {
+    set({ pinned });
+    persist("pinned", pinned);
+  },
+  groupPinned: (id, target) => {
+    if (id === target) return;
+    const { pinned, folders } = get();
+    let next = { ...folders };
+    let order = pinned.filter((p) => p !== id);
+    // Out of the folder it was in, if any.
+    for (const [key, f] of Object.entries(next)) if (f.items.includes(id)) next[key] = { ...f, items: f.items.filter((i) => i !== id) };
+    if (target.startsWith(FOLDER_PREFIX)) {
+      const key = target.slice(FOLDER_PREFIX.length);
+      next[key] = { ...next[key], items: [...next[key].items, id] };
+    } else {
+      const key = Date.now().toString(36);
+      next[key] = { name: "Папка", items: [target, id] };
+      order = order.map((p) => (p === target ? FOLDER_PREFIX + key : p));
+    }
+    ({ pinned: order, folders: next } = tidy(order, next));
+    set({ pinned: order, folders: next });
+    persist("pinned", order);
+    persist("folders", next);
+  },
+  renameFolder: (key, name) => {
+    const folders = { ...get().folders, [key]: { ...get().folders[key], name: name.trim() || "Папка" } };
+    set({ folders });
+    persist("folders", folders);
+  },
+  ungroup: (id) => {
+    const { pinned, folders } = get();
+    const key = folderOf(folders, id);
+    if (!key) return;
+    const next = { ...folders, [key]: { ...folders[key], items: folders[key].items.filter((i) => i !== id) } };
+    const at = pinned.indexOf(FOLDER_PREFIX + key);
+    const order = [...pinned.slice(0, at + 1), id, ...pinned.slice(at + 1)];
+    const tidied = tidy(order, next);
+    set(tidied);
+    persist("pinned", tidied.pinned);
+    persist("folders", tidied.folders);
+  },
+  dissolveFolder: (key) => {
+    const { pinned, folders } = get();
+    const items = folders[key]?.items ?? [];
+    const order = pinned.flatMap((p) => (p === FOLDER_PREFIX + key ? items : [p]));
+    const next = { ...folders };
+    delete next[key];
+    set({ pinned: order, folders: next });
+    persist("pinned", order);
+    persist("folders", next);
+  },
+  setSearchEngine: (searchEngine) => {
+    set({ searchEngine });
+    persist("searchEngine", searchEngine);
+  },
+  setAppHidden: (id, hidden) => {
+    const current = get().hiddenApps.filter((h) => h !== id);
+    const hiddenApps = hidden ? [...current, id] : current;
+    set({ hiddenApps });
+    persist("hiddenApps", hiddenApps);
+  },
+  renameApp: (id, name) => {
+    const appNames = { ...get().appNames };
+    if (name.trim()) appNames[id] = name.trim();
+    else delete appNames[id];
+    set({ appNames });
+    persist("appNames", appNames);
   },
   pinMany: (ids) => {
     const current = get().pinned;
@@ -151,6 +284,10 @@ load("prefs.json", { defaults: {}, autoSave: 300 })
       mailListWidth: (await s.get<number>("mailListWidth")) ?? null,
       notesListWidth: (await s.get<number>("notesListWidth")) ?? null,
       collapsedWidgets: (await s.get<Record<string, boolean>>("collapsedWidgets")) ?? {},
+      searchEngine: (await s.get<SearchEngine>("searchEngine")) ?? "google",
+      hiddenApps: (await s.get<string[]>("hiddenApps")) ?? [],
+      appNames: (await s.get<Record<string, string>>("appNames")) ?? {},
+      folders: (await s.get<Record<string, PinFolder>>("folders")) ?? {},
     });
   })
   .catch((e) => console.error("prefs load failed", e));

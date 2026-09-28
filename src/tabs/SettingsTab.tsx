@@ -7,7 +7,7 @@ import { CalendarSettings } from "../components/CalendarSettings";
 import { SpotifySettings } from "../components/SpotifySettings";
 import { UpdateSettings } from "../components/UpdateSettings";
 import { MAX_WIDTH, MIN_WIDTH, WIDTH_PRESETS, usePanelSettings, usePanelWidth, type Edge } from "../lib/panelWidth";
-import { usePrefs, type ThemeMode } from "../lib/prefs";
+import { usePrefs, type SearchEngine, type ThemeMode } from "../lib/prefs";
 import { Toggle } from "../components/Toggle";
 import { Collapse } from "../components/Collapse";
 import { prettyAccelerator, toAccelerator } from "../lib/accelerator";
@@ -173,6 +173,24 @@ function ShortcutRow() {
       </div>
       {error && <p className="mt-1.5 text-[12px] text-warn">{error}</p>}
     </div>
+  );
+}
+
+function SearchEngineRow() {
+  const engine = usePrefs((s) => s.searchEngine);
+  const setEngine = usePrefs((s) => s.setSearchEngine);
+  return (
+    <Row label="Поиск в интернете" hint="Последняя строка результатов поиска">
+      <Segmented<SearchEngine>
+        value={engine}
+        onChange={setEngine}
+        options={[
+          { value: "google", label: "Google" },
+          { value: "yandex", label: "Яндекс" },
+          { value: "duckduckgo", label: "DuckDuckGo" },
+        ]}
+      />
+    </Row>
   );
 }
 
@@ -457,6 +475,7 @@ export function SettingsTab() {
         </Row>
         <ShortcutRow />
         <EdgeRow />
+        <SearchEngineRow />
         <WidthRow />
       </div>
       <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Кнопка на панели задач</h3>

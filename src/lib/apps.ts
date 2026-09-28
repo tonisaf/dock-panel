@@ -2,19 +2,67 @@ import { useMemo } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { useQuery } from "@tanstack/react-query";
 import { usePanelStore } from "../store";
-import { usePrefs, type Usage } from "./prefs";
+import { FOLDER_PREFIX, folderOf, usePrefs, type Usage } from "./prefs";
 
 export interface AppEntry {
   id: string;
   name: string;
+  /** A folder of pinned apps (id `folder:<key>`). */
+  folder?: { key: string; items: AppEntry[] };
 }
 
+/** The backend's order (lowercase code points: Latin, then Cyrillic), for renamed apps to fit in. */
+const byName = (a: string, b: string) => {
+  const [x, y] = [a.toLowerCase(), b.toLowerCase()];
+  return x < y ? -1 : x > y ? 1 : 0;
+};
+
+/** Installed apps, under the names the user gave them. */
 export function useApps() {
+  const names = usePrefs((s) => s.appNames);
   return useQuery({
     queryKey: ["apps"],
     queryFn: () => invoke<AppEntry[]>("list_apps"),
     staleTime: 60_000,
+    select: (apps) =>
+      Object.keys(names).length === 0
+        ? apps
+        : apps.map((a) => (names[a.id] ? { ...a, name: names[a.id] } : a)).sort((a, b) => byName(a.name, b.name)),
   });
+}
+
+/** Installed apps without the ones the user hid. */
+export function useVisibleApps() {
+  const { data } = useApps();
+  const hidden = usePrefs((s) => s.hiddenApps);
+  return useMemo(() => (data ?? []).filter((a) => !hidden.includes(a.id)), [data, hidden]);
+}
+
+export function useHiddenApps() {
+  const byId = useAppsById();
+  const hidden = usePrefs((s) => s.hiddenApps);
+  return useMemo(() => hidden.map((id) => byId.get(id)).filter((a): a is AppEntry => !!a), [hidden, byId]);
+}
+
+/** Pinned directly or inside a pinned folder. */
+export function useIsPinned(id: string) {
+  return usePrefs((s) => s.pinned.includes(id) || folderOf(s.folders, id) != null);
+}
+
+/** "Frequent": launch count weighed by how recent the last launch is (halves every two weeks). */
+export function useFrequentApps(limit: number) {
+  const byId = useAppsById();
+  const usage = usePrefs((s) => s.usage);
+  const hidden = usePrefs((s) => s.hiddenApps);
+  return useMemo(() => {
+    const now = Date.now();
+    return Object.entries(usage)
+      .map(([id, u]) => ({ id, score: u.count * 0.5 ** ((now - u.last) / (14 * 86_400_000)) }))
+      .sort((a, b) => b.score - a.score)
+      .map(({ id }) => byId.get(id))
+      .filter((a): a is AppEntry => !!a && !hidden.includes(a.id))
+      .slice(0, limit);
+  }, [usage, byId, hidden, limit]);
 }
 
 /** Icons are served lazily by the Rust `appicon` protocol. */
@@ -54,17 +102,23 @@ export async function pinFromDisk(folders: boolean) {
   }
 }
 
-/** Pinned apps and files in the user's order; apps that were uninstalled drop out. */
+/** Pinned apps, files and folders in the user's order; apps that were uninstalled drop out. */
 export function usePinnedEntries() {
   const byId = useAppsById();
   const pinnedIds = usePrefs((s) => s.pinned);
-  return useMemo(
-    () =>
-      pinnedIds
-        .map((id) => (isFileId(id) ? fileEntry(id) : byId.get(id)))
-        .filter((a): a is AppEntry => !!a),
-    [pinnedIds, byId],
-  );
+  const folders = usePrefs((s) => s.folders);
+  return useMemo(() => {
+    const entry = (id: string) => (isFileId(id) ? fileEntry(id) : byId.get(id));
+    return pinnedIds
+      .map((id): AppEntry | undefined => {
+        if (!id.startsWith(FOLDER_PREFIX)) return entry(id);
+        const key = id.slice(FOLDER_PREFIX.length);
+        const f = folders[key];
+        const items = (f?.items ?? []).map(entry).filter((a): a is AppEntry => !!a);
+        return f && items.length ? { id, name: f.name, folder: { key, items } } : undefined;
+      })
+      .filter((a): a is AppEntry => !!a);
+  }, [pinnedIds, folders, byId]);
 }
 
 export function useAppsById() {
@@ -73,12 +127,15 @@ export function useAppsById() {
 }
 
 export function useSearchResults() {
-  const { data: apps } = useApps();
+  const apps = useVisibleApps();
   const pinned = usePinnedEntries();
   const query = usePanelStore((s) => s.query);
   const usage = usePrefs((s) => s.usage);
-  // Pinned files are searchable next to the installed apps.
-  const all = useMemo(() => [...(apps ?? []), ...pinned.filter((a) => isFileId(a.id))], [apps, pinned]);
+  // Pinned files (in folders too) are searchable next to the installed apps.
+  const all = useMemo(() => {
+    const files = pinned.flatMap((a) => a.folder?.items ?? [a]).filter((a) => isFileId(a.id));
+    return [...apps, ...files];
+  }, [apps, pinned]);
   return useMemo(() => searchApps(all, query, usage), [all, query, usage]);
 }
 
