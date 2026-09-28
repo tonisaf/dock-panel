@@ -9,7 +9,9 @@
 
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
 
 use serde::{Deserialize, Serialize};
@@ -20,8 +22,9 @@ const SNAPSHOT_FILE: &str = "claude-limits.json";
 const SCRIPT_FILE: &str = "claude-statusline.js";
 /// How much of a Codex session log to scan from the end.
 const CODEX_TAIL_BYTES: u64 = 512 * 1024;
-/// Session files to try, newest first, before giving up.
-const CODEX_FILES_TO_TRY: usize = 5;
+/// Recently modified session files to read. Codex also writes to old sessions
+/// now and then, so the latest limits need not be in the newest file.
+const CODEX_FILES_TO_TRY: usize = 8;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -221,14 +224,38 @@ fn codex_home(home: &Path) -> PathBuf {
     std::env::var_os("CODEX_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".codex"))
 }
 
+/// Each file's latest limits by its modification time, so an unchanged log
+/// isn't read again on every poll.
+type CodexCache = HashMap<PathBuf, (u128, Option<Snapshot>)>;
+static CODEX_CACHE: Mutex<Option<CodexCache>> = Mutex::new(None);
+
+/// The most recently recorded limits among the recently modified session
+/// files: by the record's own time, not the file's, since touching an old
+/// session (its last limits long reset) makes it the newest file.
 fn read_codex(codex_home: &Path) -> Option<Snapshot> {
     let mut files = Vec::new();
     collect_jsonl(&codex_home.join("sessions"), &mut files);
-    files.sort_by(|a, b| b.0.cmp(&a.0));
-    files
+    files.sort_by_key(|f| std::cmp::Reverse(f.0));
+    files.truncate(CODEX_FILES_TO_TRY);
+
+    let mut guard = CODEX_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let cache = guard.get_or_insert_with(HashMap::new);
+    cache.retain(|path, _| files.iter().any(|(_, p)| p == path));
+    let snapshots: Vec<Snapshot> = files
         .iter()
-        .take(CODEX_FILES_TO_TRY)
-        .find_map(|(_, path)| last_codex_limits(path))
+        .filter_map(|(modified, path)| {
+            let fresh = cache.get(path).is_some_and(|(m, _)| m == modified);
+            if !fresh {
+                cache.insert(path.clone(), (*modified, last_codex_limits(path)));
+            }
+            cache.get(path)?.1.clone()
+        })
+        .collect();
+    latest(snapshots)
+}
+
+fn latest(snapshots: impl IntoIterator<Item = Snapshot>) -> Option<Snapshot> {
+    snapshots.into_iter().max_by_key(|s| s.updated_at)
 }
 
 fn collect_jsonl(dir: &Path, out: &mut Vec<(u128, PathBuf)>) {
@@ -312,7 +339,15 @@ fn parse_rfc3339_ms(s: &str) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_rfc3339_ms;
+    use super::{latest, parse_rfc3339_ms, Snapshot};
+
+    #[test]
+    fn codex_limits_come_from_the_latest_record_not_the_newest_file() {
+        let at = |updated_at| Snapshot { updated_at, plan: None, windows: Vec::new() };
+        // Files newest first: an old session touched today, then today's.
+        assert_eq!(latest([at(100), at(300), at(200)]).map(|s| s.updated_at), Some(300));
+        assert!(latest([]).is_none());
+    }
 
     #[test]
     fn parses_codex_timestamps() {

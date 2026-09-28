@@ -34,6 +34,9 @@ const EVENT: &str = "notes:changed";
 const SYNC_EVERY: Duration = Duration::from_secs(5 * 60);
 /// A sync asked for sooner than this after the last one is skipped (the UI asks on every open).
 const FRESH_MS: u64 = 60_000;
+/// Notion's database query lags behind a page just created there: for this
+/// long a sync keeps such a note although the listing doesn't have it yet.
+const JUST_CREATED_MS: u64 = 10 * 60_000;
 const MAX_NOTES: usize = 500;
 const MAX_DEPTH: usize = 4;
 /// Notion allows about three requests a second.
@@ -144,6 +147,25 @@ struct Store {
     outbox: Vec<Op>,
     syncing: bool,
     error: Option<String>,
+    /// Notes the panel made that are now in Notion: local id -> (Notion id,
+    /// when). A note still open under its local id finds its page through it,
+    /// and a sync keeps it while Notion's listing lags (JUST_CREATED_MS).
+    created: HashMap<String, (String, u64)>,
+    /// Notion turned down a new note (for good, not for lack of connection);
+    /// the note stays local and the sync reports this.
+    create_error: Option<String>,
+}
+
+impl Store {
+    /// The Notion id of a note made here, or the id as it is.
+    fn resolve(&self, id: &str) -> String {
+        self.created.get(id).map_or_else(|| id.to_string(), |(real, _)| real.clone())
+    }
+
+    fn just_created(&self) -> HashSet<String> {
+        let now = now_ms();
+        self.created.values().filter(|(_, at)| now - at < JUST_CREATED_MS).map(|(id, _)| id.clone()).collect()
+    }
 }
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
@@ -231,7 +253,16 @@ pub fn init(app: &AppHandle) {
         index = Index::default();
     }
     let outbox: Vec<Op> = read_json(&dir.join("outbox.json")).unwrap_or_default();
-    *STORE.lock().unwrap_or_else(|e| e.into_inner()) = Some(Store { dir, settings, index, outbox, syncing: false, error: None });
+    *STORE.lock().unwrap_or_else(|e| e.into_inner()) = Some(Store {
+        dir,
+        settings,
+        index,
+        outbox,
+        syncing: false,
+        error: None,
+        created: HashMap::new(),
+        create_error: None,
+    });
 
     tauri::async_runtime::spawn(async {
         loop {
@@ -407,6 +438,8 @@ fn apply_pending(page_id: &str, blocks: &mut [Block], outbox: &[Op]) {
 async fn flush(token: &str, source_id: &str) -> Result<(), String> {
     loop {
         let Some(op) = with_store(|s| s.outbox.first().cloned()).flatten() else { return Ok(()) };
+        // A note created just now, with its blocks as Notion has them.
+        let mut created: Option<(Note, Option<Vec<Block>>)> = None;
         let result = match &op {
             Op::Toggle { block_id, checked, .. } => {
                 api(token, Method::PATCH, &format!("/blocks/{block_id}"), Some(json!({ "to_do": { "checked": checked } }))).await
@@ -416,10 +449,19 @@ async fn flush(token: &str, source_id: &str) -> Result<(), String> {
                 let schema = detect(&ds)?;
                 let body = json!({
                     "parent": { "type": "data_source_id", "data_source_id": source_id },
-                    "properties": { schema.title: { "title": [{ "text": { "content": title } }] } },
+                    "properties": { schema.title.clone(): { "title": [{ "text": { "content": title } }] } },
                     "children": blocks::from_text(body),
                 });
-                api(token, Method::POST, "/pages", Some(body)).await
+                let page = api(token, Method::POST, "/pages", Some(body)).await;
+                if let Some(note) = page.as_ref().ok().and_then(|p| to_note(p, &schema)) {
+                    // Real block ids, so edits right after go to the right blocks.
+                    let mut blocks = children(token, &note.id, 0).await.ok();
+                    if let (Some(b), Some(images)) = (blocks.as_mut(), with_store(|s| s.images())) {
+                        cache_images(b, &images).await;
+                    }
+                    created = Some((note, blocks));
+                }
+                page
             }
             Op::Props { page_id, title, tags, pinned } => {
                 let ds = api(token, Method::GET, &format!("/data_sources/{source_id}"), None).await?;
@@ -443,13 +485,16 @@ async fn flush(token: &str, source_id: &str) -> Result<(), String> {
             }
             Op::Edit { .. } => apply_edit(token, &op).await,
         };
-        match result {
-            Ok(_) => {}
+        let failed = match result {
+            Ok(_) => None,
             // Offline: keep it for later.
             Err(e) if e.starts_with("Нет связи") || e.contains("подождать") => return Err(e),
             // Anything else (a deleted block, say) won't get better by retrying.
-            Err(e) => eprintln!("notes: dropping {op:?}: {e}"),
-        }
+            Err(e) => {
+                eprintln!("notes: dropping {op:?}: {e}");
+                Some(e)
+            }
+        };
         with_store(|s| {
             // An edit's saved progress moves on while it is sent; it is still the same edit.
             let same = |f: &Op| match (f, &op) {
@@ -460,9 +505,33 @@ async fn flush(token: &str, source_id: &str) -> Result<(), String> {
                 s.outbox.remove(0);
             }
             if let Op::Create { local_id, .. } = &op {
-                // The sync right after brings the real page.
-                s.index.entries.retain(|e| &e.note.id != local_id);
-                let _ = std::fs::remove_file(s.page_path(local_id));
+                match (created.take(), &failed) {
+                    // The local note becomes the Notion page in place: the
+                    // listing may not show the page for a while yet.
+                    (Some((mut note, blocks)), _) => {
+                        let at = s.index.entries.iter().position(|e| &e.note.id == local_id);
+                        let text = at.map(|i| s.index.entries[i].text.clone()).unwrap_or_default();
+                        note.preview = preview_of(&text);
+                        let entry = Entry { note: note.clone(), text };
+                        match at {
+                            Some(i) => s.index.entries[i] = entry,
+                            None => s.index.entries.insert(0, entry),
+                        }
+                        let _ = std::fs::remove_file(s.page_path(local_id));
+                        // Without blocks, the page is fetched when opened.
+                        if let Some(blocks) = blocks {
+                            write_json(&s.page_path(&note.id), &Page { edited: note.edited.clone(), blocks });
+                        }
+                        s.created.insert(local_id.clone(), (note.id, now_ms()));
+                    }
+                    // Turned down: keep the note here, and say so.
+                    (None, Some(e)) => s.create_error = Some(format!("Notion не принял новую заметку: {e}")),
+                    // Created, but the answer wasn't a page we can read: the next sync brings it.
+                    (None, None) => {
+                        s.index.entries.retain(|e| &e.note.id != local_id);
+                        let _ = std::fs::remove_file(s.page_path(local_id));
+                    }
+                }
             }
             s.save_outbox();
             s.save_index();
@@ -562,7 +631,7 @@ pub async fn sync(force: bool) -> Result<(), String> {
     let result = sync_now(&token, &source).await;
     with_store(|s| {
         s.syncing = false;
-        s.error = result.as_ref().err().cloned();
+        s.error = result.as_ref().err().cloned().or_else(|| s.create_error.take());
         if result.is_ok() {
             s.index.synced_at = Some(now_ms());
             s.save_index();
@@ -630,7 +699,8 @@ async fn sync_now(token: &str, source: &Source) -> Result<(), String> {
         }
     }
     publish(source, &entries, &old, true);
-    prune(&dir, &entries);
+    let kept = with_store(|s| s.index.entries.clone()).unwrap_or(entries);
+    prune(&dir, &kept);
     Ok(())
 }
 
@@ -644,6 +714,17 @@ fn publish(source: &Source, synced: &[Entry], old: &HashMap<String, Entry>, done
             // Mid-sync: notes not reached yet stay as they were.
             entries.extend(old.values().filter(|e| !e.note.local && !seen.contains(e.note.id.as_str())).cloned());
         }
+        // Made here moments ago: Notion's listing may not have them yet.
+        let just_created = s.just_created();
+        let listed: HashSet<String> = entries.iter().map(|e| e.note.id.clone()).collect();
+        let lagging: Vec<Entry> = s
+            .index
+            .entries
+            .iter()
+            .filter(|e| just_created.contains(&e.note.id) && !listed.contains(&e.note.id))
+            .cloned()
+            .collect();
+        entries.extend(lagging);
         s.index.source_id = source.id.clone();
         s.index.entries = entries;
         s.save_index();
@@ -767,6 +848,7 @@ pub async fn notes_sync(force: bool) -> State {
 /// A note's blocks from the cache; fetched on the spot if it isn't cached yet.
 #[tauri::command]
 pub async fn notes_page(id: String) -> Result<Vec<Block>, String> {
+    let id = with_store(|s| s.resolve(&id)).unwrap_or(id);
     let path = with_store(|s| s.page_path(&id)).ok_or("Хранилище заметок не готово")?;
     if let Some(page) = read_json::<Page>(&path) {
         return Ok(page.blocks);
@@ -787,6 +869,7 @@ pub async fn notes_page(id: String) -> Result<Vec<Block>, String> {
 #[tauri::command]
 pub fn notes_toggle(page_id: String, block_id: String, checked: bool) -> Result<Vec<Block>, String> {
     let blocks = with_store(|s| {
+        let page_id = s.resolve(&page_id);
         let path = s.page_path(&page_id);
         let mut page: Page = read_json(&path).ok_or("Заметки нет в кэше")?;
         blocks::each_mut(&mut page.blocks, &mut |b| {
@@ -853,7 +936,7 @@ pub fn notes_create(title: String, body: String) -> Result<Note, String> {
 /// The note's content as editable text (see `edit`).
 #[tauri::command]
 pub fn notes_text(id: String) -> Result<String, String> {
-    let page: Page = with_store(|s| read_json(&s.page_path(&id))).flatten().ok_or("Заметки нет в кэше")?;
+    let page: Page = with_store(|s| read_json(&s.page_path(&s.resolve(&id)))).flatten().ok_or("Заметки нет в кэше")?;
     Ok(edit::to_text(&edit::to_lines(&page.blocks)))
 }
 
@@ -869,6 +952,7 @@ fn touch(s: &mut Store, id: &str, f: impl FnOnce(&mut Entry)) {
 #[tauri::command]
 pub fn notes_edit(id: String, text: String) -> Result<Vec<Block>, String> {
     let blocks = with_store(|s| {
+        let id = s.resolve(&id);
         let path = s.page_path(&id);
         let mut page: Page = read_json(&path).ok_or("Заметки нет в кэше")?;
 
@@ -924,6 +1008,7 @@ pub fn notes_edit(id: String, text: String) -> Result<Vec<Block>, String> {
 #[tauri::command]
 pub fn notes_set_props(id: String, title: Option<String>, tags: Option<Vec<String>>, pinned: Option<bool>) -> Result<Note, String> {
     let note = with_store(|s| {
+        let id = s.resolve(&id);
         if is_local(&id) {
             for op in &mut s.outbox {
                 if let (Op::Create { local_id, title: t, .. }, Some(new)) = (&mut *op, &title) {
