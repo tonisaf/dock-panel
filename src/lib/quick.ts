@@ -122,7 +122,7 @@ function arithmetic(q: string): Answer | null {
     return { text: `= ${fmt(v)}`, copy: plain(v), detail: "Enter — скопировать" };
   }
   // A lone number isn't a question; an expression needs an operator (or a leading "=").
-  if (!q.trim().startsWith("=") && !/\d\s*[-+*/^×÷%]/.test(s) && !/[-+*/^×÷]\s*[\d(]/.test(s)) return null;
+  if (!q.trim().startsWith("=") && !/\d\s*[-+*/^×÷·−–%]/.test(s) && !/[-+*/^×÷·−–]\s*[\d(]/.test(s)) return null;
   const tokens = tokenize(s);
   if (!tokens || !tokens.some((t) => t.t === "num")) return null;
   const v = evaluate(tokens);
