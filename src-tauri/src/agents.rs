@@ -50,6 +50,8 @@ pub struct Agent {
     since: u64,
     /// The agent's last message, when the log has it (Codex).
     last_message: Option<String>,
+    /// What a working session is doing: its latest tool call, or that it waits for an answer.
+    activity: Option<String>,
     #[serde(skip)]
     pid: Option<u32>,
     #[serde(skip)]
@@ -76,6 +78,7 @@ struct CodexFile {
     busy: bool,
     since: u64,
     last_message: Option<String>,
+    activity: Option<String>,
 }
 
 static TRACKER: Mutex<Option<Tracker>> = Mutex::new(None);
@@ -121,21 +124,155 @@ fn claude_sessions() -> Vec<Agent> {
                 e if e.contains("jetbrains") || e.contains("ide") => ("IDE", None),
                 _ => ("терминал", None),
             };
+            let busy = v["status"] == "busy";
             Some(Agent {
                 id: format!("claude:{session}"),
                 kind: "claude",
                 name: v["name"].as_str().filter(|n| !n.is_empty()).unwrap_or("Claude Code").to_string(),
                 project: folder_name(cwd),
                 host: host.to_string(),
-                busy: v["status"] == "busy",
+                busy,
                 waiting: false,
                 since: v["statusUpdatedAt"].as_u64().or(v["updatedAt"].as_u64()).unwrap_or(0),
                 last_message: None,
+                activity: if busy { claude_activity(session, cwd) } else { None },
                 pid: Some(pid),
                 host_exe,
             })
         })
         .collect()
+}
+
+/// Shown for a session stopped on a question to the user.
+const ASKING: &str = "ждёт вашего ответа";
+
+/// One line for a tool call: `Bash: cargo test`, `Edit: agents.rs`.
+fn describe_tool(name: &str, input: &Value) -> String {
+    let text = |key: &str| input[key].as_str().filter(|s| !s.is_empty());
+    let file = |key: &str| text(key).map(|p| folder_name(&p.replace('\\', "/")));
+    let detail = match name {
+        "Bash" | "PowerShell" => text("description").or_else(|| text("command")).map(str::to_string),
+        "Read" | "Edit" | "Write" | "MultiEdit" => file("file_path"),
+        "NotebookEdit" => file("notebook_path"),
+        "Grep" | "Glob" => text("pattern").map(str::to_string),
+        "WebFetch" => text("url").map(str::to_string),
+        "WebSearch" => text("query").map(str::to_string),
+        "Agent" | "Task" => text("description").map(str::to_string),
+        "Skill" => text("skill").map(str::to_string),
+        _ => None,
+    };
+    // MCP tools are `mcp__server__tool`; the tool is what matters.
+    let name = name.rsplit("__").next().unwrap_or(name);
+    match detail {
+        Some(d) => format!("{name}: {}", preview(&d, 70)),
+        None => name.to_string(),
+    }
+}
+
+/// Codex names its tools `exec`, `js`, `wait`…; their arguments are code, so
+/// only a title (when it gives one) is worth showing.
+fn codex_activity(name: &str, arguments: &Value) -> String {
+    match name {
+        "request_user_input_async" | "request_user_input" => ASKING.to_string(),
+        "exec" | "exec_command" | "shell" | "local_shell" => "выполняет команды".to_string(),
+        "wait" => "ждёт завершения команды".to_string(),
+        "apply_patch" => "правит файлы".to_string(),
+        "js" => arguments
+            .as_str()
+            .and_then(|a| serde_json::from_str::<Value>(a).ok())
+            .and_then(|a| a["title"].as_str().map(|t| preview(t, 70)))
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| "выполняет код".to_string()),
+        other => other.to_string(),
+    }
+}
+
+// ---- Claude Code: what a session is doing ------------------------------------
+
+/// How much of a transcript's end to look at for the latest tool call.
+const TRANSCRIPT_TAIL: u64 = 256 * 1024;
+
+#[derive(Default)]
+struct TranscriptCache {
+    path: Option<PathBuf>,
+    len: u64,
+    activity: Option<String>,
+}
+
+static TRANSCRIPTS: Mutex<Option<HashMap<String, TranscriptCache>>> = Mutex::new(None);
+
+/// `~/.claude/projects/<folder>/<session>.jsonl`, the folder being the cwd with
+/// everything but letters and digits turned into dashes (found by search when
+/// that guess misses, e.g. for non-Latin paths).
+fn find_transcript(session: &str, cwd: &str) -> Option<PathBuf> {
+    let projects = home().join(".claude").join("projects");
+    let file = format!("{session}.jsonl");
+    let slug: String = cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    let guess = projects.join(slug).join(&file);
+    if guess.is_file() {
+        return Some(guess);
+    }
+    std::fs::read_dir(projects).ok()?.flatten().map(|d| d.path().join(&file)).find(|p| p.is_file())
+}
+
+fn claude_activity(session: &str, cwd: &str) -> Option<String> {
+    let mut guard = TRANSCRIPTS.lock().unwrap_or_else(|e| e.into_inner());
+    let cache = guard.get_or_insert_with(HashMap::new);
+    if cache.len() > 64 {
+        cache.clear();
+    }
+    let entry = cache.entry(session.to_string()).or_default();
+    if entry.path.is_none() {
+        entry.path = find_transcript(session, cwd);
+    }
+    let path = entry.path.clone()?;
+    let len = std::fs::metadata(&path).ok()?.len();
+    if len != entry.len {
+        entry.activity = transcript_activity(&path, len);
+        entry.len = len;
+    }
+    entry.activity.clone()
+}
+
+/// The latest tool call near the end of a transcript, or that it waits for the
+/// user (a question or a plan to approve that no result has followed yet).
+fn transcript_activity(path: &Path, len: u64) -> Option<String> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let start = len.saturating_sub(TRANSCRIPT_TAIL);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf);
+    let mut lines = text.lines();
+    if start > 0 {
+        lines.next(); // cut mid-line
+    }
+    // (tool_use id, name, input, answered)
+    let mut last: Option<(String, String, Value, bool)> = None;
+    for line in lines {
+        if line.contains("\"tool_use\"") {
+            let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+            let call = v["message"]["content"].as_array().and_then(|c| c.iter().rev().find(|b| b["type"] == "tool_use"));
+            if let Some(b) = call {
+                last = Some((
+                    b["id"].as_str().unwrap_or_default().to_string(),
+                    b["name"].as_str().unwrap_or_default().to_string(),
+                    b["input"].clone(),
+                    false,
+                ));
+            }
+        } else if let Some((id, _, _, answered)) = last.as_mut() {
+            if !*answered && !id.is_empty() && line.contains("\"tool_result\"") && line.contains(id.as_str()) {
+                *answered = true;
+            }
+        }
+    }
+    let (_, name, input, answered) = last?;
+    Some(match (name.as_str(), answered) {
+        ("AskUserQuestion", false) => ASKING.to_string(),
+        ("ExitPlanMode", false) => "ждёт одобрения плана".to_string(),
+        _ => describe_tool(&name, &input),
+    })
 }
 
 // ---- Codex --------------------------------------------------------------------
@@ -212,6 +349,10 @@ fn read_codex_file(path: &Path, f: &mut CodexFile) {
             "started"
         } else if line.contains("\"task_complete\"") {
             "complete"
+        } else if line.contains("\"function_call\"") || line.contains("\"custom_tool_call\"") {
+            "call"
+        } else if line.contains("\"function_call_output\"") {
+            "output"
         } else {
             continue;
         };
@@ -233,10 +374,19 @@ fn read_codex_file(path: &Path, f: &mut CodexFile) {
             "started" if p["type"] == "task_started" => {
                 f.busy = true;
                 f.since = at;
+                f.activity = None;
+            }
+            "call" if matches!(p["type"].as_str(), Some("function_call" | "custom_tool_call")) => {
+                f.activity = Some(codex_activity(p["name"].as_str().unwrap_or_default(), &p["arguments"]));
+            }
+            // The answer to a question came back; what happens next is unknown until the next call.
+            "output" if p["type"] == "function_call_output" && f.activity.as_deref() == Some(ASKING) => {
+                f.activity = None;
             }
             "complete" if p["type"] == "task_complete" => {
                 f.busy = false;
                 f.since = at;
+                f.activity = None;
                 f.last_message = p["last_agent_message"].as_str().map(|m| preview(m, 240));
             }
             _ => {}
@@ -294,6 +444,7 @@ fn codex_sessions(t: &mut Tracker) -> Vec<Agent> {
             waiting: false,
             since: f.since,
             last_message: f.last_message.clone(),
+            activity: f.activity.clone().filter(|_| f.busy && silent < CODEX_STALE_TURN),
             pid: None,
             host_exe: match f.host.as_str() {
                 // The Codex desktop app (package OpenAI.Codex) runs as ChatGPT.exe.
@@ -579,8 +730,74 @@ mod tests {
         let mut all = claude_sessions();
         all.extend(codex_sessions(&mut t));
         for a in all {
-            println!("{} | {} | {} | {} | busy={} | since={} | {:?}", a.kind, a.name, a.project, a.host, a.busy, a.since, a.last_message.map(|m| preview(&m, 60)));
+            println!("{} | {} | busy={} | activity={:?}", a.kind, a.name, a.busy, a.activity);
         }
+    }
+
+    #[test]
+    fn describes_claude_tool_calls() {
+        let d = |name, input: Value| describe_tool(name, &input);
+        assert_eq!(d("Bash", serde_json::json!({"command": "cargo test", "description": "Run tests"})), "Bash: Run tests");
+        assert_eq!(d("Bash", serde_json::json!({"command": "cargo test"})), "Bash: cargo test");
+        assert_eq!(d("Edit", serde_json::json!({"file_path": "C:\\a\\b\\agents.rs"})), "Edit: agents.rs");
+        assert_eq!(d("Grep", serde_json::json!({"pattern": "fn poll"})), "Grep: fn poll");
+        assert_eq!(d("mcp__srv__do_thing", serde_json::json!({})), "do_thing");
+        assert_eq!(d("Read", serde_json::json!({})), "Read");
+    }
+
+    #[test]
+    fn reads_claude_activity_from_a_transcript() {
+        let dir = std::env::temp_dir().join(format!("agents-claude-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.jsonl");
+        let call = |id: &str, name: &str, input: &str| {
+            format!(r#"{{"type":"assistant","message":{{"content":[{{"type":"tool_use","id":"{id}","name":"{name}","input":{input}}}]}}}}"#)
+        };
+        let result = |id: &str| format!(r#"{{"type":"user","message":{{"content":[{{"type":"tool_result","tool_use_id":"{id}"}}]}}}}"#);
+        let activity = |lines: &[String]| {
+            std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+            transcript_activity(&path, std::fs::metadata(&path).unwrap().len())
+        };
+
+        let read = call("t1", "Read", r#"{"file_path":"/x/lib.rs"}"#);
+        assert_eq!(activity(&[read.clone()]).as_deref(), Some("Read: lib.rs"));
+        assert_eq!(activity(&[read.clone(), result("t1")]).as_deref(), Some("Read: lib.rs"));
+
+        let ask = call("t2", "AskUserQuestion", "{}");
+        assert_eq!(activity(&[read.clone(), result("t1"), ask.clone()]).as_deref(), Some(ASKING));
+        // Once answered it is just the latest tool again.
+        assert_eq!(activity(&[ask.clone(), result("t2")]).as_deref(), Some("AskUserQuestion"));
+        assert_eq!(activity(&[call("t3", "ExitPlanMode", "{}")]).as_deref(), Some("ждёт одобрения плана"));
+        assert_eq!(activity(&[r#"{"type":"user"}"#.to_string()]), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tracks_codex_activity() {
+        let dir = std::env::temp_dir().join(format!("agents-codex-act-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("rollout.jsonl");
+        let lines = [
+            r#"{"timestamp":"2026-09-26T21:00:00.000Z","type":"event_msg","payload":{"type":"task_started"}}"#,
+            r#"{"timestamp":"2026-09-26T21:00:01.000Z","type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"1+1"}}"#,
+            r#"{"timestamp":"2026-09-26T21:00:02.000Z","type":"response_item","payload":{"type":"function_call","name":"request_user_input_async","arguments":"{}"}}"#,
+        ];
+        std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+        let mut f = CodexFile::default();
+        read_codex_file(&path, &mut f);
+        assert_eq!(f.activity.as_deref(), Some(ASKING));
+
+        let more = r#"{"timestamp":"2026-09-26T21:00:03.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"c"}}"#;
+        std::fs::write(&path, lines.join("\n") + "\n" + more + "\n").unwrap();
+        read_codex_file(&path, &mut f);
+        assert_eq!(f.activity, None);
+
+        let done = r#"{"timestamp":"2026-09-26T21:00:04.000Z","type":"event_msg","payload":{"type":"task_complete","last_agent_message":"ok"}}"#;
+        std::fs::write(&path, lines.join("\n") + "\n" + more + "\n" + done + "\n").unwrap();
+        read_codex_file(&path, &mut f);
+        assert!(!f.busy);
+        assert_eq!(f.activity, None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

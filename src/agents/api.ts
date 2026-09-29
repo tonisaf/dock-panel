@@ -17,6 +17,8 @@ export interface Agent {
   /** Unix ms of the last status change. */
   since: number;
   lastMessage: string | null;
+  /** What a working session is doing: its latest tool call, or that it waits for an answer. */
+  activity: string | null;
 }
 
 export interface AgentsState {

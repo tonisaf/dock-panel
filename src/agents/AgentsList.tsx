@@ -42,6 +42,11 @@ function AgentRow({ agent, compact }: { agent: Agent; compact: boolean }) {
           {agent.kind === "claude" ? "Claude" : "Codex"} · {agent.project} · {agent.host} ·{" "}
           <span className={clsx(agent.waiting && "text-accent")}>{status}</span> {ago(agent.since)}
         </div>
+        {agent.busy && agent.activity && (
+          <p className="truncate text-[11.5px] text-fg-muted" title={agent.activity}>
+            {agent.activity}
+          </p>
+        )}
         {!compact && agent.waiting && agent.lastMessage && (
           <p className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-fg-muted">{agent.lastMessage}</p>
         )}
