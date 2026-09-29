@@ -4,7 +4,7 @@
 //! A phase's end raises a toast; clicking it starts the next phase.
 
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Condvar, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -149,6 +149,8 @@ impl Timer {
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
 static TIMER: Mutex<Option<Timer>> = Mutex::new(None);
+/// Wakes the ticker when the timer changes, so it can sleep while nothing runs.
+static WAKE: Condvar = Condvar::new();
 
 fn with_timer<R>(f: impl FnOnce(&mut Timer) -> R) -> R {
     let mut guard = TIMER.lock().unwrap_or_else(|e| e.into_inner());
@@ -208,6 +210,7 @@ fn snapshot() -> State {
 
 /// Saves, and tells the UI.
 fn changed() -> State {
+    WAKE.notify_all();
     save();
     let state = snapshot();
     if let Some(app) = APP.get() {
@@ -227,9 +230,22 @@ pub fn init(app: &AppHandle) {
         .name("pomodoro".into())
         .spawn(|| loop {
             tick();
-            std::thread::sleep(TICK);
+            idle_until_running();
         })
         .ok();
+}
+
+/// Waits one tick while the timer runs; while it doesn't, until `changed` says
+/// something did, so a stopped timer costs no wakeups.
+fn idle_until_running() {
+    let mut guard = TIMER.lock().unwrap_or_else(|e| e.into_inner());
+    loop {
+        if guard.as_ref().is_some_and(|t| t.running) {
+            let _ = WAKE.wait_timeout(guard, TICK);
+            return;
+        }
+        guard = WAKE.wait(guard).unwrap_or_else(|e| e.into_inner());
+    }
 }
 
 fn tick() {
