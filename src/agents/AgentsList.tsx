@@ -77,7 +77,7 @@ export function AgentsNotifyToggle() {
     <button
       onClick={() => setNotify(!on).catch(console.error)}
       aria-pressed={on}
-      title={on ? "Уведомлять, когда сессия закончила: вкл" : "Уведомлять, когда сессия закончила"}
+      title={on ? "Уведомлять, когда сессия закончила или ждёт ответа: вкл" : "Уведомлять, когда сессия закончила или ждёт ответа"}
       className="grid size-6 place-items-center rounded-md text-fg-subtle hover:bg-ink/10 hover:text-fg"
     >
       {on ? <Bell className="size-3.5" /> : <BellOff className="size-3.5" />}

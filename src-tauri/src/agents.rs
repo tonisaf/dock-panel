@@ -64,6 +64,8 @@ struct Tracker {
     waiting: HashSet<String>,
     /// Busy state from the previous poll, to see transitions.
     was_busy: HashMap<String, bool>,
+    /// Sessions already announced as stopped on a question, until they go on.
+    was_asking: HashSet<String>,
     first_poll_done: bool,
     codex_files: HashMap<PathBuf, CodexFile>,
     codex_titles: (Option<SystemTime>, HashMap<String, String>),
@@ -145,6 +147,12 @@ fn claude_sessions() -> Vec<Agent> {
 
 /// Shown for a session stopped on a question to the user.
 const ASKING: &str = "ждёт вашего ответа";
+const PLAN: &str = "ждёт одобрения плана";
+
+/// A working session that stopped on something only the user can answer.
+fn needs_you(a: &Agent) -> bool {
+    a.busy && matches!(a.activity.as_deref(), Some(ASKING | PLAN))
+}
 
 /// One line for a tool call: `Bash: cargo test`, `Edit: agents.rs`.
 fn describe_tool(name: &str, input: &Value) -> String {
@@ -270,7 +278,7 @@ fn transcript_activity(path: &Path, len: u64) -> Option<String> {
     let (_, name, input, answered) = last?;
     Some(match (name.as_str(), answered) {
         ("AskUserQuestion", false) => ASKING.to_string(),
-        ("ExitPlanMode", false) => "ждёт одобрения плана".to_string(),
+        ("ExitPlanMode", false) => PLAN.to_string(),
         _ => describe_tool(&name, &input),
     })
 }
@@ -466,7 +474,13 @@ fn poll(app: &AppHandle) {
     agents.extend(codex_sessions(t));
 
     let mut finished = Vec::new();
+    let mut asking = Vec::new();
     for a in &agents {
+        if !needs_you(a) {
+            t.was_asking.remove(&a.id);
+        } else if t.was_asking.insert(a.id.clone()) && t.first_poll_done {
+            asking.push(a.clone());
+        }
         let was = t.was_busy.insert(a.id.clone(), a.busy);
         if a.busy {
             t.waiting.remove(&a.id);
@@ -478,6 +492,7 @@ fn poll(app: &AppHandle) {
     let live: HashSet<&String> = agents.iter().map(|a| &a.id).collect();
     t.waiting.retain(|id| live.contains(id));
     t.was_busy.retain(|id, _| live.contains(id));
+    t.was_asking.retain(|id| live.contains(id));
     for a in &mut agents {
         a.waiting = t.waiting.contains(&a.id);
     }
@@ -493,17 +508,25 @@ fn poll(app: &AppHandle) {
 
     if NOTIFY.load(Ordering::SeqCst) {
         for a in finished {
-            notify(app, &a);
+            notify(app, &a, false);
+        }
+        for a in asking {
+            notify(app, &a, true);
         }
     }
 }
 
-fn notify(app: &AppHandle, a: &Agent) {
+/// A toast for a session that finished, or (`asking`) stopped on a question.
+fn notify(app: &AppHandle, a: &Agent, asking: bool) {
     let who = if a.kind == "claude" { "Claude" } else { "Codex" };
-    let title = format!("{who} закончил · {}", a.project);
-    let body = match &a.last_message {
-        Some(m) => format!("{}\n{}", a.name, preview(m, 140)),
-        None => a.name.clone(),
+    let (title, body) = if asking {
+        (format!("{who} ждёт вас · {}", a.project), format!("{}\n{}", a.name, a.activity.as_deref().unwrap_or(ASKING)))
+    } else {
+        let body = match &a.last_message {
+            Some(m) => format!("{}\n{}", a.name, preview(m, 140)),
+            None => a.name.clone(),
+        };
+        (format!("{who} закончил · {}", a.project), body)
     };
     #[cfg(windows)]
     {
@@ -767,7 +790,7 @@ mod tests {
         assert_eq!(activity(&[read.clone(), result("t1"), ask.clone()]).as_deref(), Some(ASKING));
         // Once answered it is just the latest tool again.
         assert_eq!(activity(&[ask.clone(), result("t2")]).as_deref(), Some("AskUserQuestion"));
-        assert_eq!(activity(&[call("t3", "ExitPlanMode", "{}")]).as_deref(), Some("ждёт одобрения плана"));
+        assert_eq!(activity(&[call("t3", "ExitPlanMode", "{}")]).as_deref(), Some(PLAN));
         assert_eq!(activity(&[r#"{"type":"user"}"#.to_string()]), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
