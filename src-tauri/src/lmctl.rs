@@ -50,7 +50,9 @@ pub struct Overview {
 }
 
 fn lms_path() -> PathBuf {
-    let home = std::env::var_os("USERPROFILE").map(PathBuf::from).unwrap_or_default();
+    let home = std::env::var_os("USERPROFILE")
+        .map(PathBuf::from)
+        .unwrap_or_default();
     home.join(".lmstudio").join("bin").join("lms.exe")
 }
 
@@ -67,19 +69,31 @@ fn lms(args: &[&str]) -> Result<String, String> {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000);
     }
-    let out = cmd.output().map_err(|e| format!("Не удалось запустить lms: {e}"))?;
+    let out = cmd
+        .output()
+        .map_err(|e| format!("Не удалось запустить lms: {e}"))?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {
         let text = String::from_utf8_lossy(&out.stderr);
-        let text = if text.trim().is_empty() { String::from_utf8_lossy(&out.stdout) } else { text };
-        let line = text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("lms завершился с ошибкой");
+        let text = if text.trim().is_empty() {
+            String::from_utf8_lossy(&out.stdout)
+        } else {
+            text
+        };
+        let line = text
+            .lines()
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or("lms завершился с ошибкой");
         Err(line.trim().to_string())
     }
 }
 
 fn parse_models(json: &str) -> Vec<Model> {
-    let Ok(Value::Array(items)) = serde_json::from_str::<Value>(json.trim()) else { return vec![] };
+    let Ok(Value::Array(items)) = serde_json::from_str::<Value>(json.trim()) else {
+        return vec![];
+    };
     items
         .iter()
         .filter_map(|m| {
@@ -109,7 +123,9 @@ fn valid_key(key: &str) -> bool {
     !key.is_empty()
         && key.len() <= 300
         && !key.starts_with('-')
-        && key.chars().all(|c| c.is_alphanumeric() || "_-./@:+() ".contains(c))
+        && key
+            .chars()
+            .all(|c| c.is_alphanumeric() || "_-./@:+() ".contains(c))
 }
 
 #[tauri::command]
@@ -121,7 +137,10 @@ pub async fn lmstudio_overview() -> Overview {
         match (ps, ls) {
             (Ok(ps), Ok(ls)) => {
                 let loaded = parse_models(&ps);
-                let available = parse_models(&ls).into_iter().filter(|m| !loaded.iter().any(|l| l.key == m.key)).collect();
+                let available = parse_models(&ls)
+                    .into_iter()
+                    .filter(|m| !loaded.iter().any(|l| l.key == m.key))
+                    .collect();
                 (loaded, available, None)
             }
             (Err(e), _) | (_, Err(e)) => (vec![], vec![], Some(e)),
@@ -129,7 +148,12 @@ pub async fn lmstudio_overview() -> Overview {
     })
     .await
     .unwrap_or_else(|e| (vec![], vec![], Some(e.to_string())));
-    Overview { running, loaded, available, error }
+    Overview {
+        running,
+        loaded,
+        available,
+        error,
+    }
 }
 
 /// Loads a model; `ttl_minutes` unloads it after that long without use.
@@ -139,7 +163,9 @@ pub async fn lmstudio_load(key: String, ttl_minutes: Option<u32>) -> Result<(), 
         return Err("Неверное имя модели".into());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        let ttl = ttl_minutes.filter(|m| *m > 0).map(|m| (u64::from(m) * 60).to_string());
+        let ttl = ttl_minutes
+            .filter(|m| *m > 0)
+            .map(|m| (u64::from(m) * 60).to_string());
         let mut args = vec!["load", key.as_str(), "-y"];
         if let Some(seconds) = &ttl {
             args.extend(["--ttl", seconds]);
@@ -166,9 +192,11 @@ pub async fn lmstudio_unload(identifier: Option<String>) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn lmstudio_server(start: bool) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || lms(&["server", if start { "start" } else { "stop" }]).map(|_| ()))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        lms(&["server", if start { "start" } else { "stop" }]).map(|_| ())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -181,8 +209,14 @@ mod tests {
     fn reads_loaded_models() {
         let m = &parse_models(PS)[0];
         assert_eq!(m.key, "qwen/qwen3.6-35b-a3b");
-        assert_eq!((m.size_bytes, m.context_length, m.ttl_ms), (22_069_769_172, Some(65536), None));
-        assert_eq!((m.status.as_deref(), m.quantization.as_deref()), (Some("idle"), Some("Q4_K_M")));
+        assert_eq!(
+            (m.size_bytes, m.context_length, m.ttl_ms),
+            (22_069_769_172, Some(65536), None)
+        );
+        assert_eq!(
+            (m.status.as_deref(), m.quantization.as_deref()),
+            (Some("idle"), Some("Q4_K_M"))
+        );
         assert!(m.vision && m.tool_use);
     }
 
@@ -190,14 +224,24 @@ mod tests {
     fn reads_models_on_disk_and_survives_junk() {
         let ls = r#"[{"type":"embedding","modelKey":"text-embedding-nomic-embed-text-v1.5","displayName":"Nomic Embed Text v1.5","sizeBytes":84106624,"maxContextLength":2048}]"#;
         let m = &parse_models(ls)[0];
-        assert_eq!((m.kind.as_str(), m.identifier.clone(), m.status.clone()), ("embedding", None, None));
-        assert!(parse_models("").is_empty() && parse_models("[]").is_empty() && parse_models("not json").is_empty());
+        assert_eq!(
+            (m.kind.as_str(), m.identifier.clone(), m.status.clone()),
+            ("embedding", None, None)
+        );
+        assert!(
+            parse_models("").is_empty()
+                && parse_models("[]").is_empty()
+                && parse_models("not json").is_empty()
+        );
         assert!(parse_models(r#"[{"displayName":"no key"}]"#).is_empty());
     }
 
     #[test]
     fn keys_cannot_inject_options() {
-        assert!(valid_key("qwen/qwen3.6-35b-a3b") && valid_key("nomic-ai/nomic-embed-text-v1.5-GGUF/x.Q4_K_M.gguf"));
+        assert!(
+            valid_key("qwen/qwen3.6-35b-a3b")
+                && valid_key("nomic-ai/nomic-embed-text-v1.5-GGUF/x.Q4_K_M.gguf")
+        );
         assert!(!valid_key("--all") && !valid_key("") && !valid_key("a; rm") && !valid_key("a\"b"));
     }
 }

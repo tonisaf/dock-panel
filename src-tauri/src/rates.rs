@@ -29,10 +29,23 @@ fn parse(v: &Value) -> Option<Rates> {
     let mut rub: HashMap<String, f64> = v["Valute"]
         .as_object()?
         .iter()
-        .filter_map(|(code, r)| Some((code.clone(), r["Value"].as_f64()? / r["Nominal"].as_f64().filter(|n| *n > 0.0)?)))
+        .filter_map(|(code, r)| {
+            Some((
+                code.clone(),
+                r["Value"].as_f64()? / r["Nominal"].as_f64().filter(|n| *n > 0.0)?,
+            ))
+        })
         .collect();
     rub.insert("RUB".into(), 1.0);
-    Some(Rates { date: v["Date"].as_str().unwrap_or_default().chars().take(10).collect(), rub })
+    Some(Rates {
+        date: v["Date"]
+            .as_str()
+            .unwrap_or_default()
+            .chars()
+            .take(10)
+            .collect(),
+        rub,
+    })
 }
 
 #[tauri::command]
@@ -43,7 +56,14 @@ pub async fn currency_rates() -> Result<Rates, String> {
         }
     }
     let fetched = async {
-        let v: Value = net::client().get(URL).send().await.map_err(|e| e.to_string())?.json().await.map_err(|e| e.to_string())?;
+        let v: Value = net::client()
+            .get(URL)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+            .json()
+            .await
+            .map_err(|e| e.to_string())?;
         parse(&v).ok_or_else(|| "Непонятный ответ ЦБ".to_string())
     }
     .await;
@@ -54,7 +74,10 @@ pub async fn currency_rates() -> Result<Rates, String> {
             Ok(r)
         }
         // Yesterday's rates beat none.
-        Err(e) => cache.as_ref().map(|(_, r)| r.clone()).ok_or(format!("Курсы ЦБ недоступны: {e}")),
+        Err(e) => cache
+            .as_ref()
+            .map(|(_, r)| r.clone())
+            .ok_or(format!("Курсы ЦБ недоступны: {e}")),
     }
 }
 

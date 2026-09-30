@@ -45,12 +45,17 @@ fn collect() -> SystemStats {
         let sys = guard.get_or_insert_with(System::new);
         sys.refresh_cpu_usage();
         sys.refresh_memory();
-        (sys.global_cpu_usage(), sys.used_memory(), sys.total_memory())
+        (
+            sys.global_cpu_usage(),
+            sys.used_memory(),
+            sys.total_memory(),
+        )
     };
 
     let system_drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
     let mut guard = DISKS.lock().unwrap_or_else(|e| e.into_inner());
-    let (disks, read_at) = guard.get_or_insert_with(|| (Disks::new_with_refreshed_list(), Instant::now()));
+    let (disks, read_at) =
+        guard.get_or_insert_with(|| (Disks::new_with_refreshed_list(), Instant::now()));
     if read_at.elapsed() >= DISK_EVERY {
         disks.refresh(false);
         *read_at = Instant::now();
@@ -61,7 +66,14 @@ fn collect() -> SystemStats {
         .map(|d| (d.total_space() - d.available_space(), d.total_space()))
         .unwrap_or((0, 0));
 
-    SystemStats { cpu, mem_used, mem_total, disk_used, disk_total, battery: battery() }
+    SystemStats {
+        cpu,
+        mem_used,
+        mem_total,
+        disk_used,
+        disk_total,
+        battery: battery(),
+    }
 }
 
 #[cfg(windows)]
@@ -76,7 +88,10 @@ fn battery() -> Option<Battery> {
     if status.BatteryFlag & NO_BATTERY != 0 || status.BatteryLifePercent == UNKNOWN {
         return None;
     }
-    Some(Battery { percent: status.BatteryLifePercent, charging: status.ACLineStatus == 1 })
+    Some(Battery {
+        percent: status.BatteryLifePercent,
+        charging: status.ACLineStatus == 1,
+    })
 }
 
 #[derive(Serialize)]
@@ -98,5 +113,8 @@ pub fn system_accent() -> Result<AccentColors, String> {
         let c = settings.GetColorValue(kind).map_err(|e| e.to_string())?;
         Ok(format!("#{:02x}{:02x}{:02x}", c.R, c.G, c.B))
     };
-    Ok(AccentColors { light: hex(UIColorType::AccentLight2)?, dark: hex(UIColorType::AccentDark1)? })
+    Ok(AccentColors {
+        light: hex(UIColorType::AccentLight2)?,
+        dark: hex(UIColorType::AccentDark1)?,
+    })
 }

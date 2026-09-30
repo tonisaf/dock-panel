@@ -56,8 +56,13 @@ pub struct Message {
 }
 
 fn projects_dir() -> PathBuf {
-    let home = std::env::var_os("USERPROFILE").map(PathBuf::from).unwrap_or_default();
-    home.join(".lmstudio").join("apps").join("bionic").join("projects")
+    let home = std::env::var_os("USERPROFILE")
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    home.join(".lmstudio")
+        .join("apps")
+        .join("bionic")
+        .join("projects")
 }
 
 /// Ids come from the webview and go into a path: only what a UUID is made of.
@@ -69,13 +74,20 @@ fn open(project_id: &str) -> Result<Connection, String> {
     if !valid_id(project_id) {
         return Err("Неверный проект".into());
     }
-    let path = projects_dir().join(project_id).join(".internal").join("ng-sessions.sqlite");
+    let path = projects_dir()
+        .join(project_id)
+        .join(".internal")
+        .join("ng-sessions.sqlite");
     if !path.exists() {
         return Err("Проект не найден".into());
     }
-    let conn = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
+    let conn = Connection::open_with_flags(
+        &path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|e| e.to_string())?;
+    conn.busy_timeout(std::time::Duration::from_secs(2))
         .map_err(|e| e.to_string())?;
-    conn.busy_timeout(std::time::Duration::from_secs(2)).map_err(|e| e.to_string())?;
     Ok(conn)
 }
 
@@ -123,10 +135,22 @@ fn sessions_of(conn: &Connection) -> Result<Vec<Session>, String> {
         .map_err(|e| e.to_string())?;
     let mut out = Vec::new();
     for (id, name, suggested, updated_ms, unread, json, head) in rows.flatten() {
-        let model = serde_json::from_str::<Value>(&json).ok().and_then(|v| model_name(&v["modelSpecifier"]));
-        let named = name.filter(|n| !n.trim().is_empty()).or(suggested.filter(|n| !n.trim().is_empty()));
-        let title = named.or_else(|| first_user_line(conn, &head)).unwrap_or_else(|| "Без названия".into());
-        out.push(Session { id, title, updated_ms, unread, model });
+        let model = serde_json::from_str::<Value>(&json)
+            .ok()
+            .and_then(|v| model_name(&v["modelSpecifier"]));
+        let named = name
+            .filter(|n| !n.trim().is_empty())
+            .or(suggested.filter(|n| !n.trim().is_empty()));
+        let title = named
+            .or_else(|| first_user_line(conn, &head))
+            .unwrap_or_else(|| "Без названия".into());
+        out.push(Session {
+            id,
+            title,
+            updated_ms,
+            unread,
+            model,
+        });
     }
     Ok(out)
 }
@@ -134,14 +158,25 @@ fn sessions_of(conn: &Connection) -> Result<Vec<Session>, String> {
 /// A model specifier is a string or an object with a path/identifier.
 fn model_name(v: &Value) -> Option<String> {
     let s = v.as_str().map(str::to_string).or_else(|| {
-        ["indexedModelIdentifier", "path", "identifier", "modelKey", "id", "name"].iter().find_map(|k| v[*k].as_str().map(str::to_string))
+        [
+            "indexedModelIdentifier",
+            "path",
+            "identifier",
+            "modelKey",
+            "id",
+            "name",
+        ]
+        .iter()
+        .find_map(|k| v[*k].as_str().map(str::to_string))
     })?;
     Some(s.rsplit('/').next().unwrap_or(&s).to_string())
 }
 
 #[tauri::command]
 pub fn bionic_projects() -> Vec<Project> {
-    let Ok(dir) = std::fs::read_dir(projects_dir()) else { return vec![] };
+    let Ok(dir) = std::fs::read_dir(projects_dir()) else {
+        return vec![];
+    };
     let mut projects: Vec<Project> = dir
         .flatten()
         .filter_map(|entry| {
@@ -149,10 +184,15 @@ pub fn bionic_projects() -> Vec<Project> {
             if !valid_id(&id) {
                 return None;
             }
-            let meta: Value =
-                serde_json::from_str(&std::fs::read_to_string(entry.path().join("project.json")).ok()?).ok()?;
+            let meta: Value = serde_json::from_str(
+                &std::fs::read_to_string(entry.path().join("project.json")).ok()?,
+            )
+            .ok()?;
             let name = meta["name"].as_str()?.to_string();
-            let sessions = open(&id).ok().and_then(|c| sessions_of(&c).ok()).unwrap_or_default();
+            let sessions = open(&id)
+                .ok()
+                .and_then(|c| sessions_of(&c).ok())
+                .unwrap_or_default();
             (!sessions.is_empty()).then_some(Project { id, name, sessions })
         })
         .collect();
@@ -168,7 +208,11 @@ pub fn bionic_session(project_id: String, session_id: String) -> Result<Vec<Mess
     }
     let conn = open(&project_id)?;
     let head: String = conn
-        .query_row("SELECT committed_head_entry_id FROM sessions WHERE session_id = ?1", [&session_id], |r| r.get(0))
+        .query_row(
+            "SELECT committed_head_entry_id FROM sessions WHERE session_id = ?1",
+            [&session_id],
+            |r| r.get(0),
+        )
         .map_err(|_| "Чат не найден".to_string())?;
     let mut messages = entries_back(&conn, &head, MAX_ENTRIES)?;
     messages.reverse();
@@ -189,11 +233,18 @@ fn entries_back(conn: &Connection, head: &str, limit: usize) -> Result<Vec<Messa
             break;
         }
         let Ok((json, previous, redirect)) = stmt.query_row([&id], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<String>>(2)?))
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<String>>(1)?,
+                r.get::<_, Option<String>>(2)?,
+            ))
         }) else {
             break;
         };
-        if let Some(message) = serde_json::from_str::<Value>(&json).ok().and_then(|v| message_of(&v)) {
+        if let Some(message) = serde_json::from_str::<Value>(&json)
+            .ok()
+            .and_then(|v| message_of(&v))
+        {
             out.push(message);
         }
         current = previous.or(redirect);
@@ -203,7 +254,10 @@ fn entries_back(conn: &Connection, head: &str, limit: usize) -> Result<Vec<Messa
 
 fn text_block(kind: &'static str, part: &Value) -> Option<Block> {
     let text = part["text"].as_str()?.trim();
-    (!text.is_empty()).then(|| Block { kind, text: text.to_string() })
+    (!text.is_empty()).then(|| Block {
+        kind,
+        text: text.to_string(),
+    })
 }
 
 /// The shown form of one entry, or `None` for everything that is not a line of the conversation.
@@ -225,16 +279,31 @@ fn message_of(entry: &Value) -> Option<Message> {
             "reasoning" => text_block("reasoning", p),
             "toolCallRequest" => {
                 let name = p["name"].as_str().unwrap_or("tool");
-                let args = if p["parameters"].is_null() { String::new() } else { p["parameters"].to_string() };
-                Some(Block { kind: "tool", text: clip(&format!("{name} {args}")) })
+                let args = if p["parameters"].is_null() {
+                    String::new()
+                } else {
+                    p["parameters"].to_string()
+                };
+                Some(Block {
+                    kind: "tool",
+                    text: clip(&format!("{name} {args}")),
+                })
             }
             "toolCallResult" => {
                 let text = p["result"]
                     .as_array()
-                    .map(|a| a.iter().filter_map(|x| x["text"].as_str()).collect::<Vec<_>>().join("\n"))
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x["text"].as_str())
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
                     .or_else(|| p["result"].as_str().map(str::to_string))
                     .unwrap_or_default();
-                Some(Block { kind: "result", text: clip(&text) })
+                Some(Block {
+                    kind: "result",
+                    text: clip(&text),
+                })
             }
             _ => None,
         })
@@ -242,7 +311,12 @@ fn message_of(entry: &Value) -> Option<Message> {
     if blocks.is_empty() {
         return None;
     }
-    Some(Message { id: entry["id"].as_str()?.to_string(), role, ts: entry["createdTimestamp"].as_i64(), blocks })
+    Some(Message {
+        id: entry["id"].as_str()?.to_string(),
+        role,
+        ts: entry["createdTimestamp"].as_i64(),
+        blocks,
+    })
 }
 
 #[cfg(test)]
@@ -262,14 +336,24 @@ mod tests {
             "message": { "role": "user", "parts": [{ "type": "text", "text": " Привет " }] } });
         let m = message_of(&user).unwrap();
         assert_eq!((m.role.as_str(), m.ts), ("user", Some(5)));
-        assert_eq!(m.blocks, [Block { kind: "text", text: "Привет".into() }]);
+        assert_eq!(
+            m.blocks,
+            [Block {
+                kind: "text",
+                text: "Привет".into()
+            }]
+        );
 
         let hidden = json!({ "id": "b", "type": "message", "hidden": true,
             "message": { "role": "user", "parts": [{ "type": "text", "text": "<environment>" }] } });
         let naming = json!({ "id": "c", "type": "message",
             "message": { "role": "user", "noAssistantResponse": true, "parts": [{ "type": "text", "text": "x" }] } });
         let state = json!({ "id": "d", "type": "stateChange" });
-        assert!(message_of(&hidden).is_none() && message_of(&naming).is_none() && message_of(&state).is_none());
+        assert!(
+            message_of(&hidden).is_none()
+                && message_of(&naming).is_none()
+                && message_of(&state).is_none()
+        );
     }
 
     #[test]
@@ -277,7 +361,12 @@ mod tests {
         let call = json!({ "id": "e", "type": "message", "message": { "role": "assistant", "parts": [
             { "type": "reasoning", "text": "думаю" },
             { "type": "toolCallRequest", "name": "list_dir", "parameters": { "path": "C:\\x" } }] } });
-        let kinds: Vec<_> = message_of(&call).unwrap().blocks.iter().map(|b| b.kind).collect();
+        let kinds: Vec<_> = message_of(&call)
+            .unwrap()
+            .blocks
+            .iter()
+            .map(|b| b.kind)
+            .collect();
         assert_eq!(kinds, ["reasoning", "tool"]);
         let result = json!({ "id": "f", "type": "message", "message": { "role": "tool", "parts": [
             { "type": "toolCallResult", "result": [{ "type": "text", "text": "F a.log" }] }] } });

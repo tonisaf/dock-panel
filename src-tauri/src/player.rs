@@ -49,7 +49,10 @@ struct Session {
 static SESSION: Mutex<Option<Session>> = Mutex::new(None);
 
 fn now_secs() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 fn settings_path(app: &AppHandle) -> Option<PathBuf> {
@@ -92,12 +95,18 @@ fn mpv_path() -> Option<PathBuf> {
 }
 
 fn ytdlp_path() -> Option<PathBuf> {
-    let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_default();
+    let local = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_default();
     let winget = local.join("Microsoft").join("WinGet");
     let mut extra = vec![winget.join("Links")];
     // winget keeps the real exe in a per-package folder.
     if let Ok(dir) = std::fs::read_dir(winget.join("Packages")) {
-        extra.extend(dir.flatten().map(|e| e.path()).filter(|p| p.to_string_lossy().contains("yt-dlp")));
+        extra.extend(
+            dir.flatten()
+                .map(|e| e.path())
+                .filter(|p| p.to_string_lossy().contains("yt-dlp")),
+        );
     }
     find("yt-dlp.exe", &extra)
 }
@@ -115,9 +124,14 @@ fn no_window(cmd: &mut Command) -> &mut Command {
 
 /// Sends one command over mpv's IPC pipe and returns its `data`.
 fn ipc(command: Value) -> Result<Value, String> {
-    let mut pipe = std::fs::OpenOptions::new().read(true).write(true).open(PIPE).map_err(|e| e.to_string())?;
+    let mut pipe = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(PIPE)
+        .map_err(|e| e.to_string())?;
     let request = json!({ "command": command, "request_id": 1 });
-    pipe.write_all(format!("{request}\n").as_bytes()).map_err(|e| e.to_string())?;
+    pipe.write_all(format!("{request}\n").as_bytes())
+        .map_err(|e| e.to_string())?;
     let mut reader = BufReader::new(pipe);
     let mut line = String::new();
     // mpv also pushes events on the pipe; skip to our reply.
@@ -126,9 +140,15 @@ fn ipc(command: Value) -> Result<Value, String> {
         if reader.read_line(&mut line).map_err(|e| e.to_string())? == 0 {
             break;
         }
-        let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
         if v["request_id"] == 1 {
-            return if v["error"] == "success" { Ok(v["data"].clone()) } else { Err(v["error"].to_string()) };
+            return if v["error"] == "success" {
+                Ok(v["data"].clone())
+            } else {
+                Err(v["error"].to_string())
+            };
         }
     }
     Err("mpv не ответил".into())
@@ -141,7 +161,11 @@ fn alive(session: &mut Session) -> bool {
 /// The session, if mpv is still running.
 fn running(slot: &mut Option<Session>) -> Option<&mut Session> {
     let session = slot.as_mut()?;
-    if alive(session) { Some(session) } else { None }
+    if alive(session) {
+        Some(session)
+    } else {
+        None
+    }
 }
 
 /// Updates yt-dlp in the background when the last update is a day old.
@@ -177,7 +201,11 @@ pub fn player_play(
     let mut guard = SESSION.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(session) = running(&mut guard) {
         // Same window, new video.
-        let _ = ipc(json!(["set_property", "start", start.map_or("none".to_string(), |s| s.to_string())]));
+        let _ = ipc(json!([
+            "set_property",
+            "start",
+            start.map_or("none".to_string(), |s| s.to_string())
+        ]));
         ipc(json!(["loadfile", url, "replace"]))?;
         let _ = ipc(json!(["set_property", "pause", false]));
         session.video_id = id;
@@ -188,7 +216,9 @@ pub fn player_play(
         return Ok(());
     }
 
-    let geometry = load(&app).geometry.unwrap_or_else(|| DEFAULT_GEOMETRY.into());
+    let geometry = load(&app)
+        .geometry
+        .unwrap_or_else(|| DEFAULT_GEOMETRY.into());
     let mut cmd = Command::new(mpv);
     cmd.arg(&url)
         .arg("--ontop")
@@ -209,8 +239,17 @@ pub fn player_play(
     if let Some(s) = start {
         cmd.arg(format!("--start={s}"));
     }
-    let child = no_window(&mut cmd).spawn().map_err(|e| format!("Не удалось запустить mpv: {e}"))?;
-    *guard = Some(Session { child, video_id: id, title, channel, marked: false, paused: false });
+    let child = no_window(&mut cmd)
+        .spawn()
+        .map_err(|e| format!("Не удалось запустить mpv: {e}"))?;
+    *guard = Some(Session {
+        child,
+        video_id: id,
+        title,
+        channel,
+        marked: false,
+        paused: false,
+    });
     drop(guard);
 
     let app = app.clone();
@@ -226,7 +265,9 @@ fn watch(app: AppHandle) {
         std::thread::sleep(Duration::from_secs(1));
         let pid = {
             let mut guard = SESSION.lock().unwrap_or_else(|e| e.into_inner());
-            let Some(session) = guard.as_mut() else { return };
+            let Some(session) = guard.as_mut() else {
+                return;
+            };
             if !alive(session) {
                 *guard = None;
                 break;
@@ -240,10 +281,16 @@ fn watch(app: AppHandle) {
         #[cfg(not(windows))]
         let _ = pid;
 
-        let percent = ipc(json!(["get_property", "percent-pos"])).ok().and_then(|v| v.as_f64());
-        let paused = ipc(json!(["get_property", "pause"])).ok().and_then(|v| v.as_bool());
+        let percent = ipc(json!(["get_property", "percent-pos"]))
+            .ok()
+            .and_then(|v| v.as_f64());
+        let paused = ipc(json!(["get_property", "pause"]))
+            .ok()
+            .and_then(|v| v.as_bool());
         let mut guard = SESSION.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(session) = guard.as_mut() else { return };
+        let Some(session) = guard.as_mut() else {
+            return;
+        };
         if let Some(p) = paused {
             session.paused = p;
         }
@@ -266,7 +313,11 @@ fn watch(app: AppHandle) {
 pub fn now_playing() -> Option<(String, String, bool)> {
     let mut guard = SESSION.lock().unwrap_or_else(|e| e.into_inner());
     let session = running(&mut guard)?;
-    Some((session.title.clone(), session.channel.clone(), !session.paused))
+    Some((
+        session.title.clone(),
+        session.channel.clone(),
+        !session.paused,
+    ))
 }
 
 /// Play / pause from the taskbar button; false when mpv isn't running.

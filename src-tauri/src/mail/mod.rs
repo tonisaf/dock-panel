@@ -30,7 +30,10 @@ struct Saved {
 
 impl Default for Saved {
     fn default() -> Self {
-        Saved { accounts: Vec::new(), notify: true }
+        Saved {
+            accounts: Vec::new(),
+            notify: true,
+        }
     }
 }
 
@@ -43,7 +46,11 @@ static APP: OnceLock<AppHandle> = OnceLock::new();
 static UNSEEN: Mutex<Option<HashMap<String, (u32, HashSet<u32>)>>> = Mutex::new(None);
 
 fn path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join(FILE))
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join(FILE))
 }
 
 fn load(app: &AppHandle) -> Saved {
@@ -59,11 +66,19 @@ fn save(app: &AppHandle, saved: &Saved) -> Result<(), String> {
     if let Some(dir) = p.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    std::fs::write(p, serde_json::to_string_pretty(saved).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    std::fs::write(
+        p,
+        serde_json::to_string_pretty(saved).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
 }
 
 fn account(app: &AppHandle, id: &str) -> Result<Account, String> {
-    load(app).accounts.into_iter().find(|a| a.id == id).ok_or_else(|| "Ящик не найден".into())
+    load(app)
+        .accounts
+        .into_iter()
+        .find(|a| a.id == id)
+        .ok_or_else(|| "Ящик не найден".into())
 }
 
 // ---- accounts ----------------------------------------------------------------------
@@ -78,12 +93,20 @@ pub struct MailSettings {
 #[tauri::command]
 pub fn mail_settings(app: AppHandle) -> MailSettings {
     let saved = load(&app);
-    MailSettings { accounts: saved.accounts, notify: saved.notify }
+    MailSettings {
+        accounts: saved.accounts,
+        notify: saved.notify,
+    }
 }
 
 /// Checks the password by logging in, then remembers the account.
 #[tauri::command]
-pub async fn mail_add(app: AppHandle, email: String, password: String, host: Option<String>) -> Result<Account, String> {
+pub async fn mail_add(
+    app: AppHandle,
+    email: String,
+    password: String,
+    host: Option<String>,
+) -> Result<Account, String> {
     let email = email.trim().to_string();
     // App passwords are often copied with the spaces Google shows between groups.
     let password: String = password.chars().filter(|c| !c.is_whitespace()).collect();
@@ -96,7 +119,12 @@ pub async fn mail_add(app: AppHandle, email: String, password: String, host: Opt
             .map(|(h, p)| (h.to_string(), p))
             .ok_or("Для этого домена укажите IMAP-сервер")?,
     };
-    let account = Account { id: email.to_lowercase(), email, host, port };
+    let account = Account {
+        id: email.to_lowercase(),
+        email,
+        host,
+        port,
+    };
 
     let check = account.clone();
     let pw = password.clone();
@@ -178,9 +206,17 @@ pub async fn mail_list(
                 .iter()
                 .map(|(a, before)| (a, s.spawn(move || client::list_page(a, *before, unread))))
                 .collect();
-            handles.into_iter().map(|(a, h)| (a, h.join().unwrap_or_else(|_| Err("сбой".into())))).collect()
+            handles
+                .into_iter()
+                .map(|(a, h)| (a, h.join().unwrap_or_else(|_| Err("сбой".into()))))
+                .collect()
         });
-        let mut list = MailList { messages: Vec::new(), errors: Vec::new(), cursors: HashMap::new(), more: false };
+        let mut list = MailList {
+            messages: Vec::new(),
+            errors: Vec::new(),
+            cursors: HashMap::new(),
+            more: false,
+        };
         for (a, r) in results {
             match r {
                 Ok(page) => {
@@ -212,9 +248,15 @@ pub struct Unread {
 #[tauri::command]
 pub fn mail_unread() -> Unread {
     let map = UNSEEN.lock().unwrap_or_else(|e| e.into_inner());
-    let by_account: HashMap<String, usize> =
-        map.iter().flatten().map(|(id, (_, uids))| (id.clone(), uids.len())).collect();
-    Unread { total: by_account.values().sum(), by_account }
+    let by_account: HashMap<String, usize> = map
+        .iter()
+        .flatten()
+        .map(|(id, (_, uids))| (id.clone(), uids.len()))
+        .collect();
+    Unread {
+        total: by_account.values().sum(),
+        by_account,
+    }
 }
 
 fn poll(app: &AppHandle) {
@@ -227,8 +269,15 @@ fn poll(app: &AppHandle) {
     let mut fresh: Vec<Summary> = Vec::new();
 
     for account in &saved.accounts {
-        let Ok((validity, unseen)) = client::poll_account(account) else { continue };
-        let previous = UNSEEN.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).get(&account.id).cloned();
+        let Ok((validity, unseen)) = client::poll_account(account) else {
+            continue;
+        };
+        let previous = UNSEEN
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_or_insert_with(HashMap::new)
+            .get(&account.id)
+            .cloned();
         let new: Vec<u32> = match &previous {
             // The first poll after start only learns what is already there.
             None => Vec::new(),
@@ -254,7 +303,12 @@ fn poll(app: &AppHandle) {
     fresh.sort_by(|a, b| b.date.cmp(&a.date));
     if fresh.len() > TOASTS_MAX {
         let senders: Vec<&str> = fresh.iter().take(3).map(|m| m.from_name.as_str()).collect();
-        notify(app, &format!("Новых писем: {}", fresh.len()), &format!("От {}…", senders.join(", ")), None);
+        notify(
+            app,
+            &format!("Новых писем: {}", fresh.len()),
+            &format!("От {}…", senders.join(", ")),
+            None,
+        );
     } else {
         for m in fresh {
             notify(app, &m.from_name.clone(), &m.subject.clone(), Some(m));
@@ -264,7 +318,13 @@ fn poll(app: &AppHandle) {
 
 /// Unread letters across all accounts, as of the last poll.
 pub fn unread_total() -> usize {
-    UNSEEN.lock().unwrap_or_else(|e| e.into_inner()).iter().flatten().map(|(_, (_, uids))| uids.len()).sum()
+    UNSEEN
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .flatten()
+        .map(|(_, (_, uids))| uids.len())
+        .sum()
 }
 
 #[cfg(windows)]
@@ -299,21 +359,31 @@ pub fn init(app: &AppHandle) {
 /// Polls right away, e.g. when the panel opens.
 #[tauri::command]
 pub async fn mail_refresh(app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || poll(&app)).await.map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || poll(&app))
+        .await
+        .map_err(|e| e.to_string())
 }
-
 
 /// Opens a letter and marks it read.
 #[tauri::command]
 pub async fn mail_open(app: AppHandle, account: String, uid: u32) -> Result<Letter, String> {
     let account = self::account(&app, &account)?;
-    tauri::async_runtime::spawn_blocking(move || client::open_letter(&account, uid)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || client::open_letter(&account, uid))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub async fn mail_action(app: AppHandle, account: String, uid: u32, action: Action) -> Result<(), String> {
+pub async fn mail_action(
+    app: AppHandle,
+    account: String,
+    uid: u32,
+    action: Action,
+) -> Result<(), String> {
     let account = self::account(&app, &account)?;
-    tauri::async_runtime::spawn_blocking(move || client::act(&account, uid, action)).await.map_err(|e| e.to_string())??;
+    tauri::async_runtime::spawn_blocking(move || client::act(&account, uid, action))
+        .await
+        .map_err(|e| e.to_string())??;
     let _ = app.emit("mail:changed", ());
     Ok(())
 }

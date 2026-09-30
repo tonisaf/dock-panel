@@ -18,6 +18,8 @@ use serde::Serialize;
 use tauri::http::{header, Request, Response};
 use tauri::{AppHandle, UriSchemeResponder};
 
+use crate::trust;
+
 const ICON_SIZE: i32 = 64;
 /// Id prefix of pinned files and folders; the rest is an absolute path.
 const FILE_PREFIX: &str = "file:";
@@ -48,11 +50,30 @@ pub async fn list_apps() -> Result<Vec<AppEntry>, String> {
         .collect();
     apps.sort_by_cached_key(|a| a.name.to_lowercase());
     apps.dedup_by(|a, b| a.id == b.id);
+    trust::remember_ids(apps.iter().map(|a| a.id.as_str()));
     Ok(apps)
+}
+
+/// Only what Rust listed, picked or found may be launched; the webview's word is not enough.
+/// An app missing from the cache may be newly installed, so the list is read again once.
+fn check_launchable(id: &str) -> Result<(), String> {
+    if trust::is_trusted(id) {
+        return Ok(());
+    }
+    if !id.starts_with(FILE_PREFIX) {
+        if let Ok(raw) = on_sta(win::enumerate) {
+            trust::remember_ids(raw.iter().map(|(id, _)| id.as_str()));
+        }
+        if trust::is_trusted(id) {
+            return Ok(());
+        }
+    }
+    Err("Это приложение не из списка панели".into())
 }
 
 #[tauri::command]
 pub async fn launch_app(id: String) -> Result<(), String> {
+    check_launchable(&id)?;
     if on_sta(move || win::launch(&id)) {
         Ok(())
     } else {
@@ -100,10 +121,23 @@ fn recent_tracking_off() -> bool {
 
 #[tauri::command]
 pub async fn app_info(id: String) -> AppInfo {
+    if check_launchable(&id).is_err() {
+        return AppInfo {
+            exe_path: None,
+            recent: Vec::new(),
+            tracking_off: recent_tracking_off(),
+        };
+    }
     let (exe_path, recent) = on_sta(move || (win::exe_path(&id), win::recent_documents(&id, 8)));
+    for (_, path) in &recent {
+        trust::remember_path(path);
+    }
     AppInfo {
         exe_path,
-        recent: recent.into_iter().map(|(name, path)| RecentDoc { name, path }).collect(),
+        recent: recent
+            .into_iter()
+            .map(|(name, path)| RecentDoc { name, path })
+            .collect(),
         tracking_off: recent_tracking_off(),
     }
 }
@@ -111,6 +145,7 @@ pub async fn app_info(id: String) -> AppInfo {
 /// Runs the app as administrator; Windows asks for consent.
 #[tauri::command]
 pub async fn launch_app_admin(id: String) -> Result<(), String> {
+    check_launchable(&id)?;
     if on_sta(move || win::launch_as(&id, "runas", None)) {
         Ok(())
     } else {
@@ -121,6 +156,10 @@ pub async fn launch_app_admin(id: String) -> Result<(), String> {
 /// Opens one of the app's recent files in that app (or with its default app when the program file is unknown).
 #[tauri::command]
 pub async fn open_recent(id: String, path: String) -> Result<(), String> {
+    check_launchable(&id)?;
+    if !trust::is_trusted_path(&path) {
+        return Err("Этого файла нет среди недавних".into());
+    }
     let ok = on_sta(move || {
         if win::exe_path(&id).is_some() && !id.starts_with(FILE_PREFIX) {
             win::launch_as(&id, "open", Some(&path))
@@ -142,19 +181,33 @@ pub async fn pick_files(app: AppHandle, folders: bool) -> Result<Vec<String>, St
     let paths = tauri::async_runtime::spawn_blocking(move || pick_paths(&app, folders))
         .await
         .map_err(|e| e.to_string())??;
-    Ok(paths.into_iter().map(|p| format!("{FILE_PREFIX}{p}")).collect())
+    paths.iter().for_each(|p| trust::remember_path(p));
+    Ok(paths
+        .into_iter()
+        .map(|p| format!("{FILE_PREFIX}{p}"))
+        .collect())
 }
 
 /// The system open dialog over the panel (which stays open meanwhile); empty if cancelled.
 pub fn pick_paths(app: &AppHandle, folders: bool) -> Result<Vec<String>, String> {
     let owner = crate::panel::hwnd(app);
-    crate::panel::keep_open_while(app, || on_sta(move || win::pick(owner, folders))).map_err(|e| e.to_string())
+    crate::panel::keep_open_while(app, || on_sta(move || win::pick(owner, folders)))
+        .map_err(|e| e.to_string())
 }
 
 /// AppsFolder also lists uninstallers, readmes and web links next to real apps.
 fn is_launchable(id: &str, name: &str) -> bool {
-    const NOISE: [&str; 6] = ["uninstall", "удалить", "удаление", "деинсталл", "readme", "release notes"];
-    const DOC_EXT: [&str; 9] = [".url", ".chm", ".txt", ".htm", ".html", ".pdf", ".rtf", ".md", ".ini"];
+    const NOISE: [&str; 6] = [
+        "uninstall",
+        "удалить",
+        "удаление",
+        "деинсталл",
+        "readme",
+        "release notes",
+    ];
+    const DOC_EXT: [&str; 9] = [
+        ".url", ".chm", ".txt", ".htm", ".html", ".pdf", ".rtf", ".md", ".ini",
+    ];
 
     let name = name.to_lowercase();
     let id = id.to_lowercase();
@@ -229,7 +282,9 @@ fn icon_response(png: Option<Vec<u8>>) -> Response<Vec<u8>> {
 
 /// Stable across builds (unlike `DefaultHasher`), so the disk cache survives upgrades.
 fn fnv1a(s: &str) -> u64 {
-    s.bytes().fold(0xcbf29ce484222325, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3))
+    s.bytes().fold(0xcbf29ce484222325, |h, b| {
+        (h ^ b as u64).wrapping_mul(0x100000001b3)
+    })
 }
 
 /// Premultiplied BGRA (what GDI hands back) to straight RGBA, in place.
@@ -239,7 +294,13 @@ fn bgra_premul_to_rgba(px: &mut [u8]) {
     for p in px.chunks_exact_mut(4) {
         let (b, g, r) = (p[0] as u32, p[1] as u32, p[2] as u32);
         let a = if opaque { 255 } else { p[3] as u32 };
-        let un = |c: u32| if a == 0 || a == 255 { c } else { ((c * 255 + a / 2) / a).min(255) };
+        let un = |c: u32| {
+            if a == 0 || a == 255 {
+                c
+            } else {
+                ((c * 255 + a / 2) / a).min(255)
+            }
+        };
         p[0] = un(r) as u8;
         p[1] = un(g) as u8;
         p[2] = un(b) as u8;
@@ -263,27 +324,30 @@ fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
 mod win {
     use std::mem::size_of;
 
+    use windows::core::Interface;
     use windows::core::{w, Result, HSTRING, PCWSTR};
     use windows::Win32::Foundation::{ERROR_CANCELLED, HWND, SIZE};
     use windows::Win32::Graphics::Gdi::{
-        DeleteObject, GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO, BITMAPINFOHEADER,
-        BI_RGB, DIB_RGB_COLORS, HBITMAP, HGDIOBJ,
+        DeleteObject, GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO,
+        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HGDIOBJ,
+    };
+    use windows::Win32::Storage::EnhancedStorage::{
+        PKEY_AppUserModel_ID, PKEY_Link_TargetParsingPath,
     };
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_INPROC_SERVER,
         COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
     };
-    use windows::Win32::UI::Shell::{
-        BHID_EnumItems, FileOpenDialog, IEnumShellItems, IFileOpenDialog, IShellItem, IShellItemImageFactory,
-        SHCreateItemFromParsingName, ShellExecuteW, FOS_ALLOWMULTISELECT, FOS_FORCEFILESYSTEM, FOS_NODEREFERENCELINKS,
-        FOS_PICKFOLDERS, SIGDN, SIGDN_FILESYSPATH, SIGDN_NORMALDISPLAY, SIGDN_PARENTRELATIVEPARSING,
-        SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY,
-    };
-    use windows::core::Interface;
-    use windows::Win32::Storage::EnhancedStorage::{PKEY_AppUserModel_ID, PKEY_Link_TargetParsingPath};
     use windows::Win32::UI::Shell::Common::IObjectArray;
     use windows::Win32::UI::Shell::{
-        ApplicationDocumentLists, IApplicationDocumentLists, IShellItem2, SHGetKnownFolderPath, ADLT_RECENT, KNOWN_FOLDER_FLAG,
+        ApplicationDocumentLists, IApplicationDocumentLists, IShellItem2, SHGetKnownFolderPath,
+        ADLT_RECENT, KNOWN_FOLDER_FLAG,
+    };
+    use windows::Win32::UI::Shell::{
+        BHID_EnumItems, FileOpenDialog, IEnumShellItems, IFileOpenDialog, IShellItem,
+        IShellItemImageFactory, SHCreateItemFromParsingName, ShellExecuteW, FOS_ALLOWMULTISELECT,
+        FOS_FORCEFILESYSTEM, FOS_NODEREFERENCELINKS, FOS_PICKFOLDERS, SIGDN, SIGDN_FILESYSPATH,
+        SIGDN_NORMALDISPLAY, SIGDN_PARENTRELATIVEPARSING, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY,
     };
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
@@ -344,7 +408,16 @@ mod win {
             .and_then(|p| std::path::Path::new(p).parent())
             .map(|d| HSTRING::from(d.as_os_str()));
         let dir = dir.as_ref().map_or(PCWSTR::null(), |d| PCWSTR(d.as_ptr()));
-        let result = unsafe { ShellExecuteW(None, w!("open"), &target, PCWSTR::null(), dir, SW_SHOWNORMAL) };
+        let result = unsafe {
+            ShellExecuteW(
+                None,
+                w!("open"),
+                &target,
+                PCWSTR::null(),
+                dir,
+                SW_SHOWNORMAL,
+            )
+        };
         // ShellExecute reports success as a value greater than 32.
         result.0 as isize > 32
     }
@@ -353,7 +426,10 @@ mod win {
         unsafe { SHCreateItemFromParsingName(&HSTRING::from(super::shell_target(id)), None).ok() }
     }
 
-    fn string_prop(item: &IShellItem, key: &windows::Win32::Foundation::PROPERTYKEY) -> Option<String> {
+    fn string_prop(
+        item: &IShellItem,
+        key: &windows::Win32::Foundation::PROPERTYKEY,
+    ) -> Option<String> {
         unsafe {
             let item2: IShellItem2 = item.cast().ok()?;
             let p = item2.GetString(key).ok()?;
@@ -390,26 +466,36 @@ mod win {
         if id.contains('!') {
             return Some(id.to_string()); // Store apps are listed by it.
         }
-        string_prop(&item(id)?, &PKEY_AppUserModel_ID).or_else(|| (!id.contains('\\') && !id.starts_with('{')).then(|| id.to_string()))
+        string_prop(&item(id)?, &PKEY_AppUserModel_ID)
+            .or_else(|| (!id.contains('\\') && !id.starts_with('{')).then(|| id.to_string()))
     }
 
     /// Files the app opened lately, from its jump list: `(name, path)`.
     pub fn recent_documents(id: &str, max: u32) -> Vec<(String, String)> {
-        let Some(aumid) = app_user_model_id(id) else { return Vec::new() };
+        let Some(aumid) = app_user_model_id(id) else {
+            return Vec::new();
+        };
         unsafe {
-            let Ok(lists) = CoCreateInstance::<_, IApplicationDocumentLists>(&ApplicationDocumentLists, None, CLSCTX_INPROC_SERVER) else {
+            let Ok(lists) = CoCreateInstance::<_, IApplicationDocumentLists>(
+                &ApplicationDocumentLists,
+                None,
+                CLSCTX_INPROC_SERVER,
+            ) else {
                 return Vec::new();
             };
             if lists.SetAppID(&HSTRING::from(aumid)).is_err() {
                 return Vec::new();
             }
-            let Ok(array) = lists.GetList::<IObjectArray>(ADLT_RECENT, max) else { return Vec::new() };
+            let Ok(array) = lists.GetList::<IObjectArray>(ADLT_RECENT, max) else {
+                return Vec::new();
+            };
             let count = array.GetCount().unwrap_or(0);
             (0..count)
                 .filter_map(|i| {
                     let item: IShellItem = array.GetAt(i).ok()?;
                     let path = display_name(&item, SIGDN_FILESYSPATH).ok()?;
-                    let name = display_name(&item, SIGDN_NORMALDISPLAY).unwrap_or_else(|_| path.clone());
+                    let name =
+                        display_name(&item, SIGDN_NORMALDISPLAY).unwrap_or_else(|_| path.clone());
                     Some((name, path))
                 })
                 .collect()
@@ -421,7 +507,10 @@ mod win {
         let exe = exe_path(id);
         let target = HSTRING::from(exe.clone().unwrap_or_else(|| super::shell_target(id)));
         let args = file.map(|f| HSTRING::from(format!("\"{f}\"")));
-        let dir = exe.as_deref().and_then(|p| std::path::Path::new(p).parent()).map(|d| HSTRING::from(d.as_os_str()));
+        let dir = exe
+            .as_deref()
+            .and_then(|p| std::path::Path::new(p).parent())
+            .map(|d| HSTRING::from(d.as_os_str()));
         let verb = HSTRING::from(verb);
         let result = unsafe {
             ShellExecuteW(
@@ -441,7 +530,10 @@ mod win {
             let path = HSTRING::from(super::shell_target(id));
             let factory: IShellItemImageFactory = SHCreateItemFromParsingName(&path, None).ok()?;
             let hbmp = factory
-                .GetImage(SIZE { cx: size, cy: size }, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK)
+                .GetImage(
+                    SIZE { cx: size, cy: size },
+                    SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK,
+                )
                 .ok()?;
             let pixels = read_bitmap(hbmp);
             let _ = DeleteObject(HGDIOBJ(hbmp.0));
@@ -455,17 +547,29 @@ mod win {
     /// Multi-select open dialog owned by `owner`; filesystem paths of the picked items.
     pub fn pick(owner: Option<isize>, folders: bool) -> Result<Vec<String>> {
         unsafe {
-            let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
+            let dialog: IFileOpenDialog =
+                CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
             // Keep .lnk files as they are: a pinned shortcut should stay a shortcut.
-            let mut options = dialog.GetOptions()? | FOS_ALLOWMULTISELECT | FOS_FORCEFILESYSTEM | FOS_NODEREFERENCELINKS;
+            let mut options = dialog.GetOptions()?
+                | FOS_ALLOWMULTISELECT
+                | FOS_FORCEFILESYSTEM
+                | FOS_NODEREFERENCELINKS;
             if folders {
                 options |= FOS_PICKFOLDERS;
             }
             dialog.SetOptions(options)?;
-            dialog.SetTitle(if folders { w!("Закрепить папки") } else { w!("Закрепить файлы") })?;
+            dialog.SetTitle(if folders {
+                w!("Закрепить папки")
+            } else {
+                w!("Закрепить файлы")
+            })?;
 
             if let Err(e) = dialog.Show(owner.map(|h| HWND(h as _))) {
-                return if e.code() == ERROR_CANCELLED.to_hresult() { Ok(Vec::new()) } else { Err(e) };
+                return if e.code() == ERROR_CANCELLED.to_hresult() {
+                    Ok(Vec::new())
+                } else {
+                    Err(e)
+                };
             }
             let items = dialog.GetResults()?;
             let mut out = Vec::new();
@@ -481,7 +585,12 @@ mod win {
     /// Top-down 32-bit BGRA pixels of a GDI bitmap.
     unsafe fn read_bitmap(hbmp: HBITMAP) -> Option<(u32, u32, Vec<u8>)> {
         let mut bm = BITMAP::default();
-        if GetObjectW(HGDIOBJ(hbmp.0), size_of::<BITMAP>() as i32, Some(&mut bm as *mut _ as _)) == 0 {
+        if GetObjectW(
+            HGDIOBJ(hbmp.0),
+            size_of::<BITMAP>() as i32,
+            Some(&mut bm as *mut _ as _),
+        ) == 0
+        {
             return None;
         }
         let (width, height) = (bm.bmWidth, bm.bmHeight.abs());
@@ -501,7 +610,15 @@ mod win {
         let mut buf = vec![0u8; (width * height * 4) as usize];
 
         let hdc = GetDC(None);
-        let lines = GetDIBits(hdc, hbmp, 0, height as u32, Some(buf.as_mut_ptr() as _), &mut info, DIB_RGB_COLORS);
+        let lines = GetDIBits(
+            hdc,
+            hbmp,
+            0,
+            height as u32,
+            Some(buf.as_mut_ptr() as _),
+            &mut info,
+            DIB_RGB_COLORS,
+        );
         ReleaseDC(None, hdc);
 
         (lines == height).then_some((width as u32, height as u32, buf))

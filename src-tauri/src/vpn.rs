@@ -74,10 +74,16 @@ fn openvpn_profile() -> Option<OpenVpnProfile> {
 pub async fn vpn_status() -> Vec<VpnInfo> {
     tauri::async_runtime::spawn_blocking(|| {
         let adapters = win::adapters_up();
-        let up = |pred: &dyn Fn(&str, &str) -> bool| adapters.iter().any(|(name, desc)| pred(name, desc));
+        let up = |pred: &dyn Fn(&str, &str) -> bool| {
+            adapters.iter().any(|(name, desc)| pred(name, desc))
+        };
 
         let openvpn_installed = program_files(OPENVPN_EXE).exists();
-        let profile = if openvpn_installed { openvpn_profile() } else { None };
+        let profile = if openvpn_installed {
+            openvpn_profile()
+        } else {
+            None
+        };
         let amnezia_installed = program_files(AMNEZIA_EXE).exists();
 
         vec![
@@ -85,9 +91,13 @@ pub async fn vpn_status() -> Vec<VpnInfo> {
                 id: "openvpn",
                 name: "OpenVPN",
                 installed: openvpn_installed,
-                connected: up(&|_, d| d.contains("OpenVPN Connect") || d.contains("OpenVPN Data Channel Offload")),
+                connected: up(&|_, d| {
+                    d.contains("OpenVPN Connect") || d.contains("OpenVPN Data Channel Offload")
+                }),
                 // Profile names are often "user@host"; show only the user part.
-                detail: profile.as_ref().map(|p| p.name.split('@').next().unwrap_or(&p.name).to_string()),
+                detail: profile
+                    .as_ref()
+                    .map(|p| p.name.split('@').next().unwrap_or(&p.name).to_string()),
                 can_toggle: profile.is_some(),
             },
             VpnInfo {
@@ -124,8 +134,16 @@ pub async fn vpn_toggle(id: String, connect: bool) -> Result<ToggleOutcome, Stri
             } else {
                 "--disconnect-shortcut".to_string()
             };
-            Command::new(exe).arg(arg).creation_flags(CREATE_NO_WINDOW).spawn().map_err(|e| e.to_string())?;
-            Ok(if connect { ToggleOutcome::Opened } else { ToggleOutcome::Done })
+            Command::new(exe)
+                .arg(arg)
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+            Ok(if connect {
+                ToggleOutcome::Opened
+            } else {
+                ToggleOutcome::Done
+            })
         }
         "amnezia" => {
             if connect && !win::service_exists(AMNEZIA_SERVICE) {
@@ -153,7 +171,10 @@ fn open_app(id: &str) -> Result<(), String> {
     if win::focus_app_window(&exe) {
         return Ok(());
     }
-    Command::new(exe).spawn().map(|_| ()).map_err(|e| e.to_string())
+    Command::new(exe)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -162,14 +183,16 @@ pub fn vpn_open(id: String) -> Result<(), String> {
 }
 
 mod win {
-    use windows::core::{w, HSTRING, PCWSTR};
     use std::path::Path;
+    use windows::core::{w, HSTRING, PCWSTR};
 
     use windows::core::{BOOL, PWSTR};
-    use windows::Win32::Foundation::{CloseHandle, ERROR_BUFFER_OVERFLOW, ERROR_CANCELLED, HWND, LPARAM, WAIT_OBJECT_0};
+    use windows::Win32::Foundation::{
+        CloseHandle, ERROR_BUFFER_OVERFLOW, ERROR_CANCELLED, HWND, LPARAM, WAIT_OBJECT_0,
+    };
     use windows::Win32::NetworkManagement::IpHelper::{
-        GetAdaptersAddresses, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST,
-        IP_ADAPTER_ADDRESSES_LH,
+        GetAdaptersAddresses, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER,
+        GAA_FLAG_SKIP_MULTICAST, IP_ADAPTER_ADDRESSES_LH,
     };
     use windows::Win32::NetworkManagement::Ndis::IfOperStatusUp;
     use windows::Win32::Networking::WinSock::AF_UNSPEC;
@@ -177,13 +200,15 @@ mod win {
         CloseServiceHandle, OpenSCManagerW, OpenServiceW, SC_MANAGER_CONNECT, SERVICE_QUERY_STATUS,
     };
     use windows::Win32::System::Threading::{
-        GetExitCodeProcess, OpenProcess, QueryFullProcessImageNameW, WaitForSingleObject, PROCESS_NAME_WIN32,
-        PROCESS_QUERY_LIMITED_INFORMATION,
+        GetExitCodeProcess, OpenProcess, QueryFullProcessImageNameW, WaitForSingleObject,
+        PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
     };
-    use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
+    use windows::Win32::UI::Shell::{
+        ShellExecuteExW, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindow, GetWindowTextLengthW, GetWindowThreadProcessId, SetForegroundWindow, ShowWindow,
-        GW_OWNER, SW_HIDE, SW_RESTORE, SW_SHOW,
+        EnumWindows, GetWindow, GetWindowTextLengthW, GetWindowThreadProcessId,
+        SetForegroundWindow, ShowWindow, GW_OWNER, SW_HIDE, SW_RESTORE, SW_SHOW,
     };
 
     fn process_image(pid: u32) -> Option<String> {
@@ -191,7 +216,13 @@ mod win {
             let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
             let mut buf = [0u16; 1024];
             let mut len = buf.len() as u32;
-            let ok = QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len).is_ok();
+            let ok = QueryFullProcessImageNameW(
+                h,
+                PROCESS_NAME_WIN32,
+                PWSTR(buf.as_mut_ptr()),
+                &mut len,
+            )
+            .is_ok();
             let _ = CloseHandle(h);
             ok.then(|| String::from_utf16_lossy(&buf[..len as usize]))
         }
@@ -202,7 +233,9 @@ mod win {
         unsafe extern "system" fn collect(hwnd: HWND, lparam: LPARAM) -> BOOL {
             let list = &mut *(lparam.0 as *mut Vec<HWND>);
             // Titled, unowned top-level windows are app main windows (hidden ones included).
-            if GetWindow(hwnd, GW_OWNER).map_or(true, |o| o.is_invalid()) && GetWindowTextLengthW(hwnd) > 0 {
+            if GetWindow(hwnd, GW_OWNER).map_or(true, |o| o.is_invalid())
+                && GetWindowTextLengthW(hwnd) > 0
+            {
                 list.push(hwnd);
             }
             true.into()
@@ -235,7 +268,13 @@ mod win {
         for _ in 0..3 {
             buf.resize((size as usize).div_ceil(8), 0);
             let ret = unsafe {
-                GetAdaptersAddresses(AF_UNSPEC.0 as u32, flags, None, Some(buf.as_mut_ptr().cast()), &mut size)
+                GetAdaptersAddresses(
+                    AF_UNSPEC.0 as u32,
+                    flags,
+                    None,
+                    Some(buf.as_mut_ptr().cast()),
+                    &mut size,
+                )
             };
             if ret == ERROR_BUFFER_OVERFLOW.0 {
                 continue;

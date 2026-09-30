@@ -79,7 +79,9 @@ pub fn init(app: &AppHandle) {
 }
 
 fn now_secs() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
 }
 
 fn check(app: &AppHandle) {
@@ -92,15 +94,22 @@ fn check(app: &AppHandle) {
 
     let due = with_state(|s| {
         let before = s.watched.clone();
-        for (provider, enabled, snapshot) in [("Claude", settings.claude, claude), ("Codex", settings.codex, codex)] {
+        for (provider, enabled, snapshot) in [
+            ("Claude", settings.claude, claude),
+            ("Codex", settings.codex, codex),
+        ] {
             if enabled {
                 watch(&mut s.watched, provider, snapshot.as_ref(), now);
             }
         }
-        let (due, pending): (Vec<_>, Vec<_>) = s.watched.drain(..).partition(|w| w.resets_at <= now);
+        let (due, pending): (Vec<_>, Vec<_>) =
+            s.watched.drain(..).partition(|w| w.resets_at <= now);
         s.watched = pending;
         let changed = s.watched != before;
-        let due: Vec<Watched> = due.into_iter().filter(|w| now - w.resets_at <= MAX_LATE_SECS).collect();
+        let due: Vec<Watched> = due
+            .into_iter()
+            .filter(|w| now - w.resets_at <= MAX_LATE_SECS)
+            .collect();
         (due, changed)
     });
 
@@ -199,21 +208,32 @@ pub fn notify(app: &AppHandle, title: &str, body: &str) {
 /// A clicked toast only reports back while its object is alive in our
 /// process, so the last few are kept.
 #[cfg(windows)]
-static RECENT_TOASTS: std::sync::Mutex<std::collections::VecDeque<windows::UI::Notifications::ToastNotification>> =
-    std::sync::Mutex::new(std::collections::VecDeque::new());
+static RECENT_TOASTS: std::sync::Mutex<
+    std::collections::VecDeque<windows::UI::Notifications::ToastNotification>,
+> = std::sync::Mutex::new(std::collections::VecDeque::new());
 
 /// A toast that runs `on_click` when the user clicks it (while the app runs).
 #[cfg(windows)]
-pub fn notify_then(app: &AppHandle, title: &str, body: &str, on_click: Option<Box<dyn Fn() + Send + Sync>>) {
+pub fn notify_then(
+    app: &AppHandle,
+    title: &str,
+    body: &str,
+    on_click: Option<Box<dyn Fn() + Send + Sync>>,
+) {
     use tauri_winrt_notification::Toast;
     use windows::core::{w, HSTRING};
     use windows::Data::Xml::Dom::XmlDocument;
     use windows::Foundation::TypedEventHandler;
-    use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
     use windows::Win32::Media::Audio::{PlaySoundW, SND_ALIAS, SND_ASYNC};
+    use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
 
     const KEEP: usize = 20;
-    let escape = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
+    let escape = |s: &str| {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+    };
 
     // A dev build has no registered AppUserModelID; borrow PowerShell's.
     let app_id = if cfg!(debug_assertions) {
@@ -238,7 +258,8 @@ pub fn notify_then(app: &AppHandle, title: &str, body: &str, on_click: Option<Bo
                 Ok(())
             }))?;
         }
-        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id))?.Show(&toast)?;
+        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id))?
+            .Show(&toast)?;
         let mut recent = RECENT_TOASTS.lock().unwrap_or_else(|e| e.into_inner());
         recent.push_back(toast);
         while recent.len() > KEEP {

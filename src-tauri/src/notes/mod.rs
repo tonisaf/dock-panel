@@ -116,11 +116,24 @@ struct Page {
 #[serde(tag = "op", rename_all = "camelCase")]
 enum Op {
     #[serde(rename_all = "camelCase")]
-    Toggle { page_id: String, block_id: String, checked: bool },
+    Toggle {
+        page_id: String,
+        block_id: String,
+        checked: bool,
+    },
     #[serde(rename_all = "camelCase")]
-    Create { local_id: String, title: String, body: String },
+    Create {
+        local_id: String,
+        title: String,
+        body: String,
+    },
     #[serde(rename_all = "camelCase")]
-    Props { page_id: String, title: Option<String>, tags: Option<Vec<String>>, pinned: Option<bool> },
+    Props {
+        page_id: String,
+        title: Option<String>,
+        tags: Option<Vec<String>>,
+        pinned: Option<bool>,
+    },
     /// The note's text went from `before` to `after`; `done` steps of the plan
     /// are already in Notion, `ids` has the blocks created so far.
     #[serde(rename_all = "camelCase")]
@@ -159,12 +172,18 @@ struct Store {
 impl Store {
     /// The Notion id of a note made here, or the id as it is.
     fn resolve(&self, id: &str) -> String {
-        self.created.get(id).map_or_else(|| id.to_string(), |(real, _)| real.clone())
+        self.created
+            .get(id)
+            .map_or_else(|| id.to_string(), |(real, _)| real.clone())
     }
 
     fn just_created(&self) -> HashSet<String> {
         let now = now_ms();
-        self.created.values().filter(|(_, at)| now - at < JUST_CREATED_MS).map(|(id, _)| id.clone()).collect()
+        self.created
+            .values()
+            .filter(|(_, at)| now - at < JUST_CREATED_MS)
+            .map(|(id, _)| id.clone())
+            .collect()
     }
 }
 
@@ -174,7 +193,11 @@ static STORE: Mutex<Option<Store>> = Mutex::new(None);
 static SYNC: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> Option<R> {
-    STORE.lock().unwrap_or_else(|e| e.into_inner()).as_mut().map(f)
+    STORE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_mut()
+        .map(f)
 }
 
 fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
@@ -196,7 +219,9 @@ fn write_json(path: &Path, value: &impl Serialize) {
 
 impl Store {
     fn page_path(&self, id: &str) -> PathBuf {
-        self.dir.join("pages").join(format!("{}.json", safe_name(id)))
+        self.dir
+            .join("pages")
+            .join(format!("{}.json", safe_name(id)))
     }
     fn images(&self) -> PathBuf {
         self.dir.join("images")
@@ -211,7 +236,9 @@ impl Store {
 
 /// Notion ids and our file names are hex and dashes; anything else is dropped.
 fn safe_name(s: &str) -> String {
-    s.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '.').collect()
+    s.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '.')
+        .collect()
 }
 
 fn changed() {
@@ -221,7 +248,9 @@ fn changed() {
 }
 
 fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
 }
 
 /// Unix ms as Notion's ISO form ("2026-09-28T10:04:05.000Z").
@@ -239,14 +268,22 @@ fn iso(ms: u64) -> String {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + i64::from(m <= 2);
     let t = secs % 86_400;
-    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{:03}Z", t / 3600, t / 60 % 60, t % 60, ms % 1000)
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{:03}Z",
+        t / 3600,
+        t / 60 % 60,
+        t % 60,
+        ms % 1000
+    )
 }
 
 // ---- start-up ----------------------------------------------------------------------
 
 pub fn init(app: &AppHandle) {
     let _ = APP.set(app.clone());
-    let Ok(dir) = app.path().app_data_dir().map(|d| d.join("notes")) else { return };
+    let Ok(dir) = app.path().app_data_dir().map(|d| d.join("notes")) else {
+        return;
+    };
     let settings: Settings = read_json(&dir.join("settings.json")).unwrap_or_default();
     let mut index: Index = read_json(&dir.join("index.json")).unwrap_or_default();
     if settings.source.as_ref().map(|s| s.id.as_str()) != Some(index.source_id.as_str()) {
@@ -274,7 +311,12 @@ pub fn init(app: &AppHandle) {
 
 // ---- Notion ------------------------------------------------------------------------
 
-async fn api(token: &str, method: Method, path: &str, body: Option<Value>) -> Result<Value, String> {
+async fn api(
+    token: &str,
+    method: Method,
+    path: &str,
+    body: Option<Value>,
+) -> Result<Value, String> {
     tokio::time::sleep(PACE).await;
     notion::call(token, method, path, body).await
 }
@@ -299,22 +341,41 @@ fn detect(ds: &Value) -> Result<Schema, String> {
     let tags = named("multi_select", &[])
         .map(|n| (n, "multi_select"))
         .or_else(|| named("select", &[]).map(|n| (n, "select")));
-    let pinned = named("checkbox", &["pin", "закреп", "избран", "favorite", "star", "важн"]);
+    let pinned = named(
+        "checkbox",
+        &["pin", "закреп", "избран", "favorite", "star", "важн"],
+    );
     let tag_options = tags
         .as_ref()
         .and_then(|(n, t)| props[n][*t]["options"].as_array())
         .into_iter()
         .flatten()
-        .filter_map(|o| Some(Tag { name: o["name"].as_str()?.to_string(), color: o["color"].as_str().unwrap_or("default").to_string() }))
+        .filter_map(|o| {
+            Some(Tag {
+                name: o["name"].as_str()?.to_string(),
+                color: o["color"].as_str().unwrap_or("default").to_string(),
+            })
+        })
         .collect();
-    Ok(Schema { title, tags, tag_options, pinned })
+    Ok(Schema {
+        title,
+        tags,
+        tag_options,
+        pinned,
+    })
 }
 
 fn to_note(page: &Value, schema: &Schema) -> Option<Note> {
     let props = &page["properties"];
     let tags = match &schema.tags {
-        Some((name, "multi_select")) => props[name]["multi_select"].as_array().cloned().unwrap_or_default(),
-        Some((name, _)) => props[name]["select"].as_object().map(|_| vec![props[name]["select"].clone()]).unwrap_or_default(),
+        Some((name, "multi_select")) => props[name]["multi_select"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default(),
+        Some((name, _)) => props[name]["select"]
+            .as_object()
+            .map(|_| vec![props[name]["select"].clone()])
+            .unwrap_or_default(),
         None => Vec::new(),
     };
     Some(Note {
@@ -324,11 +385,25 @@ fn to_note(page: &Value, schema: &Schema) -> Option<Note> {
         icon: page["icon"]["emoji"].as_str().map(str::to_string),
         tags: tags
             .iter()
-            .filter_map(|t| Some(Tag { name: t["name"].as_str()?.to_string(), color: t["color"].as_str().unwrap_or("default").to_string() }))
+            .filter_map(|t| {
+                Some(Tag {
+                    name: t["name"].as_str()?.to_string(),
+                    color: t["color"].as_str().unwrap_or("default").to_string(),
+                })
+            })
             .collect(),
-        pinned: schema.pinned.as_ref().is_some_and(|p| props[p]["checkbox"].as_bool() == Some(true)),
-        edited: page["last_edited_time"].as_str().unwrap_or_default().to_string(),
-        created: page["created_time"].as_str().unwrap_or_default().to_string(),
+        pinned: schema
+            .pinned
+            .as_ref()
+            .is_some_and(|p| props[p]["checkbox"].as_bool() == Some(true)),
+        edited: page["last_edited_time"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        created: page["created_time"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
         preview: String::new(),
         local: false,
     })
@@ -344,7 +419,13 @@ async fn children(token: &str, id: &str, depth: usize) -> Result<Vec<Block>, Str
             path.push_str(&format!("&start_cursor={c}"));
         }
         let res = api(token, Method::GET, &path, None).await?;
-        out.extend(res["results"].as_array().into_iter().flatten().filter_map(blocks::parse));
+        out.extend(
+            res["results"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(blocks::parse),
+        );
         match res["next_cursor"].as_str() {
             Some(c) if res["has_more"].as_bool() == Some(true) => cursor = Some(c.to_string()),
             _ => break,
@@ -359,7 +440,9 @@ async fn children(token: &str, id: &str, depth: usize) -> Result<Vec<Block>, Str
 }
 
 fn fnv1a(s: &str) -> u64 {
-    s.bytes().fold(0xcbf29ce484222325, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3))
+    s.bytes().fold(0xcbf29ce484222325, |h, b| {
+        (h ^ b as u64).wrapping_mul(0x100000001b3)
+    })
 }
 
 /// The cache file an image URL maps to: its path without the (expiring) query.
@@ -391,7 +474,9 @@ async fn cache_images(blocks: &mut [Block], dir: &Path) {
             have.insert(name);
             continue;
         }
-        let Ok(res) = net::client().get(&url).send().await else { continue };
+        let Ok(res) = net::client().get(&url).send().await else {
+            continue;
+        };
         if !res.status().is_success() {
             continue;
         }
@@ -403,7 +488,12 @@ async fn cache_images(blocks: &mut [Block], dir: &Path) {
         }
     }
     blocks::each_mut(blocks, &mut |b| {
-        if let Some(name) = b.url.as_deref().map(image_name).filter(|n| have.contains(n)) {
+        if let Some(name) = b
+            .url
+            .as_deref()
+            .map(image_name)
+            .filter(|n| have.contains(n))
+        {
             b.file = Some(name);
         }
     });
@@ -420,7 +510,12 @@ fn preview_of(text: &str) -> String {
 /// Puts to-dos ticked in the panel (still in the outbox) back onto blocks just read from Notion.
 fn apply_pending(page_id: &str, blocks: &mut [Block], outbox: &[Op]) {
     for op in outbox {
-        if let Op::Toggle { page_id: p, block_id, checked } = op {
+        if let Op::Toggle {
+            page_id: p,
+            block_id,
+            checked,
+        } = op
+        {
             if p == page_id {
                 blocks::each_mut(blocks, &mut |b| {
                     if &b.id == block_id {
@@ -437,15 +532,31 @@ fn apply_pending(page_id: &str, blocks: &mut [Block], outbox: &[Op]) {
 /// Sends the outbox; stops at the first failure that looks like no connection.
 async fn flush(token: &str, source_id: &str) -> Result<(), String> {
     loop {
-        let Some(op) = with_store(|s| s.outbox.first().cloned()).flatten() else { return Ok(()) };
+        let Some(op) = with_store(|s| s.outbox.first().cloned()).flatten() else {
+            return Ok(());
+        };
         // A note created just now, with its blocks as Notion has them.
         let mut created: Option<(Note, Option<Vec<Block>>)> = None;
         let result = match &op {
-            Op::Toggle { block_id, checked, .. } => {
-                api(token, Method::PATCH, &format!("/blocks/{block_id}"), Some(json!({ "to_do": { "checked": checked } }))).await
+            Op::Toggle {
+                block_id, checked, ..
+            } => {
+                api(
+                    token,
+                    Method::PATCH,
+                    &format!("/blocks/{block_id}"),
+                    Some(json!({ "to_do": { "checked": checked } })),
+                )
+                .await
             }
             Op::Create { title, body, .. } => {
-                let ds = api(token, Method::GET, &format!("/data_sources/{source_id}"), None).await?;
+                let ds = api(
+                    token,
+                    Method::GET,
+                    &format!("/data_sources/{source_id}"),
+                    None,
+                )
+                .await?;
                 let schema = detect(&ds)?;
                 let body = json!({
                     "parent": { "type": "data_source_id", "data_source_id": source_id },
@@ -463,12 +574,26 @@ async fn flush(token: &str, source_id: &str) -> Result<(), String> {
                 }
                 page
             }
-            Op::Props { page_id, title, tags, pinned } => {
-                let ds = api(token, Method::GET, &format!("/data_sources/{source_id}"), None).await?;
+            Op::Props {
+                page_id,
+                title,
+                tags,
+                pinned,
+            } => {
+                let ds = api(
+                    token,
+                    Method::GET,
+                    &format!("/data_sources/{source_id}"),
+                    None,
+                )
+                .await?;
                 let schema = detect(&ds)?;
                 let mut props = serde_json::Map::new();
                 if let Some(t) = title {
-                    props.insert(schema.title.clone(), json!({ "title": [{ "text": { "content": t } }] }));
+                    props.insert(
+                        schema.title.clone(),
+                        json!({ "title": [{ "text": { "content": t } }] }),
+                    );
                 }
                 if let (Some(tags), Some((name, kind))) = (tags, &schema.tags) {
                     let value = if *kind == "multi_select" {
@@ -481,14 +606,22 @@ async fn flush(token: &str, source_id: &str) -> Result<(), String> {
                 if let (Some(p), Some(name)) = (pinned, &schema.pinned) {
                     props.insert(name.clone(), json!({ "checkbox": p }));
                 }
-                api(token, Method::PATCH, &format!("/pages/{page_id}"), Some(json!({ "properties": props }))).await
+                api(
+                    token,
+                    Method::PATCH,
+                    &format!("/pages/{page_id}"),
+                    Some(json!({ "properties": props })),
+                )
+                .await
             }
             Op::Edit { .. } => apply_edit(token, &op).await,
         };
         let failed = match result {
             Ok(_) => None,
             // Offline: keep it for later.
-            Err(e) if e.starts_with("Нет связи") || e.contains("подождать") => return Err(e),
+            Err(e) if e.starts_with("Нет связи") || e.contains("подождать") => {
+                return Err(e)
+            }
             // Anything else (a deleted block, say) won't get better by retrying.
             Err(e) => {
                 eprintln!("notes: dropping {op:?}: {e}");
@@ -498,7 +631,18 @@ async fn flush(token: &str, source_id: &str) -> Result<(), String> {
         with_store(|s| {
             // An edit's saved progress moves on while it is sent; it is still the same edit.
             let same = |f: &Op| match (f, &op) {
-                (Op::Edit { page_id: a, before: x, .. }, Op::Edit { page_id: b, before: y, .. }) => a == b && x == y,
+                (
+                    Op::Edit {
+                        page_id: a,
+                        before: x,
+                        ..
+                    },
+                    Op::Edit {
+                        page_id: b,
+                        before: y,
+                        ..
+                    },
+                ) => a == b && x == y,
                 (f, op) => f == op,
             };
             if s.outbox.first().is_some_and(same) {
@@ -510,9 +654,14 @@ async fn flush(token: &str, source_id: &str) -> Result<(), String> {
                     // listing may not show the page for a while yet.
                     (Some((mut note, blocks)), _) => {
                         let at = s.index.entries.iter().position(|e| &e.note.id == local_id);
-                        let text = at.map(|i| s.index.entries[i].text.clone()).unwrap_or_default();
+                        let text = at
+                            .map(|i| s.index.entries[i].text.clone())
+                            .unwrap_or_default();
                         note.preview = preview_of(&text);
-                        let entry = Entry { note: note.clone(), text };
+                        let entry = Entry {
+                            note: note.clone(),
+                            text,
+                        };
                         match at {
                             Some(i) => s.index.entries[i] = entry,
                             None => s.index.entries.insert(0, entry),
@@ -520,12 +669,20 @@ async fn flush(token: &str, source_id: &str) -> Result<(), String> {
                         let _ = std::fs::remove_file(s.page_path(local_id));
                         // Without blocks, the page is fetched when opened.
                         if let Some(blocks) = blocks {
-                            write_json(&s.page_path(&note.id), &Page { edited: note.edited.clone(), blocks });
+                            write_json(
+                                &s.page_path(&note.id),
+                                &Page {
+                                    edited: note.edited.clone(),
+                                    blocks,
+                                },
+                            );
                         }
                         s.created.insert(local_id.clone(), (note.id, now_ms()));
                     }
                     // Turned down: keep the note here, and say so.
-                    (None, Some(e)) => s.create_error = Some(format!("Notion не принял новую заметку: {e}")),
+                    (None, Some(e)) => {
+                        s.create_error = Some(format!("Notion не принял новую заметку: {e}"))
+                    }
                     // Created, but the answer wasn't a page we can read: the next sync brings it.
                     (None, None) => {
                         s.index.entries.retain(|e| &e.note.id != local_id);
@@ -542,15 +699,42 @@ async fn flush(token: &str, source_id: &str) -> Result<(), String> {
 /// Sends a text edit step by step, saving progress after each, so a dropped
 /// connection resumes where it stopped instead of inserting lines twice.
 async fn apply_edit(token: &str, op: &Op) -> Result<Value, String> {
-    let Op::Edit { page_id, before, after, done, ids } = op else { return Ok(Value::Null) };
+    let Op::Edit {
+        page_id,
+        before,
+        after,
+        done,
+        ids,
+    } = op
+    else {
+        return Ok(Value::Null);
+    };
     let steps = edit::plan(before, after);
-    let mut ids: Vec<Option<String>> = if ids.len() == after.len() { ids.clone() } else { after.iter().map(|l| l.id.clone()).collect() };
+    let mut ids: Vec<Option<String>> = if ids.len() == after.len() {
+        ids.clone()
+    } else {
+        after.iter().map(|l| l.id.clone()).collect()
+    };
     let id_of = |ids: &[Option<String>], i: usize| ids[i].clone().filter(|id| !is_local(id));
     for (n, step) in steps.iter().enumerate().skip(*done) {
         let result = match step {
-            edit::Step::Update { id, body } => api(token, Method::PATCH, &format!("/blocks/{id}"), Some(body.clone())).await,
-            edit::Step::Delete { id } => api(token, Method::DELETE, &format!("/blocks/{id}"), None).await,
-            edit::Step::Insert { parent, after_line, lines } => {
+            edit::Step::Update { id, body } => {
+                api(
+                    token,
+                    Method::PATCH,
+                    &format!("/blocks/{id}"),
+                    Some(body.clone()),
+                )
+                .await
+            }
+            edit::Step::Delete { id } => {
+                api(token, Method::DELETE, &format!("/blocks/{id}"), None).await
+            }
+            edit::Step::Insert {
+                parent,
+                after_line,
+                lines,
+            } => {
                 let parent_id = match parent {
                     Some(p) => id_of(&ids, *p).ok_or("Родительский блок ещё не создан")?,
                     None => page_id.clone(),
@@ -560,9 +744,16 @@ async fn apply_edit(token: &str, op: &Op) -> Result<Value, String> {
                     Some(id) => json!({ "type": "after_block", "after_block": { "id": id } }),
                     None => json!({ "type": "start" }),
                 };
-                let children: Vec<Value> = lines.iter().map(|&i| edit::block_body(&after[i])).collect();
+                let children: Vec<Value> =
+                    lines.iter().map(|&i| edit::block_body(&after[i])).collect();
                 let path = format!("/blocks/{parent_id}/children");
-                let mut res = api(token, Method::PATCH, &path, Some(json!({ "children": children, "position": position }))).await;
+                let mut res = api(
+                    token,
+                    Method::PATCH,
+                    &path,
+                    Some(json!({ "children": children, "position": position })),
+                )
+                .await;
                 // New lines must not get lost to a request shape Notion doesn't take: the older
                 // `after` parameter next, and at worst the end of the parent.
                 if let Err(e) = &res {
@@ -574,14 +765,23 @@ async fn apply_edit(token: &str, op: &Op) -> Result<Value, String> {
                         };
                         res = api(token, Method::PATCH, &path, Some(body.clone())).await;
                         if res.is_err() && after_id.is_some() {
-                            res = api(token, Method::PATCH, &path, Some(json!({ "children": children }))).await;
+                            res = api(
+                                token,
+                                Method::PATCH,
+                                &path,
+                                Some(json!({ "children": children })),
+                            )
+                            .await;
                         }
                     }
                 }
                 if let Ok(v) = &res {
                     // Some answers list all of the parent's children: the new ones are those not seen before.
-                    let known: HashSet<&str> =
-                        before.iter().filter_map(|l| l.id.as_deref()).chain(ids.iter().filter_map(|i| i.as_deref())).collect();
+                    let known: HashSet<&str> = before
+                        .iter()
+                        .filter_map(|l| l.id.as_deref())
+                        .chain(ids.iter().filter_map(|i| i.as_deref()))
+                        .collect();
                     let created: Vec<String> = v["results"]
                         .as_array()
                         .into_iter()
@@ -599,13 +799,21 @@ async fn apply_edit(token: &str, op: &Op) -> Result<Value, String> {
         };
         match result {
             Ok(_) => {}
-            Err(e) if e.starts_with("Нет связи") || e.contains("подождать") => return Err(e),
+            Err(e) if e.starts_with("Нет связи") || e.contains("подождать") => {
+                return Err(e)
+            }
             // A block deleted in Notion meanwhile: nothing left to change there.
             Err(e) => eprintln!("notes: edit step {step:?}: {e}"),
         }
         // Progress survives a restart or a dropped connection.
         with_store(|s| {
-            if let Some(Op::Edit { page_id: p, done, ids: saved, .. }) = s.outbox.first_mut() {
+            if let Some(Op::Edit {
+                page_id: p,
+                done,
+                ids: saved,
+                ..
+            }) = s.outbox.first_mut()
+            {
                 if p == page_id {
                     *done = n + 1;
                     *saved = ids.clone();
@@ -619,10 +827,15 @@ async fn apply_edit(token: &str, op: &Op) -> Result<Value, String> {
 
 /// Refreshes the cache from Notion. Without `force`, a recent sync is enough.
 pub async fn sync(force: bool) -> Result<(), String> {
-    let Some(source) = with_store(|s| s.settings.source.clone()).flatten() else { return Ok(()) };
-    let Ok(token) = notion::token() else { return Ok(()) };
+    let Some(source) = with_store(|s| s.settings.source.clone()).flatten() else {
+        return Ok(());
+    };
+    let Ok(token) = notion::token() else {
+        return Ok(());
+    };
     let _guard = SYNC.lock().await;
-    let fresh = with_store(|s| s.index.synced_at.is_some_and(|t| now_ms() - t < FRESH_MS)).unwrap_or(false);
+    let fresh =
+        with_store(|s| s.index.synced_at.is_some_and(|t| now_ms() - t < FRESH_MS)).unwrap_or(false);
     if fresh && !force && with_store(|s| s.outbox.is_empty()).unwrap_or(true) {
         return Ok(());
     }
@@ -631,7 +844,11 @@ pub async fn sync(force: bool) -> Result<(), String> {
     let result = sync_now(&token, &source).await;
     with_store(|s| {
         s.syncing = false;
-        s.error = result.as_ref().err().cloned().or_else(|| s.create_error.take());
+        s.error = result
+            .as_ref()
+            .err()
+            .cloned()
+            .or_else(|| s.create_error.take());
         if result.is_ok() {
             s.index.synced_at = Some(now_ms());
             s.save_index();
@@ -643,7 +860,13 @@ pub async fn sync(force: bool) -> Result<(), String> {
 
 async fn sync_now(token: &str, source: &Source) -> Result<(), String> {
     flush(token, &source.id).await?;
-    let ds = api(token, Method::GET, &format!("/data_sources/{}", source.id), None).await?;
+    let ds = api(
+        token,
+        Method::GET,
+        &format!("/data_sources/{}", source.id),
+        None,
+    )
+    .await?;
     let schema = detect(&ds)?;
     with_store(|s| {
         s.index.tag_options = schema.tag_options.clone();
@@ -658,23 +881,47 @@ async fn sync_now(token: &str, source: &Source) -> Result<(), String> {
         if let Some(c) = &cursor {
             body["start_cursor"] = json!(c);
         }
-        let res = api(token, Method::POST, &format!("/data_sources/{}/query", source.id), Some(body)).await?;
-        pages.extend(res["results"].as_array().into_iter().flatten().filter_map(|p| to_note(p, &schema)));
+        let res = api(
+            token,
+            Method::POST,
+            &format!("/data_sources/{}/query", source.id),
+            Some(body),
+        )
+        .await?;
+        pages.extend(
+            res["results"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|p| to_note(p, &schema)),
+        );
         match res["next_cursor"].as_str() {
-            Some(c) if res["has_more"].as_bool() == Some(true) && pages.len() < MAX_NOTES => cursor = Some(c.to_string()),
+            Some(c) if res["has_more"].as_bool() == Some(true) && pages.len() < MAX_NOTES => {
+                cursor = Some(c.to_string())
+            }
             _ => break,
         }
     }
     pages.truncate(MAX_NOTES);
 
     let (dir, images, old): (PathBuf, PathBuf, HashMap<String, Entry>) = with_store(|s| {
-        (s.dir.clone(), s.images(), s.index.entries.iter().map(|e| (e.note.id.clone(), e.clone())).collect())
+        (
+            s.dir.clone(),
+            s.images(),
+            s.index
+                .entries
+                .iter()
+                .map(|e| (e.note.id.clone(), e.clone()))
+                .collect(),
+        )
     })
     .ok_or("Хранилище заметок не готово")?;
 
     let mut entries = Vec::with_capacity(pages.len());
     for (i, mut note) in pages.into_iter().enumerate() {
-        let path = dir.join("pages").join(format!("{}.json", safe_name(&note.id)));
+        let path = dir
+            .join("pages")
+            .join(format!("{}.json", safe_name(&note.id)));
         let cached: Option<Page> = read_json(&path);
         let text = match (cached, old.get(&note.id)) {
             (Some(page), Some(entry)) if page.edited == note.edited => {
@@ -688,7 +935,13 @@ async fn sync_now(token: &str, source: &Source) -> Result<(), String> {
                 apply_pending(&note.id, &mut blocks, &outbox);
                 let text = blocks::plain_text(&blocks);
                 note.preview = preview_of(&text);
-                write_json(&path, &Page { edited: note.edited.clone(), blocks });
+                write_json(
+                    &path,
+                    &Page {
+                        edited: note.edited.clone(),
+                        blocks,
+                    },
+                );
                 text
             }
         };
@@ -708,11 +961,21 @@ async fn sync_now(token: &str, source: &Source) -> Result<(), String> {
 fn publish(source: &Source, synced: &[Entry], old: &HashMap<String, Entry>, done: bool) {
     let seen: HashSet<&str> = synced.iter().map(|e| e.note.id.as_str()).collect();
     with_store(|s| {
-        let mut entries: Vec<Entry> = s.index.entries.iter().filter(|e| e.note.local).cloned().collect();
+        let mut entries: Vec<Entry> = s
+            .index
+            .entries
+            .iter()
+            .filter(|e| e.note.local)
+            .cloned()
+            .collect();
         entries.extend(synced.iter().cloned());
         if !done {
             // Mid-sync: notes not reached yet stay as they were.
-            entries.extend(old.values().filter(|e| !e.note.local && !seen.contains(e.note.id.as_str())).cloned());
+            entries.extend(
+                old.values()
+                    .filter(|e| !e.note.local && !seen.contains(e.note.id.as_str()))
+                    .cloned(),
+            );
         }
         // Made here moments ago: Notion's listing may not have them yet.
         let just_created = s.just_created();
@@ -734,7 +997,10 @@ fn publish(source: &Source, synced: &[Entry], old: &HashMap<String, Entry>, done
 
 /// Removes pages and images no note uses any more.
 fn prune(dir: &Path, entries: &[Entry]) {
-    let ids: HashSet<String> = entries.iter().map(|e| format!("{}.json", safe_name(&e.note.id))).collect();
+    let ids: HashSet<String> = entries
+        .iter()
+        .map(|e| format!("{}.json", safe_name(&e.note.id)))
+        .collect();
     let mut used_images = HashSet::new();
     if let Ok(files) = std::fs::read_dir(dir.join("pages")) {
         for f in files.flatten() {
@@ -790,7 +1056,11 @@ pub fn notes_state() -> State {
     let connected = notion::token().is_ok();
     with_store(|s| {
         let mut notes: Vec<Note> = s.index.entries.iter().map(|e| e.note.clone()).collect();
-        notes.sort_by(|a, b| b.pinned.cmp(&a.pinned).then_with(|| b.edited.cmp(&a.edited)));
+        notes.sort_by(|a, b| {
+            b.pinned
+                .cmp(&a.pinned)
+                .then_with(|| b.edited.cmp(&a.edited))
+        });
         State {
             configured: connected && s.settings.source.is_some(),
             source: s.settings.source.clone(),
@@ -854,20 +1124,36 @@ pub async fn notes_page(id: String) -> Result<Vec<Block>, String> {
         return Ok(page.blocks);
     }
     let token = notion::token()?;
-    let edited = with_store(|s| s.index.entries.iter().find(|e| e.note.id == id).map(|e| e.note.edited.clone()))
-        .flatten()
-        .ok_or("Заметка не найдена")?;
+    let edited = with_store(|s| {
+        s.index
+            .entries
+            .iter()
+            .find(|e| e.note.id == id)
+            .map(|e| e.note.edited.clone())
+    })
+    .flatten()
+    .ok_or("Заметка не найдена")?;
     let mut blocks = children(&token, &id, 0).await?;
     if let Some(images) = with_store(|s| s.images()) {
         cache_images(&mut blocks, &images).await;
     }
-    write_json(&path, &Page { edited, blocks: blocks.clone() });
+    write_json(
+        &path,
+        &Page {
+            edited,
+            blocks: blocks.clone(),
+        },
+    );
     Ok(blocks)
 }
 
 /// Ticks or unticks a to-do: the cache at once, Notion when it can.
 #[tauri::command]
-pub fn notes_toggle(page_id: String, block_id: String, checked: bool) -> Result<Vec<Block>, String> {
+pub fn notes_toggle(
+    page_id: String,
+    block_id: String,
+    checked: bool,
+) -> Result<Vec<Block>, String> {
     let blocks = with_store(|s| {
         let page_id = s.resolve(&page_id);
         let path = s.page_path(&page_id);
@@ -879,9 +1165,14 @@ pub fn notes_toggle(page_id: String, block_id: String, checked: bool) -> Result<
         });
         write_json(&path, &page);
         // Ticking back and forth before a sync sends only the last state.
-        s.outbox.retain(|op| !matches!(op, Op::Toggle { block_id: b, .. } if *b == block_id));
+        s.outbox
+            .retain(|op| !matches!(op, Op::Toggle { block_id: b, .. } if *b == block_id));
         if !is_local(&page_id) && !is_local(&block_id) {
-            s.outbox.push(Op::Toggle { page_id: page_id.clone(), block_id: block_id.clone(), checked });
+            s.outbox.push(Op::Toggle {
+                page_id: page_id.clone(),
+                block_id: block_id.clone(),
+                checked,
+            });
         }
         s.save_outbox();
         Ok::<_, String>(page.blocks)
@@ -899,7 +1190,15 @@ pub fn notes_create(title: String, body: String) -> Result<Note, String> {
     if title.is_empty() && body.trim().is_empty() {
         return Err("Пустая заметка".into());
     }
-    let title = if title.is_empty() { body.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim().to_string() } else { title };
+    let title = if title.is_empty() {
+        body.lines()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    } else {
+        title
+    };
     let now = now_ms();
     let local_id = format!("local-{now}");
     let blocks = blocks::local_blocks(&body, &local_id);
@@ -920,9 +1219,25 @@ pub fn notes_create(title: String, body: String) -> Result<Note, String> {
         if s.settings.source.is_none() {
             return Err("Сначала выберите базу заметок в настройках Notion".to_string());
         }
-        write_json(&s.page_path(&local_id), &Page { edited: note.edited.clone(), blocks });
-        s.index.entries.insert(0, Entry { note: note.clone(), text });
-        s.outbox.push(Op::Create { local_id, title, body });
+        write_json(
+            &s.page_path(&local_id),
+            &Page {
+                edited: note.edited.clone(),
+                blocks,
+            },
+        );
+        s.index.entries.insert(
+            0,
+            Entry {
+                note: note.clone(),
+                text,
+            },
+        );
+        s.outbox.push(Op::Create {
+            local_id,
+            title,
+            body,
+        });
         s.save_index();
         s.save_outbox();
         Ok(())
@@ -936,7 +1251,9 @@ pub fn notes_create(title: String, body: String) -> Result<Note, String> {
 /// The note's content as editable text (see `edit`).
 #[tauri::command]
 pub fn notes_text(id: String) -> Result<String, String> {
-    let page: Page = with_store(|s| read_json(&s.page_path(&s.resolve(&id)))).flatten().ok_or("Заметки нет в кэше")?;
+    let page: Page = with_store(|s| read_json(&s.page_path(&s.resolve(&id))))
+        .flatten()
+        .ok_or("Заметки нет в кэше")?;
     Ok(edit::to_text(&edit::to_lines(&page.blocks)))
 }
 
@@ -967,12 +1284,20 @@ pub fn notes_edit(id: String, text: String) -> Result<Vec<Block>, String> {
             }
             page.blocks = blocks::local_blocks(&text, &id);
         } else {
-            let pending = s.outbox.iter().position(|op| matches!(op, Op::Edit { page_id, .. } if *page_id == id));
+            let pending = s
+                .outbox
+                .iter()
+                .position(|op| matches!(op, Op::Edit { page_id, .. } if *page_id == id));
             let before = match pending {
                 // Still unsent: fold this edit into it, diffing from what Notion has.
                 Some(i) => match &s.outbox[i] {
-                    Op::Edit { done: 0, before, .. } => before.clone(),
-                    _ => return Err("Предыдущая правка этой заметки ещё отправляется — попробуйте через минуту".to_string()),
+                    Op::Edit {
+                        done: 0, before, ..
+                    } => before.clone(),
+                    _ => return Err(
+                        "Предыдущая правка этой заметки ещё отправляется — попробуйте через минуту"
+                            .to_string(),
+                    ),
                 },
                 None => edit::to_lines(&page.blocks),
             };
@@ -983,7 +1308,13 @@ pub fn notes_edit(id: String, text: String) -> Result<Vec<Block>, String> {
             // Lines already shown under local ids keep them in the cache.
             edit::match_ids(&current, &mut shown);
             page.blocks = edit::rebuild(&page.blocks, &shown, &format!("local-edit-{}", now_ms()));
-            let op = Op::Edit { page_id: id.clone(), before, after, done: 0, ids: Vec::new() };
+            let op = Op::Edit {
+                page_id: id.clone(),
+                before,
+                after,
+                done: 0,
+                ids: Vec::new(),
+            };
             match pending {
                 Some(i) => s.outbox[i] = op,
                 None => s.outbox.push(op),
@@ -1006,12 +1337,23 @@ pub fn notes_edit(id: String, text: String) -> Result<Vec<Block>, String> {
 
 /// Title, tags and pin; any left out stay as they are.
 #[tauri::command]
-pub fn notes_set_props(id: String, title: Option<String>, tags: Option<Vec<String>>, pinned: Option<bool>) -> Result<Note, String> {
+pub fn notes_set_props(
+    id: String,
+    title: Option<String>,
+    tags: Option<Vec<String>>,
+    pinned: Option<bool>,
+) -> Result<Note, String> {
     let note = with_store(|s| {
         let id = s.resolve(&id);
         if is_local(&id) {
             for op in &mut s.outbox {
-                if let (Op::Create { local_id, title: t, .. }, Some(new)) = (&mut *op, &title) {
+                if let (
+                    Op::Create {
+                        local_id, title: t, ..
+                    },
+                    Some(new),
+                ) = (&mut *op, &title)
+                {
                     if *local_id == id {
                         *t = new.clone();
                     }
@@ -1019,7 +1361,12 @@ pub fn notes_set_props(id: String, title: Option<String>, tags: Option<Vec<Strin
             }
         } else {
             let merged = s.outbox.iter_mut().find_map(|op| match op {
-                Op::Props { page_id, title: t, tags: g, pinned: p } if *page_id == id => {
+                Op::Props {
+                    page_id,
+                    title: t,
+                    tags: g,
+                    pinned: p,
+                } if *page_id == id => {
                     if title.is_some() {
                         *t = title.clone();
                     }
@@ -1034,7 +1381,12 @@ pub fn notes_set_props(id: String, title: Option<String>, tags: Option<Vec<Strin
                 _ => None,
             });
             if merged.is_none() {
-                s.outbox.push(Op::Props { page_id: id.clone(), title: title.clone(), tags: tags.clone(), pinned });
+                s.outbox.push(Op::Props {
+                    page_id: id.clone(),
+                    title: title.clone(),
+                    tags: tags.clone(),
+                    pinned,
+                });
             }
         }
         s.save_outbox();
@@ -1046,14 +1398,28 @@ pub fn notes_set_props(id: String, title: Option<String>, tags: Option<Vec<Strin
             if let Some(tags) = &tags {
                 e.note.tags = tags
                     .iter()
-                    .map(|t| options.iter().find(|o| &o.name == t).cloned().unwrap_or(Tag { name: t.clone(), color: "default".into() }))
+                    .map(|t| {
+                        options
+                            .iter()
+                            .find(|o| &o.name == t)
+                            .cloned()
+                            .unwrap_or(Tag {
+                                name: t.clone(),
+                                color: "default".into(),
+                            })
+                    })
                     .collect();
             }
             if let Some(p) = pinned {
                 e.note.pinned = p;
             }
         });
-        s.index.entries.iter().find(|e| e.note.id == id).map(|e| e.note.clone()).ok_or("Заметка не найдена".to_string())
+        s.index
+            .entries
+            .iter()
+            .find(|e| e.note.id == id)
+            .map(|e| e.note.clone())
+            .ok_or("Заметка не найдена".to_string())
     })
     .ok_or("Хранилище заметок не готово")??;
     changed();
@@ -1072,7 +1438,11 @@ pub struct Hit {
 /// Notes whose title or text has every word of `query`; title matches first.
 #[tauri::command]
 pub fn notes_search(query: String, limit: usize) -> Vec<Hit> {
-    let words: Vec<String> = query.to_lowercase().split_whitespace().map(str::to_string).collect();
+    let words: Vec<String> = query
+        .to_lowercase()
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
     if words.is_empty() {
         return Vec::new();
     }
@@ -1091,19 +1461,34 @@ fn search(entries: &[Entry], words: &[String], limit: usize) -> Vec<Hit> {
                 .then(|| (words.iter().all(|w| title.contains(w.as_str())), e))
         })
         .collect();
-    hits.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.note.edited.cmp(&a.1.note.edited)));
+    hits.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| b.1.note.edited.cmp(&a.1.note.edited))
+    });
     hits.into_iter()
         .take(limit.max(1))
-        .map(|(_, e)| Hit { id: e.note.id.clone(), title: e.note.title.clone(), icon: e.note.icon.clone(), snippet: snippet(&e.text, &words[0]) })
+        .map(|(_, e)| Hit {
+            id: e.note.id.clone(),
+            title: e.note.title.clone(),
+            icon: e.note.icon.clone(),
+            snippet: snippet(&e.text, &words[0]),
+        })
         .collect()
 }
 
 /// The line of `text` where `word` first appears, trimmed around it.
 fn snippet(text: &str, word: &str) -> String {
-    let line = text.lines().find(|l| l.to_lowercase().contains(word)).or_else(|| text.lines().next()).unwrap_or("");
+    let line = text
+        .lines()
+        .find(|l| l.to_lowercase().contains(word))
+        .or_else(|| text.lines().next())
+        .unwrap_or("");
     let chars: Vec<char> = line.chars().collect();
     let lower: Vec<char> = line.to_lowercase().chars().collect();
-    let at = lower.windows(word.chars().count().max(1)).position(|w| w.iter().copied().eq(word.chars())).unwrap_or(0);
+    let at = lower
+        .windows(word.chars().count().max(1))
+        .position(|w| w.iter().copied().eq(word.chars()))
+        .unwrap_or(0);
     let start = at.saturating_sub(30);
     let end = (at + 90).min(chars.len());
     let mut out: String = chars[start..end].iter().collect();
@@ -1120,7 +1505,9 @@ fn snippet(text: &str, word: &str) -> String {
 pub fn image_response(request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
     let name = safe_name(request.uri().path().trim_start_matches('/'));
     let path = with_store(|s| s.images().join(&name));
-    let bytes = path.filter(|_| !name.is_empty()).and_then(|p| std::fs::read(p).ok());
+    let bytes = path
+        .filter(|_| !name.is_empty())
+        .and_then(|p| std::fs::read(p).ok());
     let mime = match name.rsplit('.').next() {
         Some("png") => "image/png",
         Some("jpg" | "jpeg") => "image/jpeg",
@@ -1131,7 +1518,11 @@ pub fn image_response(request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
     };
     let builder = Response::builder().header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
     match bytes {
-        Some(b) => builder.status(200).header(header::CONTENT_TYPE, mime).header(header::CACHE_CONTROL, "max-age=604800").body(b),
+        Some(b) => builder
+            .status(200)
+            .header(header::CONTENT_TYPE, mime)
+            .header(header::CACHE_CONTROL, "max-age=604800")
+            .body(b),
         None => builder.status(404).body(Vec::new()),
     }
     .expect("static response parts are valid")
@@ -1168,7 +1559,10 @@ mod tests {
         ];
         let words = vec!["покупк".to_string()];
         let hits = search(&entries, &words, 10);
-        assert_eq!(hits.iter().map(|h| h.id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+        assert_eq!(
+            hits.iter().map(|h| h.id.as_str()).collect::<Vec<_>>(),
+            ["a", "b"]
+        );
         assert_eq!(hits[1].snippet, "виджет для покупки билетов");
         assert!(search(&entries, &["покупк".into(), "хлеб".into()], 10).len() == 1);
     }

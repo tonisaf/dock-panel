@@ -54,16 +54,34 @@ pub struct SpeakerState {
 /// Cast devices announcing themselves within `wait`, keyed by their Cast id.
 pub fn discover(wait: Duration) -> HashMap<String, Known> {
     let mut found = HashMap::new();
-    let Ok(daemon) = mdns_sd::ServiceDaemon::new() else { return found };
-    let Ok(events) = daemon.browse("_googlecast._tcp.local.") else { return found };
+    let Ok(daemon) = mdns_sd::ServiceDaemon::new() else {
+        return found;
+    };
+    let Ok(events) = daemon.browse("_googlecast._tcp.local.") else {
+        return found;
+    };
     let deadline = Instant::now() + wait;
     while let Some(left) = deadline.checked_duration_since(Instant::now()) {
-        let Ok(event) = events.recv_timeout(left) else { break };
+        let Ok(event) = events.recv_timeout(left) else {
+            break;
+        };
         if let mdns_sd::ServiceEvent::ServiceResolved(info) = event {
-            let Some(ip) = info.get_addresses_v4().into_iter().next() else { continue };
+            let Some(ip) = info.get_addresses_v4().into_iter().next() else {
+                continue;
+            };
             let txt = |k: &str| info.get_property_val_str(k).unwrap_or_default().to_string();
-            let id = Some(txt("id")).filter(|s| !s.is_empty()).unwrap_or_else(|| info.get_fullname().to_string());
-            found.insert(id, Known { ip, port: info.get_port(), name: txt("fn"), model: txt("md") });
+            let id = Some(txt("id"))
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| info.get_fullname().to_string());
+            found.insert(
+                id,
+                Known {
+                    ip,
+                    port: info.get_port(),
+                    name: txt("fn"),
+                    model: txt("md"),
+                },
+            );
         }
     }
     let _ = daemon.shutdown();
@@ -149,23 +167,29 @@ struct Session {
 
 impl Session {
     fn open(device: &Known) -> Result<Self, String> {
-        let tcp = TcpStream::connect_timeout(&SocketAddr::from((device.ip, device.port)), IO_TIMEOUT)
-            .map_err(|e| format!("колонка не отвечает: {e}"))?;
-        tcp.set_read_timeout(Some(IO_TIMEOUT)).map_err(|e| e.to_string())?;
+        let tcp =
+            TcpStream::connect_timeout(&SocketAddr::from((device.ip, device.port)), IO_TIMEOUT)
+                .map_err(|e| format!("колонка не отвечает: {e}"))?;
+        tcp.set_read_timeout(Some(IO_TIMEOUT))
+            .map_err(|e| e.to_string())?;
         // Cast devices present a self-signed certificate.
         let connector = TlsConnector::builder()
             .danger_accept_invalid_certs(true)
             .danger_accept_invalid_hostnames(true)
             .build()
             .map_err(|e| e.to_string())?;
-        let tls = connector.connect(&device.ip.to_string(), tcp).map_err(|e| e.to_string())?;
+        let tls = connector
+            .connect(&device.ip.to_string(), tcp)
+            .map_err(|e| e.to_string())?;
         let mut session = Session { tls, next_id: 1 };
         session.send(RECEIVER, NS_CONNECTION, &json!({ "type": "CONNECT" }))?;
         Ok(session)
     }
 
     fn send(&mut self, dest: &str, namespace: &str, payload: &Value) -> Result<(), String> {
-        self.tls.write_all(&encode(dest, namespace, payload)).map_err(|e| e.to_string())
+        self.tls
+            .write_all(&encode(dest, namespace, payload))
+            .map_err(|e| e.to_string())
     }
 
     fn read(&mut self) -> Result<(String, Value), String> {
@@ -177,7 +201,12 @@ impl Session {
     }
 
     /// Sends a request and waits for the reply carrying the same `requestId`.
-    fn request(&mut self, dest: &str, namespace: &str, mut payload: Value) -> Result<Value, String> {
+    fn request(
+        &mut self,
+        dest: &str,
+        namespace: &str,
+        mut payload: Value,
+    ) -> Result<Value, String> {
         let id = self.next_id;
         self.next_id += 1;
         payload["requestId"] = json!(id);
@@ -213,12 +242,21 @@ fn status(s: &mut Session) -> Result<(SpeakerState, Option<MediaApp>), String> {
         .into_iter()
         .flatten()
         .find(|a| a["isIdleScreen"] != true);
-    let Some(app) = app else { return Ok((state, None)) };
+    let Some(app) = app else {
+        return Ok((state, None));
+    };
     state.app = app["displayName"].as_str().map(str::to_string);
 
-    let speaks_media = app["namespaces"].as_array().into_iter().flatten().any(|n| n["name"] == NS_MEDIA);
+    let speaks_media = app["namespaces"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|n| n["name"] == NS_MEDIA);
     let Some(transport) = app["transportId"].as_str().filter(|_| speaks_media) else {
-        state.title = app["statusText"].as_str().filter(|t| !t.is_empty()).map(str::to_string);
+        state.title = app["statusText"]
+            .as_str()
+            .filter(|t| !t.is_empty())
+            .map(str::to_string);
         return Ok((state, None));
     };
     s.send(transport, NS_CONNECTION, &json!({ "type": "CONNECT" }))?;
@@ -227,7 +265,10 @@ fn status(s: &mut Session) -> Result<(SpeakerState, Option<MediaApp>), String> {
     if let Some(m) = &session {
         let meta = &m["media"]["metadata"];
         state.title = meta["title"].as_str().map(str::to_string);
-        state.artist = meta["artist"].as_str().or(meta["albumArtist"].as_str()).map(str::to_string);
+        state.artist = meta["artist"]
+            .as_str()
+            .or(meta["albumArtist"].as_str())
+            .map(str::to_string);
         state.image = meta["images"][0]["url"].as_str().map(str::to_string);
         state.player_state = m["playerState"].as_str().map(str::to_string);
         let commands = m["supportedMediaCommands"].as_u64().unwrap_or(0);
@@ -235,7 +276,14 @@ fn status(s: &mut Session) -> Result<(SpeakerState, Option<MediaApp>), String> {
         state.can_prev = commands & CMD_QUEUE_PREV != 0;
     }
     let name = state.app.clone().unwrap_or_default();
-    Ok((state, Some(MediaApp { name, transport: transport.to_string(), session })))
+    Ok((
+        state,
+        Some(MediaApp {
+            name,
+            transport: transport.to_string(),
+            session,
+        }),
+    ))
 }
 
 pub fn state(device: &Known) -> Result<SpeakerState, String> {
@@ -257,23 +305,39 @@ pub fn control(device: &Known, control: &Control) -> Result<(), String> {
     let mut s = Session::open(device)?;
     match control {
         Control::Volume { level } => {
-            s.request(RECEIVER, NS_RECEIVER, json!({ "type": "SET_VOLUME", "volume": { "level": level.clamp(0.0, 1.0) } }))?;
+            s.request(
+                RECEIVER,
+                NS_RECEIVER,
+                json!({ "type": "SET_VOLUME", "volume": { "level": level.clamp(0.0, 1.0) } }),
+            )?;
         }
         Control::Mute { muted } => {
-            s.request(RECEIVER, NS_RECEIVER, json!({ "type": "SET_VOLUME", "volume": { "muted": muted } }))?;
+            s.request(
+                RECEIVER,
+                NS_RECEIVER,
+                json!({ "type": "SET_VOLUME", "volume": { "muted": muted } }),
+            )?;
         }
         Control::Play | Control::Pause | Control::Next | Control::Prev => {
             let (_, app) = status(&mut s)?;
             let app = app.ok_or("на колонке ничего не играет")?;
-            let session_id = app.session.as_ref().and_then(|m| m["mediaSessionId"].as_u64());
-            let session_id = session_id.ok_or_else(|| format!("{} не даёт управлять воспроизведением", app.name))?;
+            let session_id = app
+                .session
+                .as_ref()
+                .and_then(|m| m["mediaSessionId"].as_u64());
+            let session_id = session_id
+                .ok_or_else(|| format!("{} не даёт управлять воспроизведением", app.name))?;
             let kind = match control {
                 Control::Play => "PLAY",
                 Control::Pause => "PAUSE",
                 Control::Next => "QUEUE_NEXT",
                 _ => "QUEUE_PREV",
             };
-            s.request(&app.transport, NS_MEDIA, json!({ "type": kind, "mediaSessionId": session_id }))?;
+            s.request(
+                &app.transport,
+                NS_MEDIA,
+                json!({ "type": kind, "mediaSessionId": session_id }),
+            )?;
         }
     }
     Ok(())
@@ -285,7 +349,11 @@ mod tests {
 
     #[test]
     fn message_round_trip() {
-        let framed = encode("receiver-0", NS_RECEIVER, &json!({ "type": "GET_STATUS", "requestId": 7 }));
+        let framed = encode(
+            "receiver-0",
+            NS_RECEIVER,
+            &json!({ "type": "GET_STATUS", "requestId": 7 }),
+        );
         let len = u32::from_be_bytes(framed[..4].try_into().unwrap()) as usize;
         assert_eq!(len, framed.len() - 4);
         let (ns, payload) = decode(&framed[4..]).unwrap();

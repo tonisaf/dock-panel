@@ -36,14 +36,24 @@ impl Line {
 }
 
 fn plain(spans: &[Span]) -> String {
-    spans.iter().map(|s| s.text.as_str()).collect::<String>().replace('\n', &SOFT_BREAK.to_string())
+    spans
+        .iter()
+        .map(|s| s.text.as_str())
+        .collect::<String>()
+        .replace('\n', &SOFT_BREAK.to_string())
 }
 
 /// What a block the text can't express shows as.
 fn token(b: &Block) -> String {
     let what = match b.kind.as_str() {
         "image" => "картинка".to_string(),
-        "code" => format!("код{}", b.note.as_deref().map(|l| format!(": {l}")).unwrap_or_default()),
+        "code" => format!(
+            "код{}",
+            b.note
+                .as_deref()
+                .map(|l| format!(": {l}"))
+                .unwrap_or_default()
+        ),
         "bookmark" => "ссылка".into(),
         "equation" => "формула".into(),
         "child_page" => format!("страница: {}", plain(&b.text)),
@@ -53,7 +63,16 @@ fn token(b: &Block) -> String {
 }
 
 fn can_nest(kind: &str) -> bool {
-    matches!(kind, "paragraph" | "bulleted_list_item" | "numbered_list_item" | "to_do" | "toggle" | "quote" | "callout")
+    matches!(
+        kind,
+        "paragraph"
+            | "bulleted_list_item"
+            | "numbered_list_item"
+            | "to_do"
+            | "toggle"
+            | "quote"
+            | "callout"
+    )
 }
 
 const TEXT_KINDS: [&str; 10] = [
@@ -78,7 +97,13 @@ pub fn to_lines(blocks: &[Block]) -> Vec<Line> {
             } else {
                 ("locked".to_string(), token(b))
             };
-            out.push(Line { depth, kind, text, checked: b.checked.unwrap_or(false), id: Some(b.id.clone()) });
+            out.push(Line {
+                depth,
+                kind,
+                text,
+                checked: b.checked.unwrap_or(false),
+                id: Some(b.id.clone()),
+            });
             if !b.children.is_empty() && can_nest(&b.kind) {
                 walk(&b.children, depth + 1, out);
             }
@@ -157,7 +182,13 @@ pub fn from_text(text: &str) -> Vec<Line> {
             Some(prev) => wanted.min(prev.depth),
             None => 0,
         };
-        out.push(Line { depth, kind: kind.into(), text: rest.trim_end().into(), checked, id: None });
+        out.push(Line {
+            depth,
+            kind: kind.into(),
+            text: rest.trim_end().into(),
+            checked,
+            id: None,
+        });
     }
     out
 }
@@ -165,7 +196,9 @@ pub fn from_text(text: &str) -> Vec<Line> {
 /// "12. text" -> "text".
 fn numbered(t: &str) -> Option<&str> {
     let digits = t.chars().take_while(|c| c.is_ascii_digit()).count();
-    (digits > 0).then(|| t[digits..].strip_prefix(". ")).flatten()
+    (digits > 0)
+        .then(|| t[digits..].strip_prefix(". "))
+        .flatten()
 }
 
 /// Gives the edited lines the ids of the lines they keep or change (same
@@ -176,7 +209,11 @@ pub fn match_ids(before: &[Line], after: &mut [Line]) {
     let mut lcs = vec![vec![0u32; m + 1]; n + 1];
     for i in (0..n).rev() {
         for j in (0..m).rev() {
-            lcs[i][j] = if before[i].key() == after[j].key() { lcs[i + 1][j + 1] + 1 } else { lcs[i + 1][j].max(lcs[i][j + 1]) };
+            lcs[i][j] = if before[i].key() == after[j].key() {
+                lcs[i + 1][j + 1] + 1
+            } else {
+                lcs[i + 1][j].max(lcs[i][j + 1])
+            };
         }
     }
     let (mut i, mut j) = (0, 0);
@@ -200,10 +237,13 @@ pub fn match_ids(before: &[Line], after: &mut [Line]) {
     bounds.extend(kept.iter().map(|&(i, j)| (i + 1, j + 1)));
     let ends: Vec<(usize, usize)> = kept.iter().copied().chain([(n, m)]).collect();
     for (&(bi, bj), &(ei, ej)) in bounds.iter().zip(&ends) {
-        let mut olds = (bi..ei).filter(|&i| before[i].kind != "locked" && before[i].kind != "divider").peekable();
+        let mut olds = (bi..ei)
+            .filter(|&i| before[i].kind != "locked" && before[i].kind != "divider")
+            .peekable();
         for line in &mut after[bj..ej] {
             let Some(&i) = olds.peek() else { break };
-            if before[i].depth == line.depth && before[i].kind == line.kind && line.kind != "locked" {
+            if before[i].depth == line.depth && before[i].kind == line.kind && line.kind != "locked"
+            {
                 line.id = before[i].id.clone();
                 olds.next();
             }
@@ -214,11 +254,20 @@ pub fn match_ids(before: &[Line], after: &mut [Line]) {
 /// One step of applying an edit to Notion.
 #[derive(Debug, PartialEq)]
 pub enum Step {
-    Update { id: String, body: Value },
-    Delete { id: String },
+    Update {
+        id: String,
+        body: Value,
+    },
+    Delete {
+        id: String,
+    },
     /// New sibling lines (by index into `after`), under `parent` (None: the page),
     /// placed after `after_line` (an index whose id is known by then) or first.
-    Insert { parent: Option<usize>, after_line: Option<usize>, lines: Vec<usize> },
+    Insert {
+        parent: Option<usize>,
+        after_line: Option<usize>,
+        lines: Vec<usize>,
+    },
 }
 
 fn rich(text: &str) -> Value {
@@ -237,7 +286,9 @@ fn rich(text: &str) -> Value {
 pub fn block_body(l: &Line) -> Value {
     match l.kind.as_str() {
         "divider" => json!({ "type": "divider", "divider": {} }),
-        "to_do" => json!({ "type": "to_do", "to_do": { "rich_text": rich(&l.text), "checked": l.checked } }),
+        "to_do" => {
+            json!({ "type": "to_do", "to_do": { "rich_text": rich(&l.text), "checked": l.checked } })
+        }
         // A token typed by hand is just text.
         "locked" => json!({ "type": "paragraph", "paragraph": { "rich_text": rich(&l.text) } }),
         k => json!({ "type": k, k: { "rich_text": rich(&l.text) } }),
@@ -247,15 +298,21 @@ pub fn block_body(l: &Line) -> Value {
 /// The steps that turn `before` into `after` (whose ids `match_ids` has set).
 pub fn plan(before: &[Line], after: &[Line]) -> Vec<Step> {
     let mut steps = Vec::new();
-    let kept: std::collections::HashSet<&str> = after.iter().filter_map(|l| l.id.as_deref()).collect();
+    let kept: std::collections::HashSet<&str> =
+        after.iter().filter_map(|l| l.id.as_deref()).collect();
 
     for l in after {
         let Some(id) = &l.id else { continue };
-        let Some(old) = before.iter().find(|b| b.id.as_deref() == Some(id.as_str())) else { continue };
+        let Some(old) = before.iter().find(|b| b.id.as_deref() == Some(id.as_str())) else {
+            continue;
+        };
         if old.key() != l.key() && l.kind != "locked" && l.kind != "divider" {
             let mut body = block_body(l);
             let kind = l.kind.clone();
-            steps.push(Step::Update { id: id.clone(), body: json!({ kind.clone(): body[&kind].take() }) });
+            steps.push(Step::Update {
+                id: id.clone(),
+                body: json!({ kind.clone(): body[&kind].take() }),
+            });
         }
     }
     for b in before {
@@ -288,7 +345,11 @@ pub fn plan(before: &[Line], after: &[Line]) -> Vec<Step> {
             lines.push(k);
             k += 1;
         }
-        steps.push(Step::Insert { parent, after_line: prev_sibling(j), lines });
+        steps.push(Step::Insert {
+            parent,
+            after_line: prev_sibling(j),
+            lines,
+        });
         j = k;
     }
     steps
@@ -319,7 +380,10 @@ pub fn rebuild(old: &[Block], after: &[Line], local_prefix: &str) -> Vec<Block> 
                 }
                 Some(mut b) => {
                     if plain(&b.text) != l.text {
-                        b.text = vec![Span { text: l.text.replace(SOFT_BREAK, "\n"), ..Default::default() }];
+                        b.text = vec![Span {
+                            text: l.text.replace(SOFT_BREAK, "\n"),
+                            ..Default::default()
+                        }];
                     }
                     b.checked = (b.kind == "to_do").then_some(l.checked);
                     b.children.clear();
@@ -360,7 +424,8 @@ mod tests {
     use super::*;
 
     fn block(id: &str, kind: &str, text: &str, children: Vec<Block>) -> Block {
-        let mut v = json!({ "id": id, "type": kind, kind: { "rich_text": [{ "plain_text": text }] } });
+        let mut v =
+            json!({ "id": id, "type": kind, kind: { "rich_text": [{ "plain_text": text }] } });
         if kind == "to_do" {
             v[kind]["checked"] = json!(false);
         }
@@ -373,7 +438,12 @@ mod tests {
         vec![
             block("h", "heading_2", "План", vec![]),
             block("p", "paragraph", "Купить:", vec![]),
-            block("t1", "to_do", "хлеб", vec![block("n", "paragraph", "свежий", vec![])]),
+            block(
+                "t1",
+                "to_do",
+                "хлеб",
+                vec![block("n", "paragraph", "свежий", vec![])],
+            ),
             block("t2", "to_do", "молоко", vec![]),
             block("img", "image", "", vec![]),
         ]
@@ -383,7 +453,10 @@ mod tests {
     fn round_trips_through_text() {
         let lines = to_lines(&sample());
         let text = to_text(&lines);
-        assert_eq!(text, "## План\nКупить:\n[ ] хлеб\n  свежий\n[ ] молоко\n⟦картинка⟧");
+        assert_eq!(
+            text,
+            "## План\nКупить:\n[ ] хлеб\n  свежий\n[ ] молоко\n⟦картинка⟧"
+        );
         let mut parsed = from_text(&text);
         match_ids(&lines, &mut parsed);
         assert_eq!(parsed, lines);
@@ -393,15 +466,33 @@ mod tests {
     #[test]
     fn plans_only_the_difference() {
         let before = to_lines(&sample());
-        let mut after = from_text("## План\nКупить:\n[x] хлеб\n  свежий\n  без глютена\n[ ] сыр\n[ ] молоко\n⟦картинка⟧");
+        let mut after = from_text(
+            "## План\nКупить:\n[x] хлеб\n  свежий\n  без глютена\n[ ] сыр\n[ ] молоко\n⟦картинка⟧",
+        );
         match_ids(&before, &mut after);
         let steps = plan(&before, &after);
         assert_eq!(steps.len(), 3, "{steps:#?}");
-        assert!(matches!(&steps[0], Step::Update { id, body } if id == "t1" && body["to_do"]["checked"] == true));
+        assert!(
+            matches!(&steps[0], Step::Update { id, body } if id == "t1" && body["to_do"]["checked"] == true)
+        );
         // "без глютена" goes under "хлеб", after "свежий".
-        assert_eq!(steps[1], Step::Insert { parent: Some(2), after_line: Some(3), lines: vec![4] });
+        assert_eq!(
+            steps[1],
+            Step::Insert {
+                parent: Some(2),
+                after_line: Some(3),
+                lines: vec![4]
+            }
+        );
         // "сыр" after "хлеб" at the top level.
-        assert_eq!(steps[2], Step::Insert { parent: None, after_line: Some(2), lines: vec![5] });
+        assert_eq!(
+            steps[2],
+            Step::Insert {
+                parent: None,
+                after_line: Some(2),
+                lines: vec![5]
+            }
+        );
     }
 
     #[test]
@@ -410,25 +501,41 @@ mod tests {
         let mut after = from_text("Сначала\n## План\n[ ] молоко\n⟦картинка⟧");
         match_ids(&before, &mut after);
         let steps = plan(&before, &after);
-        let deleted: Vec<&str> = steps.iter().filter_map(|s| match s { Step::Delete { id } => Some(id.as_str()), _ => None }).collect();
+        let deleted: Vec<&str> = steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::Delete { id } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
         assert_eq!(deleted, ["p", "t1", "n"]);
-        assert!(steps.contains(&Step::Insert { parent: None, after_line: None, lines: vec![0] }));
+        assert!(steps.contains(&Step::Insert {
+            parent: None,
+            after_line: None,
+            lines: vec![0]
+        }));
     }
 
     #[test]
     fn changed_text_updates_the_same_block() {
         let before = to_lines(&sample());
-        let mut after = from_text("## План на субботу\nКупить:\n[ ] хлеб\n  свежий\n[ ] молоко\n⟦картинка⟧");
+        let mut after =
+            from_text("## План на субботу\nКупить:\n[ ] хлеб\n  свежий\n[ ] молоко\n⟦картинка⟧");
         match_ids(&before, &mut after);
         let steps = plan(&before, &after);
         assert_eq!(steps.len(), 1);
-        assert!(matches!(&steps[0], Step::Update { id, body } if id == "h" && body["heading_2"]["rich_text"][0]["text"]["content"] == "План на субботу"));
+        assert!(
+            matches!(&steps[0], Step::Update { id, body } if id == "h" && body["heading_2"]["rich_text"][0]["text"]["content"] == "План на субботу")
+        );
     }
 
     #[test]
     fn nesting_only_under_blocks_that_hold_children() {
         let lines = from_text("# Заголовок\n    под заголовком\n- пункт\n      глубоко");
-        assert_eq!(lines.iter().map(|l| l.depth).collect::<Vec<_>>(), [0, 0, 0, 1]);
+        assert_eq!(
+            lines.iter().map(|l| l.depth).collect::<Vec<_>>(),
+            [0, 0, 0, 1]
+        );
     }
 
     #[test]

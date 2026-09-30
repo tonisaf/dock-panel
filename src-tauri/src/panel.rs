@@ -77,9 +77,12 @@ fn apply_width(win: &WebviewWindow) {
     if FULL.load(Ordering::SeqCst) {
         return;
     }
-    let (Ok(scale), Ok(inner), Ok(outer), Ok(pos)) =
-        (win.scale_factor(), win.inner_size(), win.outer_size(), win.outer_position())
-    else {
+    let (Ok(scale), Ok(inner), Ok(outer), Ok(pos)) = (
+        win.scale_factor(),
+        win.inner_size(),
+        win.outer_size(),
+        win.outer_position(),
+    ) else {
         return;
     };
     let new_w = (window_width() as f64 * scale).round() as u32;
@@ -90,14 +93,22 @@ fn apply_width(win: &WebviewWindow) {
         .current_monitor()
         .ok()
         .flatten()
-        .map(|m| m.work_area().size.height.saturating_sub(2 * (MARGIN * m.scale_factor()).round() as u32))
+        .map(|m| {
+            m.work_area()
+                .size
+                .height
+                .saturating_sub(2 * (MARGIN * m.scale_factor()).round() as u32)
+        })
         .filter(|&h| h > 0)
         .unwrap_or(inner.height);
     let _ = win.set_size(PhysicalSize::new(new_w, height));
     if RIGHT.load(Ordering::SeqCst) {
         // Keep the right edge where it was.
         let new_outer_w = new_w + outer.width.saturating_sub(inner.width);
-        let _ = win.set_position(PhysicalPosition::new(pos.x + outer.width as i32 - new_outer_w as i32, pos.y));
+        let _ = win.set_position(PhysicalPosition::new(
+            pos.x + outer.width as i32 - new_outer_w as i32,
+            pos.y,
+        ));
     }
 }
 /// Dock to the right screen edge instead of the left.
@@ -122,7 +133,11 @@ pub fn hold_open(app: &AppHandle, on: bool) {
 
 fn shortcut_text() -> String {
     let s = SHORTCUT.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    if s.is_empty() { DEFAULT_SHORTCUT.to_string() } else { s }
+    if s.is_empty() {
+        DEFAULT_SHORTCUT.to_string()
+    } else {
+        s
+    }
 }
 
 fn now_ms() -> u64 {
@@ -159,7 +174,9 @@ pub fn init(app: &AppHandle) -> String {
     crate::taskbar::set_pomodoro_enabled(saved["taskbarPomodoro"].as_bool().unwrap_or(true));
     let shortcut = shortcut_text();
 
-    let Some(win) = window(app) else { return shortcut };
+    let Some(win) = window(app) else {
+        return shortcut;
+    };
 
     #[cfg(windows)]
     {
@@ -172,12 +189,22 @@ pub fn init(app: &AppHandle) -> String {
     }
 
     let handle = app.clone();
-    win.on_window_event(move |event| {
-        if let tauri::WindowEvent::Focused(false) = event {
-            if !KEEP_OPEN.load(Ordering::SeqCst) && !PINNED.load(Ordering::SeqCst) && !HELD.load(Ordering::SeqCst) {
+    win.on_window_event(move |event| match event {
+        tauri::WindowEvent::Focused(false) => {
+            if !KEEP_OPEN.load(Ordering::SeqCst)
+                && !PINNED.load(Ordering::SeqCst)
+                && !HELD.load(Ordering::SeqCst)
+            {
                 request_hide(&handle);
             }
         }
+        // Files dropped from Explorer get pinned by the webview; launching them later is allowed.
+        tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
+            for p in paths {
+                crate::trust::remember_path(&p.to_string_lossy());
+            }
+        }
+        _ => {}
     });
     shortcut
 }
@@ -375,7 +402,13 @@ fn place_on_cursor_monitor(app: &AppHandle, win: &WebviewWindow) {
     // edge up with the margins, which the invisible resize borders would skew.
     #[cfg(windows)]
     if let Ok(hwnd) = win.hwnd() {
-        native::place_visible(hwnd.0 as _, x, area.position.y + margin, width as i32, height as i32);
+        native::place_visible(
+            hwnd.0 as _,
+            x,
+            area.position.y + margin,
+            width as i32,
+            height as i32,
+        );
     }
 }
 
@@ -419,7 +452,11 @@ pub struct PanelSettings {
 fn current_settings() -> PanelSettings {
     PanelSettings {
         width: WIDTH.load(Ordering::SeqCst),
-        edge: if RIGHT.load(Ordering::SeqCst) { "right" } else { "left" },
+        edge: if RIGHT.load(Ordering::SeqCst) {
+            "right"
+        } else {
+            "left"
+        },
         shortcut: shortcut_text(),
         taskbar_button: crate::taskbar::enabled(),
         taskbar_player: crate::taskbar::player_enabled(),
@@ -432,7 +469,10 @@ fn current_settings() -> PanelSettings {
 }
 
 fn save_settings(app: &AppHandle) {
-    if let (Some(path), Ok(text)) = (settings_path(app), serde_json::to_string(&current_settings())) {
+    if let (Some(path), Ok(text)) = (
+        settings_path(app),
+        serde_json::to_string(&current_settings()),
+    ) {
         let _ = std::fs::write(path, text);
     }
 }
@@ -504,7 +544,9 @@ pub fn panel_set_taskbar_tasks(app: AppHandle, on: bool) -> PanelSettings {
 /// Swaps the global toggle shortcut; the old one stays if the new one is taken.
 #[tauri::command]
 pub fn panel_set_shortcut(app: AppHandle, shortcut: String) -> Result<PanelSettings, String> {
-    let new: Shortcut = shortcut.parse().map_err(|e| format!("Не получилось разобрать сочетание: {e}"))?;
+    let new: Shortcut = shortcut
+        .parse()
+        .map_err(|e| format!("Не получилось разобрать сочетание: {e}"))?;
     let gs = app.global_shortcut();
     let old = shortcut_text();
     if let Ok(old) = old.parse::<Shortcut>() {
@@ -528,7 +570,11 @@ pub fn panel_set_shortcut(app: AppHandle, shortcut: String) -> Result<PanelSetti
 pub fn panel_suspend_shortcut(app: AppHandle, suspend: bool) {
     if let Ok(sc) = shortcut_text().parse::<Shortcut>() {
         let gs = app.global_shortcut();
-        let _ = if suspend { gs.unregister(sc) } else { gs.register(sc) };
+        let _ = if suspend {
+            gs.unregister(sc)
+        } else {
+            gs.register(sc)
+        };
     }
 }
 
@@ -551,12 +597,12 @@ pub fn panel_set_width(app: AppHandle, width: u32, persist: bool) -> u32 {
 pub(crate) mod native {
     use windows::Win32::Foundation::{HWND, RECT};
     use windows::Win32::Graphics::Dwm::{
-        DwmGetWindowAttribute, DwmSetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_WINDOW_CORNER_PREFERENCE,
-        DWMWCP_ROUND,
+        DwmGetWindowAttribute, DwmSetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS,
+        DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongPtrW, GetWindowRect, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, SWP_NOACTIVATE, SWP_NOZORDER,
-        WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+        GetWindowLongPtrW, GetWindowRect, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE,
+        SWP_NOACTIVATE, SWP_NOZORDER, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
     };
 
     pub fn style(raw: *mut core::ffi::c_void) {
@@ -602,7 +648,10 @@ pub(crate) mod native {
                     outer.bottom - visible.bottom,
                 );
                 // Sane borders only: a minimised or mid-move window reports nonsense.
-                if [borders.0, borders.1, borders.2, borders.3].iter().all(|b| (0..=32).contains(b)) {
+                if [borders.0, borders.1, borders.2, borders.3]
+                    .iter()
+                    .all(|b| (0..=32).contains(b))
+                {
                     *cached = Some(borders);
                 }
             }
@@ -618,7 +667,15 @@ pub(crate) mod native {
         let hwnd = HWND(raw);
         let (l, t, r, b) = frame(hwnd);
         unsafe {
-            let _ = SetWindowPos(hwnd, None, x - l, y - t, w + l + r, h + t + b, SWP_NOZORDER | SWP_NOACTIVATE);
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                x - l,
+                y - t,
+                w + l + r,
+                h + t + b,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            );
         }
     }
 }
@@ -629,7 +686,15 @@ mod tests {
 
     #[test]
     fn parses_shortcuts_from_the_settings_ui() {
-        for s in ["Ctrl+Space", "Ctrl+Alt+A", "Alt+Shift+1", "Super+Space", "Ctrl+Backquote", "F9", "Ctrl+Shift+F12"] {
+        for s in [
+            "Ctrl+Space",
+            "Ctrl+Alt+A",
+            "Alt+Shift+1",
+            "Super+Space",
+            "Ctrl+Backquote",
+            "F9",
+            "Ctrl+Shift+F12",
+        ] {
             assert!(s.parse::<Shortcut>().is_ok(), "{s} should parse");
         }
     }

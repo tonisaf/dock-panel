@@ -1,0 +1,2 @@
+# Formatting only: hide from `git blame` (git config blame.ignoreRevsFile .git-blame-ignore-revs)
+6af67c5c4665c0a7924daa741ab3b7b67236e422

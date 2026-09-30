@@ -7,9 +7,9 @@
 //! - Codex: the CLI logs `rate_limits` on every `token_count` event in its
 //!   session files under `~/.codex/sessions`.
 
+use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
@@ -64,7 +64,8 @@ pub async fn ai_limits(app: AppHandle) -> Result<AiLimits, String> {
         AiLimits {
             claude,
             claude_web: crate::claude_web::status(),
-            claude_connected: claude_status_line(&home).is_some_and(|cmd| cmd.contains(SCRIPT_FILE)),
+            claude_connected: claude_status_line(&home)
+                .is_some_and(|cmd| cmd.contains(SCRIPT_FILE)),
             alerts: crate::alerts::settings(),
             codex,
         }
@@ -87,7 +88,11 @@ pub fn snapshots(app: &AppHandle) -> (Option<Snapshot>, Option<Snapshot>) {
         let data_dir = app.path().app_data_dir().ok()?;
         read_claude_snapshot(&data_dir.join(SNAPSHOT_FILE))
     });
-    let codex = app.path().home_dir().ok().and_then(|home| read_codex(&codex_home(&home)));
+    let codex = app
+        .path()
+        .home_dir()
+        .ok()
+        .and_then(|home| read_codex(&codex_home(&home)));
     (claude, codex)
 }
 
@@ -106,7 +111,13 @@ fn read_json(path: &Path) -> Option<Value> {
 
 fn claude_status_line(home: &Path) -> Option<String> {
     let settings = read_json(&claude_settings_path(home))?;
-    Some(settings.get("statusLine")?.get("command")?.as_str()?.to_string())
+    Some(
+        settings
+            .get("statusLine")?
+            .get("command")?
+            .as_str()?
+            .to_string(),
+    )
 }
 
 fn read_claude_snapshot(path: &Path) -> Option<Snapshot> {
@@ -122,7 +133,11 @@ fn read_claude_snapshot(path: &Path) -> Option<Snapshot> {
             })
         })
         .collect();
-    Some(Snapshot { updated_at: v.get("updatedAt")?.as_i64()?, plan: None, windows })
+    Some(Snapshot {
+        updated_at: v.get("updatedAt")?.as_i64()?,
+        plan: None,
+        windows,
+    })
 }
 
 /// Writes the status line script and points Claude Code's `statusLine` at it.
@@ -132,20 +147,32 @@ pub async fn claude_connect(app: AppHandle) -> Result<(), String> {
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let home = app.path().home_dir().map_err(|e| e.to_string())?;
 
-    if std::process::Command::new("node").arg("--version").output().is_err() {
+    if std::process::Command::new("node")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
         return Err("Не найден Node.js: он нужен для скрипта статус-строки Claude Code".into());
     }
 
     fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
     let snapshot = data_dir.join(SNAPSHOT_FILE);
     let script = data_dir.join(SCRIPT_FILE);
-    let snapshot_literal = serde_json::to_string(&snapshot.to_string_lossy()).expect("path serializes");
-    fs::write(&script, STATUS_LINE_SCRIPT.replace("__SNAPSHOT_PATH__", &snapshot_literal))
-        .map_err(|e| e.to_string())?;
+    let snapshot_literal =
+        serde_json::to_string(&snapshot.to_string_lossy()).expect("path serializes");
+    fs::write(
+        &script,
+        STATUS_LINE_SCRIPT.replace("__SNAPSHOT_PATH__", &snapshot_literal),
+    )
+    .map_err(|e| e.to_string())?;
 
     let settings_path = claude_settings_path(&home);
     let mut settings = read_json(&settings_path).unwrap_or_else(|| json!({}));
-    if let Some(existing) = settings.get("statusLine").and_then(|s| s.get("command")).and_then(Value::as_str) {
+    if let Some(existing) = settings
+        .get("statusLine")
+        .and_then(|s| s.get("command"))
+        .and_then(Value::as_str)
+    {
         if !existing.contains(SCRIPT_FILE) {
             return Err(format!(
                 "У Claude Code уже настроена своя статус-строка ({existing}). Замените её вручную или удалите, чтобы подключить панель."
@@ -153,7 +180,10 @@ pub async fn claude_connect(app: AppHandle) -> Result<(), String> {
         }
     }
     if settings_path.exists() {
-        let _ = fs::copy(&settings_path, settings_path.with_extension("json.dock-panel.bak"));
+        let _ = fs::copy(
+            &settings_path,
+            settings_path.with_extension("json.dock-panel.bak"),
+        );
     }
     settings
         .as_object_mut()
@@ -169,7 +199,9 @@ pub async fn claude_connect(app: AppHandle) -> Result<(), String> {
 pub async fn claude_disconnect(app: AppHandle) -> Result<(), String> {
     let home = app.path().home_dir().map_err(|e| e.to_string())?;
     let settings_path = claude_settings_path(&home);
-    let Some(mut settings) = read_json(&settings_path) else { return Ok(()) };
+    let Some(mut settings) = read_json(&settings_path) else {
+        return Ok(());
+    };
     let ours = settings
         .get("statusLine")
         .and_then(|s| s.get("command"))
@@ -228,7 +260,9 @@ process.stdin.on("end", () => {
 // ---- Codex ----------------------------------------------------------------------
 
 fn codex_home(home: &Path) -> PathBuf {
-    std::env::var_os("CODEX_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".codex"))
+    std::env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".codex"))
 }
 
 /// Each file's latest limits by its modification time, so an unchanged log
@@ -266,7 +300,9 @@ fn latest(snapshots: impl IntoIterator<Item = Snapshot>) -> Option<Snapshot> {
 }
 
 fn collect_jsonl(dir: &Path, out: &mut Vec<(u128, PathBuf)>) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         let Ok(meta) = entry.metadata() else { continue };
@@ -287,41 +323,52 @@ fn collect_jsonl(dir: &Path, out: &mut Vec<(u128, PathBuf)>) {
 fn last_codex_limits(path: &Path) -> Option<Snapshot> {
     let mut file = File::open(path).ok()?;
     let len = file.metadata().ok()?.len();
-    file.seek(SeekFrom::Start(len.saturating_sub(CODEX_TAIL_BYTES))).ok()?;
+    file.seek(SeekFrom::Start(len.saturating_sub(CODEX_TAIL_BYTES)))
+        .ok()?;
     let mut tail = Vec::new();
     file.read_to_end(&mut tail).ok()?;
     let tail = String::from_utf8_lossy(&tail);
 
-    tail.lines().rev().filter(|l| l.contains("\"rate_limits\"")).find_map(|line| {
-        let v: Value = serde_json::from_str(line).ok()?;
-        let limits = v.get("payload")?.get("rate_limits")?;
-        let windows: Vec<LimitWindow> = ["primary", "secondary"]
-            .iter()
-            .filter_map(|key| {
-                let w = limits.get(*key)?;
-                let minutes = w.get("window_minutes")?.as_i64()?;
-                Some(LimitWindow {
-                    kind: match minutes {
-                        300 => "five_hour".into(),
-                        10080 => "seven_day".into(),
-                        m => format!("window_{m}"),
-                    },
-                    used_percent: w.get("used_percent")?.as_f64()?,
-                    resets_at: w.get("resets_at")?.as_i64()?,
+    tail.lines()
+        .rev()
+        .filter(|l| l.contains("\"rate_limits\""))
+        .find_map(|line| {
+            let v: Value = serde_json::from_str(line).ok()?;
+            let limits = v.get("payload")?.get("rate_limits")?;
+            let windows: Vec<LimitWindow> = ["primary", "secondary"]
+                .iter()
+                .filter_map(|key| {
+                    let w = limits.get(*key)?;
+                    let minutes = w.get("window_minutes")?.as_i64()?;
+                    Some(LimitWindow {
+                        kind: match minutes {
+                            300 => "five_hour".into(),
+                            10080 => "seven_day".into(),
+                            m => format!("window_{m}"),
+                        },
+                        used_percent: w.get("used_percent")?.as_f64()?,
+                        resets_at: w.get("resets_at")?.as_i64()?,
+                    })
                 })
+                .collect();
+            if windows.is_empty() {
+                return None;
+            }
+            let updated_at = v
+                .get("timestamp")
+                .and_then(Value::as_str)
+                .and_then(parse_rfc3339_ms)
+                .unwrap_or(0);
+            let plan = limits
+                .get("plan_type")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            Some(Snapshot {
+                updated_at,
+                plan,
+                windows,
             })
-            .collect();
-        if windows.is_empty() {
-            return None;
-        }
-        let updated_at = v
-            .get("timestamp")
-            .and_then(Value::as_str)
-            .and_then(parse_rfc3339_ms)
-            .unwrap_or(0);
-        let plan = limits.get("plan_type").and_then(Value::as_str).map(str::to_string);
-        Some(Snapshot { updated_at, plan, windows })
-    })
+        })
 }
 
 /// Minimal parser for Codex's `2026-09-24T12:27:17.879Z` UTC timestamps.
@@ -350,15 +397,25 @@ mod tests {
 
     #[test]
     fn codex_limits_come_from_the_latest_record_not_the_newest_file() {
-        let at = |updated_at| Snapshot { updated_at, plan: None, windows: Vec::new() };
+        let at = |updated_at| Snapshot {
+            updated_at,
+            plan: None,
+            windows: Vec::new(),
+        };
         // Files newest first: an old session touched today, then today's.
-        assert_eq!(latest([at(100), at(300), at(200)]).map(|s| s.updated_at), Some(300));
+        assert_eq!(
+            latest([at(100), at(300), at(200)]).map(|s| s.updated_at),
+            Some(300)
+        );
         assert!(latest([]).is_none());
     }
 
     #[test]
     fn parses_codex_timestamps() {
         assert_eq!(parse_rfc3339_ms("1970-01-01T00:00:00.000Z"), Some(0));
-        assert_eq!(parse_rfc3339_ms("2026-09-24T12:27:17.879Z"), Some(1_790_252_837_879));
+        assert_eq!(
+            parse_rfc3339_ms("2026-09-24T12:27:17.879Z"),
+            Some(1_790_252_837_879)
+        );
     }
 }

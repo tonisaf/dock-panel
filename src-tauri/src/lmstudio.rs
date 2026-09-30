@@ -48,7 +48,10 @@ pub struct Status {
 }
 
 fn client(timeout: Duration) -> Result<reqwest::Client, String> {
-    reqwest::Client::builder().timeout(timeout).build().map_err(|e| e.to_string())
+    reqwest::Client::builder()
+        .timeout(timeout)
+        .build()
+        .map_err(|e| e.to_string())
 }
 
 fn unreachable_message(e: &reqwest::Error) -> String {
@@ -96,7 +99,11 @@ pub async fn is_running() -> bool {
 async fn pick_model() -> Result<String, String> {
     match secrets::read(MODEL_KEY) {
         Some(m) => Ok(m),
-        None => models().await?.into_iter().next().ok_or_else(|| "В LM Studio нет моделей: скачайте и загрузите модель".into()),
+        None => models()
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| "В LM Studio нет моделей: скачайте и загрузите модель".into()),
     }
 }
 
@@ -104,8 +111,18 @@ async fn pick_model() -> Result<String, String> {
 pub async fn lmstudio_status() -> Status {
     let model = secrets::read(MODEL_KEY);
     match models().await {
-        Ok(models) => Status { reachable: true, models, model, error: None },
-        Err(e) => Status { reachable: false, models: vec![], model, error: Some(e) },
+        Ok(models) => Status {
+            reachable: true,
+            models,
+            model,
+            error: None,
+        },
+        Err(e) => Status {
+            reachable: false,
+            models: vec![],
+            model,
+            error: Some(e),
+        },
     }
 }
 
@@ -136,7 +153,15 @@ pub fn ask(app: AppHandle, id: u64, prompt: String) -> Result<(), String> {
             Ok(text) => (text, false),
             Err(e) => (e, true),
         };
-        let _ = app.emit("ask:done", Done { id, text, error, duration_ms: started.elapsed().as_millis() as u64 });
+        let _ = app.emit(
+            "ask:done",
+            Done {
+                id,
+                text,
+                error,
+                duration_ms: started.elapsed().as_millis() as u64,
+            },
+        );
     });
     Ok(())
 }
@@ -167,7 +192,10 @@ async fn stream(app: &AppHandle, id: u64, prompt: &str) -> Result<String, String
         let code = res.status().as_u16();
         let text = res.text().await.unwrap_or_default();
         let message = serde_json::from_str::<Value>(&text).ok().and_then(|v| {
-            v["error"]["message"].as_str().or_else(|| v["error"].as_str()).map(str::to_string)
+            v["error"]["message"]
+                .as_str()
+                .or_else(|| v["error"].as_str())
+                .map(str::to_string)
         });
         return Err(message.unwrap_or_else(|| format!("LM Studio ответил {code}")));
     }
@@ -237,9 +265,16 @@ pub async fn llm_run(task: String, text: String) -> Result<String, String> {
     let code = res.status().as_u16();
     let v: Value = res.json().await.map_err(|e| e.to_string())?;
     if code >= 400 {
-        return Err(v["error"]["message"].as_str().map(str::to_string).unwrap_or_else(|| format!("LM Studio ответил {code}")));
+        return Err(v["error"]["message"]
+            .as_str()
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("LM Studio ответил {code}")));
     }
-    let answer = strip_thinking(v["choices"][0]["message"]["content"].as_str().unwrap_or_default());
+    let answer = strip_thinking(
+        v["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or_default(),
+    );
     if answer.is_empty() {
         Err("LM Studio не ответил".into())
     } else {
@@ -262,7 +297,10 @@ fn delta_text(line: &str) -> Option<String> {
         return None;
     }
     let v: Value = serde_json::from_str(data).ok()?;
-    v["choices"][0]["delta"]["content"].as_str().filter(|t| !t.is_empty()).map(str::to_string)
+    v["choices"][0]["delta"]["content"]
+        .as_str()
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
 }
 
 #[cfg(test)]
@@ -275,15 +313,23 @@ mod tests {
             delta_text(r#"data: {"choices":[{"delta":{"content":"при"}}]}"#).as_deref(),
             Some("при")
         );
-        assert_eq!(delta_text(r#"data: {"choices":[{"delta":{"role":"assistant"}}]}"#), None);
+        assert_eq!(
+            delta_text(r#"data: {"choices":[{"delta":{"role":"assistant"}}]}"#),
+            None
+        );
         assert_eq!(delta_text("data: [DONE]"), None);
     }
 
     #[test]
     fn strips_inline_reasoning() {
-        assert_eq!(strip_thinking("<think>hmm</think>
+        assert_eq!(
+            strip_thinking(
+                "<think>hmm</think>
 
-Ответ"), "Ответ");
+Ответ"
+            ),
+            "Ответ"
+        );
         assert_eq!(strip_thinking("  Ответ "), "Ответ");
     }
 
