@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useQueryClient } from "@tanstack/react-query";
-import { Bell, BellOff, Clock, LogIn, LogOut, MessageCircleQuestion, RefreshCw, Sparkle, Unlink } from "lucide-react";
+import { Bell, BellOff, Clock, LogIn, LogOut, MessageCircleQuestion, MessagesSquare, RefreshCw, Sparkle, Unlink } from "lucide-react";
 import { AskBox } from "../ask/AskBox";
 import clsx from "clsx";
 import { Card } from "../components/Card";
+import { BionicChats } from "../bionic/BionicChats";
 import { AgentsList, AgentsNotifyToggle } from "../agents/AgentsList";
 import { LimitBars } from "../widgets/ai/LimitBars";
 import {
@@ -173,6 +174,10 @@ export function AiTab() {
 
       <Card title="Сессии" icon={Sparkle} action={<AgentsNotifyToggle />}>
         <AgentsList />
+      </Card>
+
+      <Card title="Чаты Bionic" icon={MessagesSquare}>
+        <BionicChats />
       </Card>
 
       <ClaudeCard data={data} />

@@ -9,6 +9,7 @@ mod discord;
 mod files;
 mod gcal;
 mod home;
+mod bionic;
 mod listening;
 mod lmstudio;
 mod claude_web;
@@ -229,6 +230,8 @@ pub fn run() {
             monitors::monitors_blackout,
             agents::agents_list,
             ask::ask_start,
+            bionic::bionic_projects,
+            bionic::bionic_session,
             openclaw::openclaw_status,
             openclaw::openclaw_set_token,
             openclaw::openclaw_disconnect,
