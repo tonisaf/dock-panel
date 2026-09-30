@@ -18,6 +18,7 @@ import { AskWidget } from "./ask/AskWidget";
 import { DiscordWidget } from "./discord/DiscordWidget";
 import { PomodoroWidget } from "./pomodoro/PomodoroWidget";
 import { NotesWidget } from "./notes/NotesWidget";
+import { BriefingWidget } from "./briefing/BriefingWidget";
 
 export interface WidgetDef {
   id: string;
@@ -31,6 +32,7 @@ export interface WidgetDef {
  */
 export const WIDGETS: WidgetDef[] = [
   { id: "pinned", title: "Закреплённые", component: PinnedWidget },
+  { id: "briefing", title: "Брифинг", component: BriefingWidget },
   { id: "weather", title: "Погода", component: WeatherWidget },
   { id: "calendar", title: "Календарь", component: CalendarWidget },
   { id: "media", title: "Сейчас играет", component: MediaWidget },

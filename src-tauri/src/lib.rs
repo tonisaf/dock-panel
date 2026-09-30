@@ -237,6 +237,7 @@ pub fn run() {
             openclaw::openclaw_disconnect,
             lmstudio::lmstudio_status,
             lmstudio::lmstudio_set_model,
+            lmstudio::llm_run,
             player::player_play,
             player::player_available,
             ask::ask_cancel,

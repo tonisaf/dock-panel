@@ -17,6 +17,7 @@ import {
 import clsx from "clsx";
 import { EmptyState } from "../components/Card";
 import { usePanelStore } from "../store";
+import { MailSummary } from "../mail/MailSummary";
 import { usePanelSettings } from "../lib/panelWidth";
 import { usePrefs } from "../lib/prefs";
 import { SplitView, useSidePane } from "../components/SidePane";
@@ -193,6 +194,8 @@ function Reader({
             ))}
           </div>
         )}
+
+        {letter && <MailSummary key={`${letter.account}/${letter.uid}`} letter={letter} />}
 
         <div className="mt-3 border-t border-stroke pt-3 text-[13px] leading-relaxed">
           {error ? (
