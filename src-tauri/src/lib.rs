@@ -10,6 +10,7 @@ mod files;
 mod gcal;
 mod home;
 mod listening;
+mod lmstudio;
 mod claude_web;
 mod mail;
 mod media;
@@ -18,6 +19,7 @@ mod net;
 mod notes;
 mod notion;
 mod oauth;
+mod openclaw;
 mod panel;
 mod player;
 mod rates;
@@ -227,6 +229,11 @@ pub fn run() {
             monitors::monitors_blackout,
             agents::agents_list,
             ask::ask_start,
+            openclaw::openclaw_status,
+            openclaw::openclaw_set_token,
+            openclaw::openclaw_disconnect,
+            lmstudio::lmstudio_status,
+            lmstudio::lmstudio_set_model,
             player::player_play,
             player::player_available,
             ask::ask_cancel,

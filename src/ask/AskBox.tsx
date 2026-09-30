@@ -8,7 +8,12 @@ const MODELS: { value: Model; label: string; hint: string }[] = [
   { value: "haiku", label: "Haiku", hint: "Быстро" },
   { value: "sonnet", label: "Sonnet", hint: "Обычно" },
   { value: "opus", label: "Opus", hint: "Умнее, дольше" },
+  { value: "openclaw", label: "OpenClaw", hint: "Агент OpenClaw (Gateway в WSL)" },
+  { value: "lmstudio", label: "LM Studio", hint: "Локальная модель" },
 ];
+
+const providerName = (model: Model) =>
+  model === "openclaw" ? "OpenClaw" : model === "lmstudio" ? "LM Studio" : "Claude";
 
 /**
  * A question box for Claude through Claude Code (`claude -p`): free text or
@@ -53,7 +58,7 @@ export function AskBox({ compact = false }: { compact?: boolean }) {
             }
           }}
           rows={Math.min(5, Math.max(1, draft.split("\n").length))}
-          placeholder="Спросить Claude…"
+          placeholder={`Спросить ${providerName(model)}…`}
           className="max-h-32 min-h-6 flex-1 resize-none bg-transparent py-0.5 text-[13px] leading-relaxed outline-none placeholder:text-fg-subtle"
         />
         {running ? (
@@ -129,7 +134,7 @@ export function AskBox({ compact = false }: { compact?: boolean }) {
             </div>
           ) : (
             <p className="flex items-center gap-2 text-[12px] text-fg-subtle">
-              <Loader2 className="size-3.5 animate-spin" /> Claude думает…
+              <Loader2 className="size-3.5 animate-spin" /> {providerName(model)} думает…
             </p>
           )}
           {status === "done" && (

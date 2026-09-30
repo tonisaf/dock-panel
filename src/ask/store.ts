@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-export type Model = "haiku" | "sonnet" | "opus";
+export type Model = "haiku" | "sonnet" | "opus" | "openclaw" | "lmstudio";
 export type Status = "idle" | "running" | "done" | "error";
 
 const MODEL_KEY = "ask.model";
@@ -10,7 +10,7 @@ const MODEL_KEY = "ask.model";
 function savedModel(): Model {
   try {
     const m = localStorage.getItem(MODEL_KEY);
-    if (m === "haiku" || m === "sonnet" || m === "opus") return m;
+    if (m === "haiku" || m === "sonnet" || m === "opus" || m === "openclaw" || m === "lmstudio") return m;
   } catch {
     // Storage can be unavailable; the default is fine.
   }

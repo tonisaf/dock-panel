@@ -43,6 +43,11 @@ fn allowed_model(model: &str) -> bool {
     matches!(model, "haiku" | "sonnet" | "opus")
 }
 
+/// "openclaw" as the model sends the question to the OpenClaw Gateway instead of `claude -p`.
+const OPENCLAW: &str = "openclaw";
+/// "lmstudio" sends it to the local LM Studio server.
+const LMSTUDIO: &str = "lmstudio";
+
 /// Starts a question and returns its id; the answer arrives as events.
 #[tauri::command]
 pub fn ask_start(app: AppHandle, prompt: String, model: Option<String>) -> Result<u64, String> {
@@ -50,8 +55,21 @@ pub fn ask_start(app: AppHandle, prompt: String, model: Option<String>) -> Resul
     if prompt.is_empty() {
         return Err("Пустой вопрос".into());
     }
+    let via_openclaw = model.as_deref() == Some(OPENCLAW);
+    let via_lmstudio = model.as_deref() == Some(LMSTUDIO);
     let model = model.filter(|m| allowed_model(m)).unwrap_or_else(|| "sonnet".into());
     ask_cancel();
+    if via_openclaw {
+        let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+        crate::openclaw::ask(app, id, prompt)?;
+        return Ok(id);
+    }
+
+    if via_lmstudio {
+        let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+        crate::lmstudio::ask(app, id, prompt)?;
+        return Ok(id);
+    }
 
     let dir = std::env::temp_dir().join("dock-panel-ask");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -168,6 +186,8 @@ fn friendly_error(message: &str) -> String {
 /// Stops the running question, if any.
 #[tauri::command]
 pub fn ask_cancel() {
+    crate::openclaw::cancel();
+    crate::lmstudio::cancel();
     if let Some((_, mut child)) = RUNNING.lock().unwrap_or_else(|e| e.into_inner()).take() {
         // `cmd` started claude as a child: take the whole tree down.
         #[cfg(windows)]

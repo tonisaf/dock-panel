@@ -3,6 +3,8 @@ import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import clsx from "clsx";
 import { CityPicker } from "../components/CityPicker";
 import { NotionSettings } from "../components/NotionSettings";
+import { LmStudioSettings, useLmStudioStatus } from "../components/LmStudioSettings";
+import { OpenClawSettings, useOpenClawStatus } from "../components/OpenClawSettings";
 import { CalendarSettings } from "../components/CalendarSettings";
 import { SpotifySettings } from "../components/SpotifySettings";
 import { UpdateSettings } from "../components/UpdateSettings";
@@ -39,6 +41,7 @@ import {
   Mail,
   Music,
   NotebookPen,
+  Bot,
   TvMinimalPlay,
   type LucideIcon,
 } from "lucide-react";
@@ -346,6 +349,8 @@ function Integrations() {
   const gcal = useGcalStatus().data;
   const ical = useIcalCalendars().data ?? [];
   const notion = useNotionStatus().data;
+  const openclaw = useOpenClawStatus().data;
+  const lmstudio = useLmStudioStatus().data;
   const spotify = useSpotifyStatus().data;
   const youtube = useYoutubeSettings().data;
   const yandex = useYandexStatus().data;
@@ -381,6 +386,30 @@ function Integrations() {
       </Group>
       <Group id="notion" icon={NotebookPen} title="Notion" {...connected(notion, notion?.workspace)}>
         <NotionSettings />
+      </Group>
+      <Group
+        id="openclaw"
+        icon={Bot}
+        title="OpenClaw"
+        {...(openclaw &&
+          (!openclaw.connected
+            ? { status: "не подключено" }
+            : openclaw.reachable
+              ? { status: "Gateway отвечает", tone: "ok" as Tone }
+              : { status: "не отвечает", tone: "warn" as Tone }))}
+      >
+        <OpenClawSettings />
+      </Group>
+      <Group
+        id="lmstudio"
+        icon={Bot}
+        title="LM Studio"
+        {...(lmstudio &&
+          (lmstudio.reachable
+            ? { status: lmstudio.model ?? "сервер отвечает", tone: "ok" as Tone }
+            : { status: "не запущен", tone: "warn" as Tone }))}
+      >
+        <LmStudioSettings />
       </Group>
       <Group id="spotify" icon={Music} title="Spotify" {...connected(spotify, spotify?.user)}>
         <SpotifySettings />
