@@ -87,6 +87,11 @@ fn model_ids(v: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The server answers.
+pub async fn is_running() -> bool {
+    models().await.is_ok()
+}
+
 /// The saved model, or the first chat model the server lists.
 async fn pick_model() -> Result<String, String> {
     match secrets::read(MODEL_KEY) {

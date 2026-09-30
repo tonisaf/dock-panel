@@ -19,6 +19,7 @@ import { DiscordWidget } from "./discord/DiscordWidget";
 import { PomodoroWidget } from "./pomodoro/PomodoroWidget";
 import { NotesWidget } from "./notes/NotesWidget";
 import { BriefingWidget } from "./briefing/BriefingWidget";
+import { LmStudioWidget } from "./lmstudio/LmStudioWidget";
 
 export interface WidgetDef {
   id: string;
@@ -45,6 +46,7 @@ export const WIDGETS: WidgetDef[] = [
   { id: "notes", title: "Заметки", component: NotesWidget },
   { id: "ai", title: "Лимиты AI", component: AiLimitsWidget },
   { id: "agents", title: "Агенты", component: AgentsWidget },
+  { id: "lmstudio", title: "LM Studio", component: LmStudioWidget },
   { id: "ask", title: "Спросить Claude", component: AskWidget },
   { id: "pomodoro", title: "Помодоро", component: PomodoroWidget },
   { id: "vpn", title: "VPN", component: VpnWidget },

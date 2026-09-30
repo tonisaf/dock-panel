@@ -11,6 +11,7 @@ mod gcal;
 mod home;
 mod bionic;
 mod listening;
+mod lmctl;
 mod lmstudio;
 mod claude_web;
 mod mail;
@@ -238,6 +239,10 @@ pub fn run() {
             lmstudio::lmstudio_status,
             lmstudio::lmstudio_set_model,
             lmstudio::llm_run,
+            lmctl::lmstudio_overview,
+            lmctl::lmstudio_load,
+            lmctl::lmstudio_unload,
+            lmctl::lmstudio_server,
             player::player_play,
             player::player_available,
             ask::ask_cancel,
