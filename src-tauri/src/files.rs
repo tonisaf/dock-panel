@@ -181,7 +181,9 @@ fn search(entries: &[Entry], query: &str, limit: usize) -> Vec<Hit> {
 #[tauri::command]
 pub async fn files_search(query: String, limit: usize) -> Vec<Hit> {
     let Some(index) = INDEX.read().unwrap_or_else(|e| e.into_inner()).clone() else { return Vec::new() };
-    tauri::async_runtime::spawn_blocking(move || search(&index, &query, limit.clamp(1, 20))).await.unwrap_or_default()
+    let hits = tauri::async_runtime::spawn_blocking(move || search(&index, &query, limit.clamp(1, 20))).await.unwrap_or_default();
+    hits.iter().for_each(|h| crate::trust::remember_path(&h.path));
+    hits
 }
 
 #[cfg(test)]

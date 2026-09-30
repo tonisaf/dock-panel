@@ -172,12 +172,19 @@ pub fn init(app: &AppHandle) -> String {
     }
 
     let handle = app.clone();
-    win.on_window_event(move |event| {
-        if let tauri::WindowEvent::Focused(false) = event {
+    win.on_window_event(move |event| match event {
+        tauri::WindowEvent::Focused(false) => {
             if !KEEP_OPEN.load(Ordering::SeqCst) && !PINNED.load(Ordering::SeqCst) && !HELD.load(Ordering::SeqCst) {
                 request_hide(&handle);
             }
         }
+        // Files dropped from Explorer get pinned by the webview; launching them later is allowed.
+        tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
+            for p in paths {
+                crate::trust::remember_path(&p.to_string_lossy());
+            }
+        }
+        _ => {}
     });
     shortcut
 }

@@ -18,6 +18,8 @@ use serde::Serialize;
 use tauri::http::{header, Request, Response};
 use tauri::{AppHandle, UriSchemeResponder};
 
+use crate::trust;
+
 const ICON_SIZE: i32 = 64;
 /// Id prefix of pinned files and folders; the rest is an absolute path.
 const FILE_PREFIX: &str = "file:";
@@ -48,11 +50,30 @@ pub async fn list_apps() -> Result<Vec<AppEntry>, String> {
         .collect();
     apps.sort_by_cached_key(|a| a.name.to_lowercase());
     apps.dedup_by(|a, b| a.id == b.id);
+    trust::remember_ids(apps.iter().map(|a| a.id.as_str()));
     Ok(apps)
+}
+
+/// Only what Rust listed, picked or found may be launched; the webview's word is not enough.
+/// An app missing from the cache may be newly installed, so the list is read again once.
+fn check_launchable(id: &str) -> Result<(), String> {
+    if trust::is_trusted(id) {
+        return Ok(());
+    }
+    if !id.starts_with(FILE_PREFIX) {
+        if let Ok(raw) = on_sta(win::enumerate) {
+            trust::remember_ids(raw.iter().map(|(id, _)| id.as_str()));
+        }
+        if trust::is_trusted(id) {
+            return Ok(());
+        }
+    }
+    Err("Это приложение не из списка панели".into())
 }
 
 #[tauri::command]
 pub async fn launch_app(id: String) -> Result<(), String> {
+    check_launchable(&id)?;
     if on_sta(move || win::launch(&id)) {
         Ok(())
     } else {
@@ -100,7 +121,13 @@ fn recent_tracking_off() -> bool {
 
 #[tauri::command]
 pub async fn app_info(id: String) -> AppInfo {
+    if check_launchable(&id).is_err() {
+        return AppInfo { exe_path: None, recent: Vec::new(), tracking_off: recent_tracking_off() };
+    }
     let (exe_path, recent) = on_sta(move || (win::exe_path(&id), win::recent_documents(&id, 8)));
+    for (_, path) in &recent {
+        trust::remember_path(path);
+    }
     AppInfo {
         exe_path,
         recent: recent.into_iter().map(|(name, path)| RecentDoc { name, path }).collect(),
@@ -111,6 +138,7 @@ pub async fn app_info(id: String) -> AppInfo {
 /// Runs the app as administrator; Windows asks for consent.
 #[tauri::command]
 pub async fn launch_app_admin(id: String) -> Result<(), String> {
+    check_launchable(&id)?;
     if on_sta(move || win::launch_as(&id, "runas", None)) {
         Ok(())
     } else {
@@ -121,6 +149,10 @@ pub async fn launch_app_admin(id: String) -> Result<(), String> {
 /// Opens one of the app's recent files in that app (or with its default app when the program file is unknown).
 #[tauri::command]
 pub async fn open_recent(id: String, path: String) -> Result<(), String> {
+    check_launchable(&id)?;
+    if !trust::is_trusted_path(&path) {
+        return Err("Этого файла нет среди недавних".into());
+    }
     let ok = on_sta(move || {
         if win::exe_path(&id).is_some() && !id.starts_with(FILE_PREFIX) {
             win::launch_as(&id, "open", Some(&path))
@@ -142,6 +174,7 @@ pub async fn pick_files(app: AppHandle, folders: bool) -> Result<Vec<String>, St
     let paths = tauri::async_runtime::spawn_blocking(move || pick_paths(&app, folders))
         .await
         .map_err(|e| e.to_string())??;
+    paths.iter().for_each(|p| trust::remember_path(p));
     Ok(paths.into_iter().map(|p| format!("{FILE_PREFIX}{p}")).collect())
 }
 

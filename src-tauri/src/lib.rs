@@ -31,6 +31,7 @@ mod spotify;
 mod system;
 mod taskbar;
 mod tray;
+mod trust;
 mod updater;
 mod vpn;
 mod weather;
@@ -72,6 +73,9 @@ pub fn run() {
         })
         .setup(move |app| {
             let handle = app.handle();
+            if let Ok(dir) = app.path().app_data_dir() {
+                trust::load_pins(&dir.join("prefs.json"));
+            }
             let shortcut = panel::init(handle);
             tray::init(handle, &shortcut)?;
             taskbar::start(handle);
