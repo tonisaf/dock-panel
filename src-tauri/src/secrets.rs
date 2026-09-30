@@ -3,7 +3,8 @@
 
 use windows::core::{HSTRING, PWSTR};
 use windows::Win32::Security::Credentials::{
-    CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
+    CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE,
+    CRED_TYPE_GENERIC,
 };
 
 pub fn write(target: &str, secret: &str) -> Result<(), String> {

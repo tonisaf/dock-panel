@@ -77,11 +77,14 @@ impl Stats {
     }
 
     fn track(&mut self, day: &str, artist: &str, title: &str) -> &mut TrackStat {
-        self.day(day).tracks.entry(track_key(artist, title)).or_insert_with(|| TrackStat {
-            title: title.to_string(),
-            artist: artist.to_string(),
-            ..Default::default()
-        })
+        self.day(day)
+            .tracks
+            .entry(track_key(artist, title))
+            .or_insert_with(|| TrackStat {
+                title: title.to_string(),
+                artist: artist.to_string(),
+                ..Default::default()
+            })
     }
 
     fn listen(&mut self, day: &str, hour: usize, artist: &str, title: &str, ms: u64) {
@@ -138,7 +141,10 @@ fn day_key(days: i64) -> String {
 /// Today's day number and the hour of day, local time.
 fn local_now() -> (i64, usize) {
     let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
-    (days_from_civil(t.wYear.into(), t.wMonth.into(), t.wDay.into()), t.wHour as usize)
+    (
+        days_from_civil(t.wYear.into(), t.wMonth.into(), t.wDay.into()),
+        t.wHour as usize,
+    )
 }
 
 // ---- watching the player -----------------------------------------------------------
@@ -174,7 +180,14 @@ fn is_music(np: &NowPlaying) -> bool {
 
 impl Tracker {
     /// Takes a reading of the player `elapsed_ms` after the last one and files it in `stats`.
-    fn observe(&mut self, np: Option<&NowPlaying>, elapsed_ms: u64, day: &str, hour: usize, stats: &mut Stats) -> Outcome {
+    fn observe(
+        &mut self,
+        np: Option<&NowPlaying>,
+        elapsed_ms: u64,
+        day: &str,
+        hour: usize,
+        stats: &mut Stats,
+    ) -> Outcome {
         let Some(np) = np.filter(|n| is_music(n)) else {
             self.current = None;
             return Outcome::Nothing;
@@ -190,10 +203,22 @@ impl Tracker {
                 .is_some_and(|(was, now)| now + REPEAT_JUMP_MS < was && now < REPEAT_START_MS),
         };
         if fresh {
-            self.current = Some(Current { key, listened_ms: 0, counted: false, position_ms: None, was_playing: false });
+            self.current = Some(Current {
+                key,
+                listened_ms: 0,
+                counted: false,
+                position_ms: None,
+                was_playing: false,
+            });
         }
-        let Some(cur) = self.current.as_mut() else { return Outcome::Nothing };
-        let credited = if cur.was_playing && np.playing { elapsed_ms.min(MAX_STEP_MS) } else { 0 };
+        let Some(cur) = self.current.as_mut() else {
+            return Outcome::Nothing;
+        };
+        let credited = if cur.was_playing && np.playing {
+            elapsed_ms.min(MAX_STEP_MS)
+        } else {
+            0
+        };
         cur.was_playing = np.playing;
         cur.position_ms = np.position_ms;
         if credited == 0 {
@@ -202,7 +227,9 @@ impl Tracker {
 
         stats.listen(day, hour, &np.artist, &np.title, credited);
         cur.listened_ms += credited;
-        let needed = np.duration_ms.map_or(PLAY_AFTER_MS, |d| d.min(PLAY_AFTER_MS));
+        let needed = np
+            .duration_ms
+            .map_or(PLAY_AFTER_MS, |d| d.min(PLAY_AFTER_MS));
         if !cur.counted && cur.listened_ms >= needed {
             cur.counted = true;
             stats.play(day, &np.artist, &np.title);
@@ -257,7 +284,11 @@ impl Stats {
     /// The `days` days up to and including `today`.
     fn summarize(&self, days: i64, today: i64) -> Summary {
         let from = day_key(today - days + 1);
-        let range = || self.days.iter().filter(|(k, _)| k.as_str() >= from.as_str());
+        let range = || {
+            self.days
+                .iter()
+                .filter(|(k, _)| k.as_str() >= from.as_str())
+        };
 
         let mut artists: HashMap<&str, u64> = HashMap::new();
         let mut tracks: HashMap<&str, TrackStat> = HashMap::new();
@@ -274,14 +305,23 @@ impl Stats {
                 *artists.entry(name).or_default() += ms;
             }
             for (key, t) in &d.tracks {
-                let sum = tracks.entry(key).or_insert_with(|| TrackStat { plays: 0, ms: 0, ..t.clone() });
+                let sum = tracks.entry(key).or_insert_with(|| TrackStat {
+                    plays: 0,
+                    ms: 0,
+                    ..t.clone()
+                });
                 sum.plays += t.plays;
                 sum.ms += t.ms;
             }
         }
 
-        let mut artists: Vec<ArtistRow> =
-            artists.into_iter().map(|(name, ms)| ArtistRow { name: name.to_string(), ms }).collect();
+        let mut artists: Vec<ArtistRow> = artists
+            .into_iter()
+            .map(|(name, ms)| ArtistRow {
+                name: name.to_string(),
+                ms,
+            })
+            .collect();
         artists.sort_by(|a, b| b.ms.cmp(&a.ms).then_with(|| a.name.cmp(&b.name)));
         artists.truncate(TOP_N);
 
@@ -289,10 +329,18 @@ impl Stats {
         let mut tracks: Vec<TrackRow> = tracks
             .into_values()
             .filter(|t| t.plays > 0)
-            .map(|t| TrackRow { title: t.title, artist: t.artist, plays: t.plays, ms: t.ms })
+            .map(|t| TrackRow {
+                title: t.title,
+                artist: t.artist,
+                plays: t.plays,
+                ms: t.ms,
+            })
             .collect();
         tracks.sort_by(|a, b| {
-            b.plays.cmp(&a.plays).then(b.ms.cmp(&a.ms)).then_with(|| a.title.cmp(&b.title))
+            b.plays
+                .cmp(&a.plays)
+                .then(b.ms.cmp(&a.ms))
+                .then_with(|| a.title.cmp(&b.title))
         });
         tracks.truncate(TOP_N);
 
@@ -305,7 +353,15 @@ impl Stats {
             })
             .collect();
 
-        Summary { total_ms, plays, active_days, artists, tracks, hours, daily }
+        Summary {
+            total_ms,
+            plays,
+            active_days,
+            artists,
+            tracks,
+            hours,
+            daily,
+        }
     }
 }
 
@@ -324,11 +380,15 @@ fn path(app: &AppHandle) -> Option<PathBuf> {
 }
 
 fn save() {
-    let Some(p) = APP.get().and_then(path) else { return };
+    let Some(p) = APP.get().and_then(path) else {
+        return;
+    };
     if let Some(dir) = p.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let Ok(text) = with_stats(|s| serde_json::to_string(s)) else { return };
+    let Ok(text) = with_stats(|s| serde_json::to_string(s)) else {
+        return;
+    };
     // Through a temp file, so a crash mid-write can't leave a torn log.
     let tmp = p.with_extension("json.tmp");
     if std::fs::write(&tmp, text).is_ok() {
@@ -343,7 +403,10 @@ pub fn init(app: &AppHandle) {
         .and_then(|t| serde_json::from_str::<Stats>(&t).ok())
         .unwrap_or_default();
     with_stats(|s| *s = saved);
-    std::thread::Builder::new().name("listening".into()).spawn(watch).ok();
+    std::thread::Builder::new()
+        .name("listening".into())
+        .spawn(watch)
+        .ok();
 }
 
 fn watch() {
@@ -367,7 +430,11 @@ fn watch() {
             unsaved = false;
             last_save = Instant::now();
         }
-        std::thread::sleep(if tracker.current.is_some() { TICK } else { IDLE_TICK });
+        std::thread::sleep(if tracker.current.is_some() {
+            TICK
+        } else {
+            IDLE_TICK
+        });
     }
 }
 
@@ -400,7 +467,9 @@ mod tests {
 
     /// Feeds `n` readings, 5 s apart, of the same state.
     fn feed(t: &mut Tracker, s: &mut Stats, n: usize, np: &NowPlaying) -> Vec<Outcome> {
-        (0..n).map(|_| t.observe(Some(np), 5_000, "2026-01-01", 10, s)).collect()
+        (0..n)
+            .map(|_| t.observe(Some(np), 5_000, "2026-01-01", 10, s))
+            .collect()
     }
 
     #[test]
@@ -432,7 +501,10 @@ mod tests {
         let d = &s.days["2026-01-01"];
         assert_eq!(d.plays, 0);
         assert_eq!(d.ms, 30_000);
-        assert!(s.summarize(1, days_from_civil(2026, 1, 1)).tracks.is_empty());
+        assert!(s
+            .summarize(1, days_from_civil(2026, 1, 1))
+            .tracks
+            .is_empty());
     }
 
     #[test]
@@ -471,9 +543,17 @@ mod tests {
         let mut chrome = np("Video", "Channel", true, Some(0));
         chrome.source = "chrome.exe".into();
         feed(&mut t, &mut s, 9, &chrome);
-        feed(&mut t, &mut s, 9, &np("Advertisement", "Spotify", true, Some(0)));
+        feed(
+            &mut t,
+            &mut s,
+            9,
+            &np("Advertisement", "Spotify", true, Some(0)),
+        );
         assert!(s.days.is_empty());
-        assert_eq!(t.observe(None, 5_000, "2026-01-01", 10, &mut s), Outcome::Nothing);
+        assert_eq!(
+            t.observe(None, 5_000, "2026-01-01", 10, &mut s),
+            Outcome::Nothing
+        );
     }
 
     #[test]
@@ -493,12 +573,35 @@ mod tests {
             }
         }
         let week = s.summarize(7, today);
-        assert_eq!((week.total_ms, week.plays, week.active_days), (900_000, 6, 2));
-        assert_eq!(week.artists[0], ArtistRow { name: "B".into(), ms: 500_000 });
-        assert_eq!(week.tracks[0], TrackRow { title: "x".into(), artist: "A".into(), plays: 4, ms: 400_000 });
+        assert_eq!(
+            (week.total_ms, week.plays, week.active_days),
+            (900_000, 6, 2)
+        );
+        assert_eq!(
+            week.artists[0],
+            ArtistRow {
+                name: "B".into(),
+                ms: 500_000
+            }
+        );
+        assert_eq!(
+            week.tracks[0],
+            TrackRow {
+                title: "x".into(),
+                artist: "A".into(),
+                plays: 4,
+                ms: 400_000
+            }
+        );
         assert_eq!(week.hours[9], 900_000);
         assert_eq!(week.daily.len(), 7);
-        assert_eq!(week.daily[6], DayBar { day: "2026-03-10".into(), ms: 300_000 });
+        assert_eq!(
+            week.daily[6],
+            DayBar {
+                day: "2026-03-10".into(),
+                ms: 300_000
+            }
+        );
         assert_eq!(week.daily[0].ms, 0);
 
         let month = s.summarize(30, today);

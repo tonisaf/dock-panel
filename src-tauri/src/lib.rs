@@ -1,19 +1,19 @@
 mod agents;
 mod ai_limits;
-mod ask;
 mod alerts;
 mod apps;
+mod ask;
+mod bionic;
 mod calendar;
+mod claude_web;
 mod desktop;
 mod discord;
 mod files;
 mod gcal;
 mod home;
-mod bionic;
 mod listening;
 mod lmctl;
 mod lmstudio;
-mod claude_web;
 mod mail;
 mod media;
 mod monitors;
@@ -24,8 +24,8 @@ mod oauth;
 mod openclaw;
 mod panel;
 mod player;
-mod rates;
 mod pomodoro;
+mod rates;
 mod secrets;
 mod spotify;
 mod system;
@@ -51,7 +51,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 // The panel toggle, and the Discord microphone toggle if set.
@@ -97,7 +100,11 @@ pub fn run() {
             let registered = shortcut
                 .parse::<Shortcut>()
                 .map_err(|e| e.to_string())
-                .and_then(|sc| app.global_shortcut().register(sc).map_err(|e| e.to_string()));
+                .and_then(|sc| {
+                    app.global_shortcut()
+                        .register(sc)
+                        .map_err(|e| e.to_string())
+                });
             if let Err(e) = registered {
                 eprintln!("{shortcut} is unavailable: {e}");
             }

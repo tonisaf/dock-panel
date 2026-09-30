@@ -30,7 +30,9 @@ fn with<R>(f: impl FnOnce(&mut Trusted) -> R) -> R {
 
 /// Windows paths compare case-insensitively and with either slash.
 fn norm(path: &str) -> String {
-    path.replace('/', "\\").trim_end_matches('\\').to_lowercase()
+    path.replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_lowercase()
 }
 
 fn key(id: &str) -> String {
@@ -68,14 +70,26 @@ pub fn is_trusted_path(path: &str) -> bool {
 /// Everything that was pinned, from `prefs.json`: `pinned` and the items of `folders`.
 fn pinned_ids(prefs: &Value) -> Vec<String> {
     let direct = prefs["pinned"].as_array().into_iter().flatten();
-    let grouped = prefs["folders"].as_object().into_iter().flat_map(|f| f.values()).flat_map(|f| f["items"].as_array().into_iter().flatten());
-    direct.chain(grouped).filter_map(|v| v.as_str()).map(str::to_string).collect()
+    let grouped = prefs["folders"]
+        .as_object()
+        .into_iter()
+        .flat_map(|f| f.values())
+        .flat_map(|f| f["items"].as_array().into_iter().flatten());
+    direct
+        .chain(grouped)
+        .filter_map(|v| v.as_str())
+        .map(str::to_string)
+        .collect()
 }
 
 /// Reads the pins once at start, before the webview can change them.
 pub fn load_pins(prefs_file: &Path) {
-    let Ok(text) = std::fs::read_to_string(prefs_file) else { return };
-    let Ok(prefs) = serde_json::from_str::<Value>(&text) else { return };
+    let Ok(text) = std::fs::read_to_string(prefs_file) else {
+        return;
+    };
+    let Ok(prefs) = serde_json::from_str::<Value>(&text) else {
+        return;
+    };
     let keys: HashSet<String> = pinned_ids(&prefs).iter().map(|id| key(id)).collect();
     with(|t| t.pinned = keys);
 }

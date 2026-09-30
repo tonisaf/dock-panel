@@ -90,14 +90,24 @@ fn watch(app: &AppHandle) {
 /// Whether `now` is news after `before` was reported `since` ago: anything but
 /// the position moving on as it should.
 fn differs(before: Option<&NowPlaying>, now: Option<&NowPlaying>, since: Duration) -> bool {
-    let (Some(b), Some(n)) = (before, now) else { return before.is_some() != now.is_some() };
-    let same = NowPlaying { position_ms: b.position_ms, ..n.clone() };
+    let (Some(b), Some(n)) = (before, now) else {
+        return before.is_some() != now.is_some();
+    };
+    let same = NowPlaying {
+        position_ms: b.position_ms,
+        ..n.clone()
+    };
     if same != *b {
         return true;
     }
     match (b.position_ms, n.position_ms) {
         (Some(was), Some(is)) => {
-            let expected = was as i64 + if b.playing { since.as_millis() as i64 } else { 0 };
+            let expected = was as i64
+                + if b.playing {
+                    since.as_millis() as i64
+                } else {
+                    0
+                };
             (is as i64 - expected).abs() > SEEK_SLACK_MS
         }
         _ => false,
@@ -128,8 +138,8 @@ pub mod win {
     use base64::prelude::{Engine, BASE64_STANDARD};
     use windows::core::{Error, Interface, Result};
     use windows::Graphics::Imaging::{
-        BitmapAlphaMode, BitmapBounds, BitmapDecoder, BitmapInterpolationMode, BitmapPixelFormat, BitmapTransform,
-        ColorManagementMode, ExifOrientationMode,
+        BitmapAlphaMode, BitmapBounds, BitmapDecoder, BitmapInterpolationMode, BitmapPixelFormat,
+        BitmapTransform, ColorManagementMode, ExifOrientationMode,
     };
     use windows::Media::Control::{
         GlobalSystemMediaTransportControlsSession as Session,
@@ -159,7 +169,9 @@ pub mod win {
     }
 
     fn now_ticks() -> i64 {
-        let since_unix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+        let since_unix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
         since_unix.as_nanos() as i64 / 100 + EPOCH_DIFF_TICKS
     }
 
@@ -213,9 +225,19 @@ pub mod win {
         let mut bytes = vec![0u8; size as usize];
         reader.ReadBytes(&mut bytes)?;
 
-        let mime = stream.ContentType().map(|m| m.to_string()).unwrap_or_default();
-        let mime = if mime.is_empty() { "image/png".to_string() } else { mime };
-        Ok(Some(format!("data:{mime};base64,{}", BASE64_STANDARD.encode(bytes))))
+        let mime = stream
+            .ContentType()
+            .map(|m| m.to_string())
+            .unwrap_or_default();
+        let mime = if mime.is_empty() {
+            "image/png".to_string()
+        } else {
+            mime
+        };
+        Ok(Some(format!(
+            "data:{mime};base64,{}",
+            BASE64_STANDARD.encode(bytes)
+        )))
     }
 
     /// Album art centre-cropped to a `size`×`size` square, as premultiplied BGRA.
@@ -226,7 +248,10 @@ pub mod win {
         };
         let stream: IRandomAccessStream = reference.OpenReadAsync()?.join()?.cast()?;
         let decoder = BitmapDecoder::CreateAsync(&stream)?.join()?;
-        let (w, h) = (decoder.OrientedPixelWidth()?.max(1), decoder.OrientedPixelHeight()?.max(1));
+        let (w, h) = (
+            decoder.OrientedPixelWidth()?.max(1),
+            decoder.OrientedPixelHeight()?.max(1),
+        );
         // Scale the short side to `size`, then crop the middle.
         let short = w.min(h);
         let (sw, sh) = ((w * size).div_ceil(short), (h * size).div_ceil(short));
@@ -234,7 +259,12 @@ pub mod win {
         transform.SetInterpolationMode(BitmapInterpolationMode::Fant)?;
         transform.SetScaledWidth(sw)?;
         transform.SetScaledHeight(sh)?;
-        transform.SetBounds(BitmapBounds { X: (sw - size) / 2, Y: (sh - size) / 2, Width: size, Height: size })?;
+        transform.SetBounds(BitmapBounds {
+            X: (sw - size) / 2,
+            Y: (sh - size) / 2,
+            Width: size,
+            Height: size,
+        })?;
         let data = decoder
             .GetPixelDataTransformedAsync(
                 BitmapPixelFormat::Bgra8,
@@ -250,7 +280,8 @@ pub mod win {
     pub fn seek(position_ms: u64) -> Result<()> {
         let Some(s) = session()? else { return Ok(()) };
         let start = s.GetTimelineProperties()?.StartTime()?.Duration;
-        s.TryChangePlaybackPositionAsync(start + position_ms as i64 * 10_000)?.join()?;
+        s.TryChangePlaybackPositionAsync(start + position_ms as i64 * 10_000)?
+            .join()?;
         Ok(())
     }
 

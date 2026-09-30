@@ -24,7 +24,11 @@ const OPEN_METEO_TIMEOUT: Duration = Duration::from_secs(5);
 /// After Open-Meteo fails, go straight to the fallbacks for this long.
 const OPEN_METEO_BACKOFF_MS: u64 = 30 * 60 * 1000;
 const NOMINATIM_INTERVAL: Duration = Duration::from_millis(1100);
-const APP_AGENT: &str = concat!("DockPanel/", env!("CARGO_PKG_VERSION"), " (+https://github.com/tonisaf/dock-panel)");
+const APP_AGENT: &str = concat!(
+    "DockPanel/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://github.com/tonisaf/dock-panel)"
+);
 
 static OPEN_METEO_SKIP_UNTIL: AtomicU64 = AtomicU64::new(0);
 static NOMINATIM_LAST: Mutex<Option<Instant>> = Mutex::new(None);
@@ -37,11 +41,21 @@ pub struct Sourced {
 }
 
 fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
-async fn get_json(url: &str, query: &[(&str, String)], timeout: Option<Duration>) -> Result<Value, String> {
-    let mut req = net::client().get(url).query(query).header(USER_AGENT, APP_AGENT);
+async fn get_json(
+    url: &str,
+    query: &[(&str, String)],
+    timeout: Option<Duration>,
+) -> Result<Value, String> {
+    let mut req = net::client()
+        .get(url)
+        .query(query)
+        .header(USER_AGENT, APP_AGENT);
     if let Some(t) = timeout {
         req = req.timeout(t);
     }
@@ -80,14 +94,29 @@ pub async fn weather_forecast(latitude: f64, longitude: f64) -> Result<Sourced, 
         ("forecast_days", "2".into()),
         ("wind_speed_unit", "ms".into()),
     ];
-    if let Some(body) = try_open_meteo("https://api.open-meteo.com/v1/forecast", &open_meteo).await {
-        return Ok(Sourced { source: "open-meteo", body });
+    if let Some(body) = try_open_meteo("https://api.open-meteo.com/v1/forecast", &open_meteo).await
+    {
+        return Ok(Sourced {
+            source: "open-meteo",
+            body,
+        });
     }
 
     // MET Norway rejects coordinates with more than 4 decimals.
-    let met = [("lat", format!("{latitude:.4}")), ("lon", format!("{longitude:.4}"))];
-    let body = get_json("https://api.met.no/weatherapi/locationforecast/2.0/compact", &met, None).await?;
-    Ok(Sourced { source: "met.no", body })
+    let met = [
+        ("lat", format!("{latitude:.4}")),
+        ("lon", format!("{longitude:.4}")),
+    ];
+    let body = get_json(
+        "https://api.met.no/weatherapi/locationforecast/2.0/compact",
+        &met,
+        None,
+    )
+    .await?;
+    Ok(Sourced {
+        source: "met.no",
+        body,
+    })
 }
 
 #[tauri::command]
@@ -98,8 +127,16 @@ pub async fn weather_geocode(query: String) -> Result<Sourced, String> {
         ("language", "ru".into()),
         ("format", "json".into()),
     ];
-    if let Some(body) = try_open_meteo("https://geocoding-api.open-meteo.com/v1/search", &open_meteo).await {
-        return Ok(Sourced { source: "open-meteo", body });
+    if let Some(body) = try_open_meteo(
+        "https://geocoding-api.open-meteo.com/v1/search",
+        &open_meteo,
+    )
+    .await
+    {
+        return Ok(Sourced {
+            source: "open-meteo",
+            body,
+        });
     }
 
     // Nominatim's usage policy: no more than one request per second.
@@ -120,6 +157,14 @@ pub async fn weather_geocode(query: String) -> Result<Sourced, String> {
         ("accept-language", "ru".into()),
         ("featureType", "settlement".into()),
     ];
-    let body = get_json("https://nominatim.openstreetmap.org/search", &nominatim, None).await?;
-    Ok(Sourced { source: "nominatim", body })
+    let body = get_json(
+        "https://nominatim.openstreetmap.org/search",
+        &nominatim,
+        None,
+    )
+    .await?;
+    Ok(Sourced {
+        source: "nominatim",
+        body,
+    })
 }

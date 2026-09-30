@@ -46,7 +46,10 @@ pub struct Status {
 }
 
 fn client(timeout: Duration) -> Result<reqwest::Client, String> {
-    reqwest::Client::builder().timeout(timeout).build().map_err(|e| e.to_string())
+    reqwest::Client::builder()
+        .timeout(timeout)
+        .build()
+        .map_err(|e| e.to_string())
 }
 
 fn unreachable_message(e: &reqwest::Error) -> String {
@@ -68,7 +71,9 @@ async fn probe(token: &str) -> Result<(), String> {
     match res.status().as_u16() {
         200 => Ok(()),
         401 | 403 => Err("Gateway не принял токен".into()),
-        404 => Err("В Gateway выключен HTTP API: включите gateway.http.endpoints.chatCompletions".into()),
+        404 => Err(
+            "В Gateway выключен HTTP API: включите gateway.http.endpoints.chatCompletions".into(),
+        ),
         code => Err(format!("Gateway ответил {code}")),
     }
 }
@@ -76,11 +81,23 @@ async fn probe(token: &str) -> Result<(), String> {
 #[tauri::command]
 pub async fn openclaw_status() -> Status {
     let Some(token) = secrets::read(SECRET) else {
-        return Status { connected: false, reachable: false, error: None };
+        return Status {
+            connected: false,
+            reachable: false,
+            error: None,
+        };
     };
     match probe(&token).await {
-        Ok(()) => Status { connected: true, reachable: true, error: None },
-        Err(e) => Status { connected: true, reachable: false, error: Some(e) },
+        Ok(()) => Status {
+            connected: true,
+            reachable: true,
+            error: None,
+        },
+        Err(e) => Status {
+            connected: true,
+            reachable: false,
+            error: Some(e),
+        },
     }
 }
 
@@ -101,7 +118,8 @@ pub fn openclaw_disconnect() {
 
 /// Starts a question to the default agent and returns its id.
 pub fn ask(app: AppHandle, id: u64, prompt: String) -> Result<(), String> {
-    let token = secrets::read(SECRET).ok_or("OpenClaw не подключён: вставьте токен Gateway в настройках")?;
+    let token = secrets::read(SECRET)
+        .ok_or("OpenClaw не подключён: вставьте токен Gateway в настройках")?;
     CURRENT.store(id, Ordering::SeqCst);
     tauri::async_runtime::spawn(async move {
         let started = Instant::now();
@@ -115,7 +133,15 @@ pub fn ask(app: AppHandle, id: u64, prompt: String) -> Result<(), String> {
             Ok(text) => (text, false),
             Err(e) => (e, true),
         };
-        let _ = app.emit("ask:done", Done { id, text, error, duration_ms: started.elapsed().as_millis() as u64 });
+        let _ = app.emit(
+            "ask:done",
+            Done {
+                id,
+                text,
+                error,
+                duration_ms: started.elapsed().as_millis() as u64,
+            },
+        );
     });
     Ok(())
 }
@@ -181,7 +207,10 @@ fn delta_text(line: &str) -> Option<String> {
         return None;
     }
     let v: Value = serde_json::from_str(data).ok()?;
-    v["choices"][0]["delta"]["content"].as_str().filter(|t| !t.is_empty()).map(str::to_string)
+    v["choices"][0]["delta"]["content"]
+        .as_str()
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
 }
 
 #[cfg(test)]
@@ -194,7 +223,10 @@ mod tests {
             delta_text(r#"data: {"choices":[{"delta":{"content":"при"}}]}"#).as_deref(),
             Some("при")
         );
-        assert_eq!(delta_text(r#"data: {"choices":[{"delta":{"role":"assistant"}}]}"#), None);
+        assert_eq!(
+            delta_text(r#"data: {"choices":[{"delta":{"role":"assistant"}}]}"#),
+            None
+        );
         assert_eq!(delta_text("data: [DONE]"), None);
         assert_eq!(delta_text(": keep-alive"), None);
     }

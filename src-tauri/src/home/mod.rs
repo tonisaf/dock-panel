@@ -41,7 +41,11 @@ const YANDEX: &str = "yandex:";
 static LAST_SCAN: Mutex<Option<Instant>> = Mutex::new(None);
 
 fn path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join(FILE))
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join(FILE))
 }
 
 fn load(app: &AppHandle) -> Saved {
@@ -57,7 +61,11 @@ fn save(app: &AppHandle, saved: &Saved) -> Result<(), String> {
     if let Some(dir) = p.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    std::fs::write(p, serde_json::to_string_pretty(saved).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    std::fs::write(
+        p,
+        serde_json::to_string_pretty(saved).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// IPv4 addresses of this PC's LAN interfaces: no loopback, no VPN tunnels.
@@ -80,7 +88,10 @@ fn scan(saved: &mut Saved) {
     let (lamps, speakers) = std::thread::scope(|s| {
         let lamps = s.spawn(|| yeelight::discover(&ips, YEELIGHT_WAIT));
         let speakers = s.spawn(|| cast::discover(CAST_WAIT));
-        (lamps.join().unwrap_or_default(), speakers.join().unwrap_or_default())
+        (
+            lamps.join().unwrap_or_default(),
+            speakers.join().unwrap_or_default(),
+        )
     });
     saved.lamps.extend(lamps);
     saved.speakers.extend(speakers);
@@ -120,13 +131,22 @@ pub struct HomeState {
 }
 
 fn lamp_name(saved: &Saved, id: &str, known: &yeelight::Known) -> String {
-    saved.names.get(id).cloned().unwrap_or_else(|| match known.model.as_str() {
-        "" => "Лампа Yeelight".into(),
-        m => format!("Yeelight {m}"),
-    })
+    saved
+        .names
+        .get(id)
+        .cloned()
+        .unwrap_or_else(|| match known.model.as_str() {
+            "" => "Лампа Yeelight".into(),
+            m => format!("Yeelight {m}"),
+        })
 }
 
-fn lamp(saved: &Saved, id: &str, known: &yeelight::Known, state: Option<yeelight::LampState>) -> Lamp {
+fn lamp(
+    saved: &Saved,
+    id: &str,
+    known: &yeelight::Known,
+    state: Option<yeelight::LampState>,
+) -> Lamp {
     Lamp {
         id: id.to_string(),
         name: lamp_name(saved, id, known),
@@ -157,10 +177,19 @@ fn yandex_lamp(saved: &Saved, dev: yandex::Device) -> Lamp {
     }
 }
 
-fn speaker(saved: &Saved, id: &str, known: &cast::Known, state: Option<cast::SpeakerState>) -> Speaker {
+fn speaker(
+    saved: &Saved,
+    id: &str,
+    known: &cast::Known,
+    state: Option<cast::SpeakerState>,
+) -> Speaker {
     Speaker {
         id: id.to_string(),
-        name: saved.names.get(id).cloned().unwrap_or_else(|| known.name.clone()),
+        name: saved
+            .names
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| known.name.clone()),
         model: known.model.clone(),
         state,
     }
@@ -179,10 +208,14 @@ fn snapshot(saved: &Saved) -> HomeState {
             .iter()
             .map(|(id, k)| (id, k, s.spawn(move || cast::state(k).ok())))
             .collect();
-        let mut lamps: Vec<Lamp> =
-            lamps.into_iter().map(|(id, k, h)| lamp(saved, id, k, h.join().ok().flatten())).collect();
-        let mut speakers: Vec<Speaker> =
-            speakers.into_iter().map(|(id, k, h)| speaker(saved, id, k, h.join().ok().flatten())).collect();
+        let mut lamps: Vec<Lamp> = lamps
+            .into_iter()
+            .map(|(id, k, h)| lamp(saved, id, k, h.join().ok().flatten()))
+            .collect();
+        let mut speakers: Vec<Speaker> = speakers
+            .into_iter()
+            .map(|(id, k, h)| speaker(saved, id, k, h.join().ok().flatten()))
+            .collect();
         lamps.sort_by_cached_key(|l| l.name.to_lowercase());
         speakers.sort_by_cached_key(|s| s.name.to_lowercase());
         HomeState { lamps, speakers }
@@ -198,8 +231,12 @@ fn state_blocking(app: &AppHandle, rescan: bool) -> Result<HomeState, String> {
     }
     let state = snapshot(&saved);
 
-    let missing = state.lamps.iter().any(|l| l.state.is_none()) || state.speakers.iter().any(|s| s.state.is_none());
-    let stale = LAST_SCAN.lock().unwrap_or_else(|e| e.into_inner()).is_none_or(|t| t.elapsed() > AUTO_RESCAN);
+    let missing = state.lamps.iter().any(|l| l.state.is_none())
+        || state.speakers.iter().any(|s| s.state.is_none());
+    let stale = LAST_SCAN
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_none_or(|t| t.elapsed() > AUTO_RESCAN);
     if missing && stale {
         scan(&mut saved);
         save(app, &saved)?;
@@ -208,8 +245,12 @@ fn state_blocking(app: &AppHandle, rescan: bool) -> Result<HomeState, String> {
     Ok(state)
 }
 
-async fn blocking<R: Send + 'static>(f: impl FnOnce() -> Result<R, String> + Send + 'static) -> Result<R, String> {
-    tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())?
+async fn blocking<R: Send + 'static>(
+    f: impl FnOnce() -> Result<R, String> + Send + 'static,
+) -> Result<R, String> {
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Every known device with its current state; `rescan` searches the network first.
@@ -236,7 +277,11 @@ pub async fn home_state(app: AppHandle, rescan: bool) -> Result<HomeState, Strin
 }
 
 #[tauri::command]
-pub async fn home_lamp_set(app: AppHandle, id: String, change: yeelight::Change) -> Result<Lamp, String> {
+pub async fn home_lamp_set(
+    app: AppHandle,
+    id: String,
+    change: yeelight::Change,
+) -> Result<Lamp, String> {
     if let Some(yandex_id) = id.strip_prefix(YANDEX) {
         let dev = yandex::apply(yandex_id, &change).await?;
         return Ok(yandex_lamp(&load(&app), dev));
@@ -252,7 +297,11 @@ pub async fn home_lamp_set(app: AppHandle, id: String, change: yeelight::Change)
 }
 
 #[tauri::command]
-pub async fn home_speaker_control(app: AppHandle, id: String, control: cast::Control) -> Result<Speaker, String> {
+pub async fn home_speaker_control(
+    app: AppHandle,
+    id: String,
+    control: cast::Control,
+) -> Result<Speaker, String> {
     blocking(move || {
         let saved = load(&app);
         let known = saved.speakers.get(&id).ok_or("колонка не найдена")?;

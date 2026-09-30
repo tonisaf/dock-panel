@@ -22,7 +22,9 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::{gcal, net};
 
 mod parse;
-use parse::{channel_id_in_page, is_channel_id, parse_duration, parse_feed, parse_takeout, parse_time, Video};
+use parse::{
+    channel_id_in_page, is_channel_id, parse_duration, parse_feed, parse_takeout, parse_time, Video,
+};
 
 const FILE: &str = "youtube.json";
 const CACHE_FILE: &str = "youtube-cache.json";
@@ -131,11 +133,18 @@ mod refresh_lock {
 }
 
 fn now_ms() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 fn data_path(app: &AppHandle, file: &str) -> Result<PathBuf, String> {
-    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join(file))
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join(file))
 }
 
 fn read_json<T: for<'de> Deserialize<'de> + Default>(app: &AppHandle, file: &str) -> T {
@@ -151,7 +160,8 @@ fn write_json<T: Serialize>(app: &AppHandle, file: &str, value: &T) -> Result<()
     if let Some(dir) = p.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    std::fs::write(p, serde_json::to_string(value).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    std::fs::write(p, serde_json::to_string(value).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
 }
 
 fn load(app: &AppHandle) -> Saved {
@@ -186,7 +196,11 @@ async fn get_text(url: &str) -> Result<String, String> {
         })?;
     let status = res.status();
     if !status.is_success() {
-        return Err(if status.as_u16() == 404 { "канал не найден".into() } else { format!("YouTube: HTTP {status}") });
+        return Err(if status.as_u16() == 404 {
+            "канал не найден".into()
+        } else {
+            format!("YouTube: HTTP {status}")
+        });
     }
     res.text().await.map_err(|e| e.to_string())
 }
@@ -197,7 +211,11 @@ async fn fetch_feed(id: &str) -> Result<Feed, String> {
     for v in &mut videos {
         v.channel_id = id.to_string();
     }
-    Ok(Feed { fetched: now_ms(), title, videos })
+    Ok(Feed {
+        fetched: now_ms(),
+        title,
+        videos,
+    })
 }
 
 async fn fetch_tagged(id: String) -> (String, Result<Feed, String>) {
@@ -228,7 +246,11 @@ async fn resolve(input: &str) -> Result<Channel, String> {
         return Err("Не похоже на ссылку на канал YouTube".into());
     }
     let feed = fetch_feed(&id).await?;
-    Ok(Channel { id, title: feed.title, google: false })
+    Ok(Channel {
+        id,
+        title: feed.title,
+        google: false,
+    })
 }
 
 /// Fetches every channel's feed, keeps the old copy for those that fail,
@@ -251,10 +273,16 @@ async fn refresh(app: &AppHandle) -> Vec<Video> {
             match result {
                 Ok(feed) => {
                     if let Some(old) = cache.feeds.get(&id) {
-                        let known: HashSet<&str> = old.videos.iter().map(|v| v.id.as_str()).collect();
+                        let known: HashSet<&str> =
+                            old.videos.iter().map(|v| v.id.as_str()).collect();
                         let newest_old = old.videos.first().map_or(0, |v| v.published);
                         fresh.extend(
-                            feed.videos.iter().filter(|v| !known.contains(v.id.as_str()) && v.published > newest_old).cloned(),
+                            feed.videos
+                                .iter()
+                                .filter(|v| {
+                                    !known.contains(v.id.as_str()) && v.published > newest_old
+                                })
+                                .cloned(),
                         );
                     }
                     cache.feeds.insert(id, feed);
@@ -312,14 +340,21 @@ async fn fetch_subscriptions() -> Result<Vec<Channel>, String> {
         let mut url = format!("{YT_API}/subscriptions?part=snippet&mine=true&maxResults=50");
         if let Some(token) = &page {
             url.push_str("&pageToken=");
-            url.push_str(&percent_encoding::utf8_percent_encode(token, percent_encoding::NON_ALPHANUMERIC).to_string());
+            url.push_str(
+                &percent_encoding::utf8_percent_encode(token, percent_encoding::NON_ALPHANUMERIC)
+                    .to_string(),
+            );
         }
         let v = gcal::google_get(&url).await?;
         for item in v["items"].as_array().into_iter().flatten() {
             let snippet = &item["snippet"];
             if let Some(id) = snippet["resourceId"]["channelId"].as_str() {
                 let title = snippet["title"].as_str().unwrap_or(id).to_string();
-                out.push(Channel { id: id.to_string(), title, google: true });
+                out.push(Channel {
+                    id: id.to_string(),
+                    title,
+                    google: true,
+                });
             }
         }
         page = v["nextPageToken"].as_str().map(str::to_string);
@@ -334,11 +369,16 @@ async fn fetch_subscriptions() -> Result<Vec<Channel>, String> {
 /// channels added by hand stay either way.
 fn merge_subscriptions(saved: &mut Saved, subs: Vec<Channel>) {
     let subscribed: HashSet<&str> = subs.iter().map(|c| c.id.as_str()).collect();
-    saved.channels.retain(|c| !c.google || subscribed.contains(c.id.as_str()));
+    saved
+        .channels
+        .retain(|c| !c.google || subscribed.contains(c.id.as_str()));
     // A cancelled subscription forgets its "removed from the panel" mark.
     saved.ignored.retain(|id| subscribed.contains(id.as_str()));
     let known: HashSet<String> = saved.channels.iter().map(|c| c.id.clone()).collect();
-    saved.channels.extend(subs.into_iter().filter(|c| !known.contains(&c.id) && !saved.ignored.contains(&c.id)));
+    saved.channels.extend(
+        subs.into_iter()
+            .filter(|c| !known.contains(&c.id) && !saved.ignored.contains(&c.id)),
+    );
 }
 
 /// Duration and live state for the videos that will show and don't have them
@@ -363,15 +403,21 @@ async fn fetch_details(app: &AppHandle) {
              &fields=items(id,contentDetails/duration,snippet/liveBroadcastContent,liveStreamingDetails/scheduledStartTime)",
             chunk.join(",")
         );
-        let Ok(v) = gcal::google_get(&url).await else { break };
+        let Ok(v) = gcal::google_get(&url).await else {
+            break;
+        };
         let mut found: HashMap<String, Details> = v["items"]
             .as_array()
             .into_iter()
             .flatten()
             .filter_map(|item| {
-                let live = item["snippet"]["liveBroadcastContent"].as_str().filter(|l| *l == "live" || *l == "upcoming");
+                let live = item["snippet"]["liveBroadcastContent"]
+                    .as_str()
+                    .filter(|l| *l == "live" || *l == "upcoming");
                 let details = Details {
-                    duration: item["contentDetails"]["duration"].as_str().and_then(parse_duration),
+                    duration: item["contentDetails"]["duration"]
+                        .as_str()
+                        .and_then(parse_duration),
                     starts: live
                         .filter(|l| *l == "upcoming")
                         .and(item["liveStreamingDetails"]["scheduledStartTime"].as_str())
@@ -384,12 +430,17 @@ async fn fetch_details(app: &AppHandle) {
         with_cache(app, |c| {
             for id in chunk {
                 // Missing from the answer: private or deleted; don't ask again.
-                c.details.insert(id.clone(), found.remove(id).unwrap_or_default());
+                c.details
+                    .insert(id.clone(), found.remove(id).unwrap_or_default());
             }
         });
     }
     with_cache(app, |c| {
-        let present: HashSet<String> = c.feeds.values().flat_map(|f| f.videos.iter().map(|v| v.id.clone())).collect();
+        let present: HashSet<String> = c
+            .feeds
+            .values()
+            .flat_map(|f| f.videos.iter().map(|v| v.id.clone()))
+            .collect();
         c.details.retain(|id, _| present.contains(id));
         let _ = write_json(app, CACHE_FILE, c);
     });
@@ -401,8 +452,16 @@ fn notify_new(app: &AppHandle, mut fresh: Vec<Video>) {
     }
     fresh.sort_by(|a, b| b.published.cmp(&a.published));
     if fresh.len() > TOASTS_MAX {
-        let channels: Vec<&str> = fresh.iter().take(3).map(|v| v.channel_title.as_str()).collect();
-        notify(app, &format!("Новых видео: {}", fresh.len()), &channels.join(", "));
+        let channels: Vec<&str> = fresh
+            .iter()
+            .take(3)
+            .map(|v| v.channel_title.as_str())
+            .collect();
+        notify(
+            app,
+            &format!("Новых видео: {}", fresh.len()),
+            &channels.join(", "),
+        );
     } else {
         for v in &fresh {
             notify(app, &v.channel_title, &v.title);
@@ -448,8 +507,18 @@ pub struct Settings {
 #[tauri::command]
 pub fn youtube_settings(app: AppHandle) -> Settings {
     let s = load(&app);
-    let google_error = if s.sync_google { with_cache(&app, |c| c.google_error.clone()) } else { None };
-    Settings { channels: s.channels, notify: s.notify, hide_shorts: s.hide_shorts, sync_google: s.sync_google, google_error }
+    let google_error = if s.sync_google {
+        with_cache(&app, |c| c.google_error.clone())
+    } else {
+        None
+    };
+    Settings {
+        channels: s.channels,
+        notify: s.notify,
+        hide_shorts: s.hide_shorts,
+        sync_google: s.sync_google,
+        google_error,
+    }
 }
 
 #[tauri::command]
@@ -468,19 +537,35 @@ pub async fn youtube_add(app: AppHandle, input: String) -> Result<Channel, Strin
 #[tauri::command]
 pub async fn youtube_import(app: AppHandle) -> Result<usize, String> {
     let picker = app.clone();
-    let paths = tauri::async_runtime::spawn_blocking(move || crate::apps::pick_paths(&picker, false))
-        .await
-        .map_err(|e| e.to_string())??;
-    let Some(path) = paths.first() else { return Ok(0) };
-    let csv = std::fs::read_to_string(path).map_err(|e| format!("Не удалось прочитать файл: {e}"))?;
-    let found: Vec<Channel> =
-        parse_takeout(&csv).into_iter().map(|(id, title)| Channel { id, title, google: false }).collect();
+    let paths =
+        tauri::async_runtime::spawn_blocking(move || crate::apps::pick_paths(&picker, false))
+            .await
+            .map_err(|e| e.to_string())??;
+    let Some(path) = paths.first() else {
+        return Ok(0);
+    };
+    let csv =
+        std::fs::read_to_string(path).map_err(|e| format!("Не удалось прочитать файл: {e}"))?;
+    let found: Vec<Channel> = parse_takeout(&csv)
+        .into_iter()
+        .map(|(id, title)| Channel {
+            id,
+            title,
+            google: false,
+        })
+        .collect();
     if found.is_empty() {
-        return Err("В файле нет каналов. Нужен subscriptions.csv из Google Takeout (YouTube → подписки).".into());
+        return Err(
+            "В файле нет каналов. Нужен subscriptions.csv из Google Takeout (YouTube → подписки)."
+                .into(),
+        );
     }
     let mut saved = load(&app);
     let known: HashSet<String> = saved.channels.iter().map(|c| c.id.clone()).collect();
-    let new: Vec<Channel> = found.into_iter().filter(|c| !known.contains(&c.id)).collect();
+    let new: Vec<Channel> = found
+        .into_iter()
+        .filter(|c| !known.contains(&c.id))
+        .collect();
     let count = new.len();
     saved.channels.extend(new);
     save(&app, &saved)?;
@@ -577,7 +662,9 @@ pub struct FeedView {
 #[tauri::command]
 pub async fn youtube_feed(app: AppHandle, force: bool) -> Result<FeedView, String> {
     let saved = load(&app);
-    let stale = with_cache(&app, |c| now_ms() - c.refreshed > REFRESH_EVERY.as_millis() as i64);
+    let stale = with_cache(&app, |c| {
+        now_ms() - c.refreshed > REFRESH_EVERY.as_millis() as i64
+    });
     if !saved.channels.is_empty() && (force || stale) {
         // New videos found here would otherwise never be announced.
         let fresh = refresh(&app).await;
@@ -598,7 +685,11 @@ pub async fn youtube_feed(app: AppHandle, force: bool) -> Result<FeedView, Strin
             .collect();
         videos.sort_by(|a, b| b.video.published.cmp(&a.video.published));
         videos.truncate(FEED_MAX);
-        FeedView { videos, refreshed: cache.refreshed, failed: cache.failed, channels: saved.channels.len() }
+        FeedView {
+            videos,
+            refreshed: cache.refreshed,
+            failed: cache.failed,
+            channels: saved.channels.len(),
+        }
     }))
 }
-

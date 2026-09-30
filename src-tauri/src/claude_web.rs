@@ -74,7 +74,13 @@ pub fn status() -> WebStatus {
 }
 
 pub fn snapshot() -> Option<Snapshot> {
-    with_state(|s| if s.persisted.enabled { s.persisted.snapshot.clone() } else { None })
+    with_state(|s| {
+        if s.persisted.enabled {
+            s.persisted.snapshot.clone()
+        } else {
+            None
+        }
+    })
 }
 
 fn state_path(app: &AppHandle) -> Option<PathBuf> {
@@ -196,7 +202,9 @@ enum Outcome {
 }
 
 fn handle_report(app: &AppHandle, url: &Url) {
-    let Some(id) = with_state(|s| s.in_flight) else { return };
+    let Some(id) = with_state(|s| s.in_flight) else {
+        return;
+    };
     let report: Option<Value> = url
         .query_pairs()
         .find(|(k, _)| k == "d")
@@ -220,7 +228,10 @@ fn handle_report(app: &AppHandle, url: &Url) {
     } else if report["auth"].as_bool() == Some(true) {
         Ok(Outcome::NeedsLogin)
     } else {
-        Err(report["error"].as_str().unwrap_or("ошибка claude.ai").to_string())
+        Err(report["error"]
+            .as_str()
+            .unwrap_or("ошибка claude.ai")
+            .to_string())
     };
     finish(app, id, outcome);
 }
@@ -277,27 +288,33 @@ pub async fn claude_web_login(app: AppHandle) -> Result<(), String> {
     }
 
     let nav_app = app.clone();
-    let win = WebviewWindowBuilder::new(&app, LOGIN_LABEL, WebviewUrl::External(LOGIN_URL.parse().expect("valid url")))
-        .title("Вход в Claude — Dock Panel")
-        .inner_size(480.0, 760.0)
-        .center()
-        .on_navigation(move |url| {
-            // Leaving /login for the app itself means the sign-in went through.
-            let signed_in = url.host_str() == Some("claude.ai")
-                && ["/new", "/recents", "/chat", "/project"].iter().any(|p| url.path().starts_with(p));
-            if signed_in {
-                let app = nav_app.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(Duration::from_millis(800));
-                    if let Some(w) = app.get_webview_window(LOGIN_LABEL) {
-                        let _ = w.close();
-                    }
-                });
-            }
-            true
-        })
-        .build()
-        .map_err(|e| e.to_string())?;
+    let win = WebviewWindowBuilder::new(
+        &app,
+        LOGIN_LABEL,
+        WebviewUrl::External(LOGIN_URL.parse().expect("valid url")),
+    )
+    .title("Вход в Claude — Dock Panel")
+    .inner_size(480.0, 760.0)
+    .center()
+    .on_navigation(move |url| {
+        // Leaving /login for the app itself means the sign-in went through.
+        let signed_in = url.host_str() == Some("claude.ai")
+            && ["/new", "/recents", "/chat", "/project"]
+                .iter()
+                .any(|p| url.path().starts_with(p));
+        if signed_in {
+            let app = nav_app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(800));
+                if let Some(w) = app.get_webview_window(LOGIN_LABEL) {
+                    let _ = w.close();
+                }
+            });
+        }
+        true
+    })
+    .build()
+    .map_err(|e| e.to_string())?;
 
     let app_on_close = app.clone();
     win.on_window_event(move |event| {

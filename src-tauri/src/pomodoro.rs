@@ -36,7 +36,13 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { focus_min: 25, short_min: 5, long_min: 15, long_every: 4, auto_start: false }
+        Settings {
+            focus_min: 25,
+            short_min: 5,
+            long_min: 15,
+            long_every: 4,
+            auto_start: false,
+        }
     }
 }
 
@@ -158,7 +164,9 @@ fn with_timer<R>(f: impl FnOnce(&mut Timer) -> R) -> R {
 }
 
 fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
 }
 
 fn today() -> String {
@@ -171,7 +179,9 @@ fn path(app: &AppHandle) -> Option<PathBuf> {
 }
 
 fn save() {
-    let Some(p) = APP.get().and_then(path) else { return };
+    let Some(p) = APP.get().and_then(path) else {
+        return;
+    };
     if let Some(dir) = p.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
@@ -257,7 +267,13 @@ fn tick() {
     let day = today();
     let (ended, next, running, done, every) = with_timer(|t| {
         let ended = t.finish(now, &day, true);
-        (ended, t.phase, t.running, t.done_in_cycle, t.settings.long_every)
+        (
+            ended,
+            t.phase,
+            t.running,
+            t.done_in_cycle,
+            t.settings.long_every,
+        )
     });
     changed();
     announce(ended, next, running, done, every);
@@ -278,7 +294,11 @@ fn announce(ended: Phase, next: Phase, running: bool, done: u32, every: u32) {
         Phase::Short => format!("перерыв, {} мин", minutes(next)),
         Phase::Long => format!("длинный перерыв, {} мин", minutes(next)),
     };
-    let progress = if ended == Phase::Focus { format!(" ({done} из {every})") } else { String::new() };
+    let progress = if ended == Phase::Focus {
+        format!(" ({done} из {every})")
+    } else {
+        String::new()
+    };
     let body = if running {
         format!("Дальше {what}, уже идёт.{progress}")
     } else {

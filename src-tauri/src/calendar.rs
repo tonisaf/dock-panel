@@ -17,7 +17,9 @@ use crate::net;
 
 const FILE: &str = "calendars.json";
 const CACHE_TTL: Duration = Duration::from_secs(5 * 60);
-const PALETTE: [&str; 6] = ["#8ab4ff", "#6fcf97", "#f5a55b", "#f28fb5", "#b794f4", "#e9c46a"];
+const PALETTE: [&str; 6] = [
+    "#8ab4ff", "#6fcf97", "#f5a55b", "#f28fb5", "#b794f4", "#e9c46a",
+];
 
 #[derive(Serialize, Deserialize, Clone)]
 struct Stored {
@@ -36,14 +38,22 @@ pub struct CalendarInfo {
 
 impl From<&Stored> for CalendarInfo {
     fn from(s: &Stored) -> Self {
-        CalendarInfo { id: s.id.clone(), name: s.name.clone(), color: s.color.clone() }
+        CalendarInfo {
+            id: s.id.clone(),
+            name: s.name.clone(),
+            color: s.color.clone(),
+        }
     }
 }
 
 static CACHE: Mutex<Option<HashMap<String, (Instant, String)>>> = Mutex::new(None);
 
 fn path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join(FILE))
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join(FILE))
 }
 
 fn load(app: &AppHandle) -> Vec<Stored> {
@@ -64,11 +74,17 @@ fn save(app: &AppHandle, calendars: &[Stored]) -> Result<(), String> {
 }
 
 async fn fetch(url: &str) -> Result<String, String> {
-    let res = net::client().get(url).send().await.map_err(|e| format!("Нет связи с календарём: {e}"))?;
+    let res = net::client()
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("Нет связи с календарём: {e}"))?;
     let status = res.status();
     if !status.is_success() {
         return Err(match status.as_u16() {
-            401 | 403 | 404 => "Ссылка не работает: проверьте, что скопировали секретный адрес целиком.".into(),
+            401 | 403 | 404 => {
+                "Ссылка не работает: проверьте, что скопировали секретный адрес целиком.".into()
+            }
             code => format!("Календарь ответил ошибкой {code}"),
         });
     }
@@ -111,7 +127,9 @@ pub async fn calendar_add(app: AppHandle, url: String) -> Result<CalendarInfo, S
     let host = url.split('/').nth(2).unwrap_or("Календарь").to_string();
     let id = format!(
         "{:x}",
-        SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis())
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis())
     );
     let stored = Stored {
         id: id.clone(),
@@ -122,7 +140,11 @@ pub async fn calendar_add(app: AppHandle, url: String) -> Result<CalendarInfo, S
     let info = CalendarInfo::from(&stored);
     calendars.push(stored);
     save(&app, &calendars)?;
-    CACHE.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(id, (Instant::now(), ics));
+    CACHE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert_with(HashMap::new)
+        .insert(id, (Instant::now(), ics));
     Ok(info)
 }
 
@@ -150,7 +172,11 @@ pub async fn calendar_ics(app: AppHandle, id: String) -> Result<String, String> 
     if let Some(ics) = cached {
         return Ok(ics);
     }
-    let url = load(&app).into_iter().find(|c| c.id == id).ok_or("Календарь не найден")?.url;
+    let url = load(&app)
+        .into_iter()
+        .find(|c| c.id == id)
+        .ok_or("Календарь не найден")?
+        .url;
     let ics = fetch(&url).await?;
     CACHE
         .lock()

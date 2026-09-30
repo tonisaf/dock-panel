@@ -57,7 +57,9 @@ pub fn ask_start(app: AppHandle, prompt: String, model: Option<String>) -> Resul
     }
     let via_openclaw = model.as_deref() == Some(OPENCLAW);
     let via_lmstudio = model.as_deref() == Some(LMSTUDIO);
-    let model = model.filter(|m| allowed_model(m)).unwrap_or_else(|| "sonnet".into());
+    let model = model
+        .filter(|m| allowed_model(m))
+        .unwrap_or_else(|| "sonnet".into());
     ask_cancel();
     if via_openclaw {
         let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
@@ -102,9 +104,13 @@ pub fn ask_start(app: AppHandle, prompt: String, model: Option<String>) -> Resul
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    let mut child = cmd.spawn().map_err(|e| format!("Не удалось запустить claude: {e}"))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Не удалось запустить claude: {e}"))?;
     if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(prompt.as_bytes()).map_err(|e| e.to_string())?;
+        stdin
+            .write_all(prompt.as_bytes())
+            .map_err(|e| e.to_string())?;
     }
     let stdout = child.stdout.take().ok_or("нет вывода")?;
     let stderr = child.stderr.take();
@@ -117,20 +123,31 @@ pub fn ask_start(app: AppHandle, prompt: String, model: Option<String>) -> Resul
         let mut text = String::new();
         let mut result: Option<(String, bool)> = None;
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+            let Ok(v) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
             match v["type"].as_str() {
                 Some("stream_event") => {
                     let delta = &v["event"]["delta"];
                     if delta["type"] == "text_delta" {
                         if let Some(t) = delta["text"].as_str() {
                             text.push_str(t);
-                            let _ = app.emit("ask:delta", Delta { id, text: t.to_string() });
+                            let _ = app.emit(
+                                "ask:delta",
+                                Delta {
+                                    id,
+                                    text: t.to_string(),
+                                },
+                            );
                         }
                     }
                 }
                 Some("result") => {
                     let body = v["result"].as_str().unwrap_or_default().to_string();
-                    result = Some((body, v["is_error"].as_bool().unwrap_or(false) || v["subtype"] != "success"));
+                    result = Some((
+                        body,
+                        v["is_error"].as_bool().unwrap_or(false) || v["subtype"] != "success",
+                    ));
                 }
                 _ => {}
             }
@@ -164,7 +181,12 @@ pub fn ask_start(app: AppHandle, prompt: String, model: Option<String>) -> Resul
             None if !text.is_empty() => (text, false),
             None => (friendly_error(stderr_text.trim()), true),
         };
-        let done = Done { id, text: body, error, duration_ms: started.elapsed().as_millis() as u64 };
+        let done = Done {
+            id,
+            text: body,
+            error,
+            duration_ms: started.elapsed().as_millis() as u64,
+        };
         let _ = app.emit("ask:done", done);
     });
     Ok(id)
@@ -172,9 +194,11 @@ pub fn ask_start(app: AppHandle, prompt: String, model: Option<String>) -> Resul
 
 fn friendly_error(message: &str) -> String {
     let lower = message.to_lowercase();
-    if lower.contains("authenticate") || lower.contains("not logged in") || lower.contains("/login") {
+    if lower.contains("authenticate") || lower.contains("not logged in") || lower.contains("/login")
+    {
         NOT_LOGGED_IN.into()
-    } else if lower.contains("is not recognized") || lower.contains("не является внутренней") {
+    } else if lower.contains("is not recognized") || lower.contains("не является внутренней")
+    {
         "Claude Code не установлен: команда claude не найдена".into()
     } else if message.is_empty() {
         "Claude не ответил".into()
@@ -209,7 +233,9 @@ pub fn clipboard_text() -> Option<String> {
     #[cfg(windows)]
     unsafe {
         use windows::Win32::Foundation::{HANDLE, HGLOBAL};
-        use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
+        use windows::Win32::System::DataExchange::{
+            CloseClipboard, GetClipboardData, OpenClipboard,
+        };
         use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
         const CF_UNICODETEXT: u32 = 13;
 
@@ -241,7 +267,10 @@ mod tests {
 
     #[test]
     fn explains_login_errors() {
-        assert_eq!(friendly_error("Failed to authenticate: OAuth session expired"), NOT_LOGGED_IN);
+        assert_eq!(
+            friendly_error("Failed to authenticate: OAuth session expired"),
+            NOT_LOGGED_IN
+        );
         assert_eq!(friendly_error("Rate limited"), "Rate limited");
         assert!(allowed_model("haiku") && !allowed_model("--dangerously-skip-permissions"));
     }

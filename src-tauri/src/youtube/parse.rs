@@ -23,7 +23,14 @@ pub struct Video {
 pub fn parse_time(s: &str) -> Option<i64> {
     let b = s.as_bytes();
     let num = |from: usize, len: usize| s.get(from..from + len)?.parse::<i64>().ok();
-    let (y, mo, d, h, mi, se) = (num(0, 4)?, num(5, 2)?, num(8, 2)?, num(11, 2)?, num(14, 2)?, num(17, 2)?);
+    let (y, mo, d, h, mi, se) = (
+        num(0, 4)?,
+        num(5, 2)?,
+        num(8, 2)?,
+        num(11, 2)?,
+        num(14, 2)?,
+        num(17, 2)?,
+    );
     // Days from civil (Howard Hinnant), valid for the proleptic Gregorian calendar.
     let yy = if mo <= 2 { y - 1 } else { y };
     let era = yy.div_euclid(400);
@@ -55,17 +62,25 @@ const ATOM: &str = "http://www.w3.org/2005/Atom";
 const YT: &str = "http://www.youtube.com/xml/schemas/2015";
 const MEDIA: &str = "http://search.yahoo.com/mrss/";
 
-fn child<'a, 'i>(n: roxmltree::Node<'a, 'i>, ns: &str, name: &str) -> Option<roxmltree::Node<'a, 'i>> {
+fn child<'a, 'i>(
+    n: roxmltree::Node<'a, 'i>,
+    ns: &str,
+    name: &str,
+) -> Option<roxmltree::Node<'a, 'i>> {
     n.children().find(|c| c.has_tag_name((ns, name)))
 }
 
 fn text(n: Option<roxmltree::Node<'_, '_>>) -> String {
-    n.and_then(|n| n.text()).unwrap_or_default().trim().to_string()
+    n.and_then(|n| n.text())
+        .unwrap_or_default()
+        .trim()
+        .to_string()
 }
 
 /// A channel's Atom feed → its title and videos, newest first.
 pub fn parse_feed(xml: &str) -> Result<(String, Vec<Video>), String> {
-    let doc = roxmltree::Document::parse(xml).map_err(|e| format!("непонятный ответ YouTube: {e}"))?;
+    let doc =
+        roxmltree::Document::parse(xml).map_err(|e| format!("непонятный ответ YouTube: {e}"))?;
     let root = doc.root_element();
 
     let channel_title = text(child(root, ATOM, "title"));
@@ -78,9 +93,15 @@ pub fn parse_feed(xml: &str) -> Result<(String, Vec<Video>), String> {
             if id.is_empty() {
                 return None;
             }
-            let link = child(e, ATOM, "link").and_then(|l| l.attribute("href")).unwrap_or_default().to_string();
+            let link = child(e, ATOM, "link")
+                .and_then(|l| l.attribute("href"))
+                .unwrap_or_default()
+                .to_string();
             let group = child(e, MEDIA, "group");
-            let thumbnail = group.and_then(|g| child(g, MEDIA, "thumbnail")).and_then(|t| t.attribute("url")).map(str::to_string);
+            let thumbnail = group
+                .and_then(|g| child(g, MEDIA, "thumbnail"))
+                .and_then(|t| t.attribute("url"))
+                .map(str::to_string);
             let views = group
                 .and_then(|g| child(g, MEDIA, "community"))
                 .and_then(|c| child(c, MEDIA, "statistics"))
@@ -89,8 +110,16 @@ pub fn parse_feed(xml: &str) -> Result<(String, Vec<Video>), String> {
             let entry_channel = text(child(e, YT, "channelId"));
             Some(Video {
                 short: link.contains("/shorts/"),
-                url: if link.is_empty() { format!("https://www.youtube.com/watch?v={id}") } else { link },
-                channel_id: if entry_channel.is_empty() { channel_id.clone() } else { entry_channel },
+                url: if link.is_empty() {
+                    format!("https://www.youtube.com/watch?v={id}")
+                } else {
+                    link
+                },
+                channel_id: if entry_channel.is_empty() {
+                    channel_id.clone()
+                } else {
+                    entry_channel
+                },
                 channel_title: channel_title.clone(),
                 title: text(child(e, ATOM, "title")),
                 published: parse_time(&text(child(e, ATOM, "published"))).unwrap_or(0),
@@ -142,7 +171,10 @@ pub fn parse_duration(s: &str) -> Option<u32> {
 }
 
 pub fn is_channel_id(s: &str) -> bool {
-    s.len() == 24 && s.starts_with("UC") && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    s.len() == 24
+        && s.starts_with("UC")
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// The channel ID a channel, handle or video page declares.
@@ -166,8 +198,13 @@ pub fn parse_takeout(csv: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for line in csv.lines() {
         let fields = split_csv_line(line);
-        let Some(id) = fields.iter().find(|f| is_channel_id(f.trim())) else { continue };
-        let title = fields.last().map(|t| t.trim()).filter(|t| !t.is_empty() && !is_channel_id(t) && !t.starts_with("http"));
+        let Some(id) = fields.iter().find(|f| is_channel_id(f.trim())) else {
+            continue;
+        };
+        let title = fields
+            .last()
+            .map(|t| t.trim())
+            .filter(|t| !t.is_empty() && !is_channel_id(t) && !t.starts_with("http"));
         out.push((id.trim().to_string(), title.unwrap_or(id).to_string()));
     }
     out
@@ -235,11 +272,18 @@ mod tests {
         assert_eq!(videos.len(), 2);
         assert_eq!(videos[0].id, "bbbbbbbbbbb", "newest first");
         assert!(videos[0].short);
-        assert_eq!(videos[0].published, parse_time("2026-09-25T15:30:00Z").unwrap());
+        assert_eq!(
+            videos[0].published,
+            parse_time("2026-09-25T15:30:00Z").unwrap()
+        );
         assert_eq!(videos[1].title, "Older & longer");
         assert_eq!(videos[1].views, Some(12345));
         assert_eq!(videos[1].channel_id, "UC_x5XG1OV2P6uZZ5FSM9Ttw");
-        assert!(videos[1].thumbnail.as_deref().unwrap().contains("hqdefault"));
+        assert!(videos[1]
+            .thumbnail
+            .as_deref()
+            .unwrap()
+            .contains("hqdefault"));
     }
 
     #[test]
@@ -258,16 +302,25 @@ mod tests {
     fn parses_times() {
         assert_eq!(parse_time("1970-01-01T00:00:00+00:00"), Some(0));
         assert_eq!(parse_time("2000-03-01T00:00:00Z"), Some(951_868_800_000));
-        assert_eq!(parse_time("2026-09-25T18:30:00.123+03:00"), parse_time("2026-09-25T15:30:00Z"));
+        assert_eq!(
+            parse_time("2026-09-25T18:30:00.123+03:00"),
+            parse_time("2026-09-25T15:30:00Z")
+        );
         assert_eq!(parse_time("garbage"), None);
     }
 
     #[test]
     fn finds_channel_id_in_pages() {
         let handle = r#"<html><link rel="canonical" href="https://www.youtube.com/channel/UC_x5XG1OV2P6uZZ5FSM9Ttw"></html>"#;
-        assert_eq!(channel_id_in_page(handle).as_deref(), Some("UC_x5XG1OV2P6uZZ5FSM9Ttw"));
+        assert_eq!(
+            channel_id_in_page(handle).as_deref(),
+            Some("UC_x5XG1OV2P6uZZ5FSM9Ttw")
+        );
         let video = r#"<meta itemprop="channelId" content="UCBR8-60-B28hp2BmDPdntcQ">"#;
-        assert_eq!(channel_id_in_page(video).as_deref(), Some("UCBR8-60-B28hp2BmDPdntcQ"));
+        assert_eq!(
+            channel_id_in_page(video).as_deref(),
+            Some("UCBR8-60-B28hp2BmDPdntcQ")
+        );
         assert_eq!(channel_id_in_page("<html>nothing</html>"), None);
     }
 

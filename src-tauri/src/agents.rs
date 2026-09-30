@@ -91,11 +91,16 @@ static NOTIFY: AtomicBool = AtomicBool::new(true);
 static APP: OnceLock<AppHandle> = OnceLock::new();
 
 fn home() -> PathBuf {
-    std::env::var_os("USERPROFILE").map(PathBuf::from).unwrap_or_default()
+    std::env::var_os("USERPROFILE")
+        .map(PathBuf::from)
+        .unwrap_or_default()
 }
 
 fn folder_name(path: &str) -> String {
-    Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string())
+    Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string())
 }
 
 fn preview(text: &str, max: usize) -> String {
@@ -110,10 +115,14 @@ fn preview(text: &str, max: usize) -> String {
 // ---- Claude Code --------------------------------------------------------------
 
 fn claude_sessions() -> Vec<Agent> {
-    let Ok(dir) = std::fs::read_dir(home().join(".claude").join("sessions")) else { return Vec::new() };
+    let Ok(dir) = std::fs::read_dir(home().join(".claude").join("sessions")) else {
+        return Vec::new();
+    };
     dir.flatten()
         .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
-        .filter_map(|e| serde_json::from_str::<Value>(&std::fs::read_to_string(e.path()).ok()?).ok())
+        .filter_map(|e| {
+            serde_json::from_str::<Value>(&std::fs::read_to_string(e.path()).ok()?).ok()
+        })
         // Only sessions a person works in; `claude -p` runs (like the panel's quick questions) aren't.
         .filter(|v| v["kind"].as_str().is_none_or(|k| k == "interactive"))
         .filter_map(|v| {
@@ -133,14 +142,25 @@ fn claude_sessions() -> Vec<Agent> {
             Some(Agent {
                 id: format!("claude:{session}"),
                 kind: "claude",
-                name: v["name"].as_str().filter(|n| !n.is_empty()).unwrap_or("Claude Code").to_string(),
+                name: v["name"]
+                    .as_str()
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or("Claude Code")
+                    .to_string(),
                 project: folder_name(cwd),
                 host: host.to_string(),
                 busy,
                 waiting: false,
-                since: v["statusUpdatedAt"].as_u64().or(v["updatedAt"].as_u64()).unwrap_or(0),
+                since: v["statusUpdatedAt"]
+                    .as_u64()
+                    .or(v["updatedAt"].as_u64())
+                    .unwrap_or(0),
                 last_message: None,
-                activity: if busy { claude_activity(session, cwd) } else { None },
+                activity: if busy {
+                    claude_activity(session, cwd)
+                } else {
+                    None
+                },
                 pid: Some(pid),
                 host_exe,
             })
@@ -162,7 +182,9 @@ fn describe_tool(name: &str, input: &Value) -> String {
     let text = |key: &str| input[key].as_str().filter(|s| !s.is_empty());
     let file = |key: &str| text(key).map(|p| folder_name(&p.replace('\\', "/")));
     let detail = match name {
-        "Bash" | "PowerShell" => text("description").or_else(|| text("command")).map(str::to_string),
+        "Bash" | "PowerShell" => text("description")
+            .or_else(|| text("command"))
+            .map(str::to_string),
         "Read" | "Edit" | "Write" | "MultiEdit" => file("file_path"),
         "NotebookEdit" => file("notebook_path"),
         "Grep" | "Glob" => text("pattern").map(str::to_string),
@@ -218,12 +240,19 @@ static TRANSCRIPTS: Mutex<Option<HashMap<String, TranscriptCache>>> = Mutex::new
 fn find_transcript(session: &str, cwd: &str) -> Option<PathBuf> {
     let projects = home().join(".claude").join("projects");
     let file = format!("{session}.jsonl");
-    let slug: String = cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    let slug: String = cwd
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
     let guess = projects.join(slug).join(&file);
     if guess.is_file() {
         return Some(guess);
     }
-    std::fs::read_dir(projects).ok()?.flatten().map(|d| d.path().join(&file)).find(|p| p.is_file())
+    std::fs::read_dir(projects)
+        .ok()?
+        .flatten()
+        .map(|d| d.path().join(&file))
+        .find(|p| p.is_file())
 }
 
 fn claude_activity(session: &str, cwd: &str) -> Option<String> {
@@ -262,8 +291,12 @@ fn transcript_activity(path: &Path, len: u64) -> Option<String> {
     let mut last: Option<(String, String, Value, bool)> = None;
     for line in lines {
         if line.contains("\"tool_use\"") {
-            let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-            let call = v["message"]["content"].as_array().and_then(|c| c.iter().rev().find(|b| b["type"] == "tool_use"));
+            let Ok(v) = serde_json::from_str::<Value>(line) else {
+                continue;
+            };
+            let call = v["message"]["content"]
+                .as_array()
+                .and_then(|c| c.iter().rev().find(|b| b["type"] == "tool_use"));
             if let Some(b) = call {
                 last = Some((
                     b["id"].as_str().unwrap_or_default().to_string(),
@@ -273,7 +306,11 @@ fn transcript_activity(path: &Path, len: u64) -> Option<String> {
                 ));
             }
         } else if let Some((id, _, _, answered)) = last.as_mut() {
-            if !*answered && !id.is_empty() && line.contains("\"tool_result\"") && line.contains(id.as_str()) {
+            if !*answered
+                && !id.is_empty()
+                && line.contains("\"tool_result\"")
+                && line.contains(id.as_str())
+            {
                 *answered = true;
             }
         }
@@ -291,11 +328,17 @@ fn transcript_activity(path: &Path, len: u64) -> Option<String> {
 /// Session day folders for today and the two days before (the logs are dated in UTC).
 fn codex_day_dirs() -> Vec<PathBuf> {
     let root = home().join(".codex").join("sessions");
-    let today = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() / 86_400;
+    let today = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        / 86_400;
     (0..3)
         .map(|back| {
             let (y, m, d) = civil_from_days(today as i64 - back);
-            root.join(format!("{y:04}")).join(format!("{m:02}")).join(format!("{d:02}"))
+            root.join(format!("{y:04}"))
+                .join(format!("{m:02}"))
+                .join(format!("{d:02}"))
         })
         .collect()
 }
@@ -330,15 +373,24 @@ fn rfc3339_ms(ts: &str) -> Option<u64> {
     let doy = (153 * mp + 2) / 5 + day - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days = era * 146_097 + doe - 719_468;
-    let ms: i64 = frac.chars().take(3).collect::<String>().parse::<i64>().unwrap_or(0)
+    let ms: i64 = frac
+        .chars()
+        .take(3)
+        .collect::<String>()
+        .parse::<i64>()
+        .unwrap_or(0)
         * 10_i64.pow(3 - frac.len().min(3) as u32);
     Some((((days * 24 + hh) * 60 + mm) * 60 + ss) as u64 * 1000 + ms as u64)
 }
 
 /// Reads what was appended to a rollout log since last time.
 fn read_codex_file(path: &Path, f: &mut CodexFile) {
-    let Ok(mut file) = std::fs::File::open(path) else { return };
-    let Ok(len) = file.metadata().map(|m| m.len()) else { return };
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return;
+    };
+    let Ok(len) = file.metadata().map(|m| m.len()) else {
+        return;
+    };
     if len < f.offset {
         *f = CodexFile::default();
     }
@@ -350,7 +402,9 @@ fn read_codex_file(path: &Path, f: &mut CodexFile) {
         return;
     }
     // Only whole lines; a half-written last line is read next time.
-    let Some(end) = buf.iter().rposition(|&b| b == b'\n') else { return };
+    let Some(end) = buf.iter().rposition(|&b| b == b'\n') else {
+        return;
+    };
     f.offset += end as u64 + 1;
     for line in buf[..end].split(|&b| b == b'\n') {
         let line = String::from_utf8_lossy(line);
@@ -367,14 +421,19 @@ fn read_codex_file(path: &Path, f: &mut CodexFile) {
         } else {
             continue;
         };
-        let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
         let p = &v["payload"];
         let at = v["timestamp"].as_str().and_then(rfc3339_ms).unwrap_or(0);
         match kind {
             "meta" => {
                 f.id = p["id"].as_str().map(str::to_string);
                 f.cwd = p["cwd"].as_str().unwrap_or_default().to_string();
-                f.host = match (p["originator"].as_str().unwrap_or_default(), p["source"].as_str().unwrap_or_default()) {
+                f.host = match (
+                    p["originator"].as_str().unwrap_or_default(),
+                    p["source"].as_str().unwrap_or_default(),
+                ) {
                     (o, _) if o.contains("Desktop") => "Codex",
                     (_, "vscode") => "VS Code",
                     _ => "терминал",
@@ -387,11 +446,21 @@ fn read_codex_file(path: &Path, f: &mut CodexFile) {
                 f.since = at;
                 f.activity = None;
             }
-            "call" if matches!(p["type"].as_str(), Some("function_call" | "custom_tool_call")) => {
-                f.activity = Some(codex_activity(p["name"].as_str().unwrap_or_default(), &p["arguments"]));
+            "call"
+                if matches!(
+                    p["type"].as_str(),
+                    Some("function_call" | "custom_tool_call")
+                ) =>
+            {
+                f.activity = Some(codex_activity(
+                    p["name"].as_str().unwrap_or_default(),
+                    &p["arguments"],
+                ));
             }
             // The answer to a question came back; what happens next is unknown until the next call.
-            "output" if p["type"] == "function_call_output" && f.activity.as_deref() == Some(ASKING) => {
+            "output"
+                if p["type"] == "function_call_output" && f.activity.as_deref() == Some(ASKING) =>
+            {
                 f.activity = None;
             }
             "complete" if p["type"] == "task_complete" => {
@@ -415,7 +484,12 @@ fn codex_titles(t: &mut Tracker) {
         .unwrap_or_default()
         .lines()
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter_map(|v| Some((v["id"].as_str()?.to_string(), v["thread_name"].as_str()?.to_string())))
+        .filter_map(|v| {
+            Some((
+                v["id"].as_str()?.to_string(),
+                v["thread_name"].as_str()?.to_string(),
+            ))
+        })
         .collect();
     t.codex_titles = (modified, titles);
 }
@@ -448,14 +522,22 @@ fn codex_sessions(t: &mut Tracker) -> Vec<Agent> {
         out.push(Agent {
             id: format!("codex:{id}"),
             kind: "codex",
-            name: t.codex_titles.1.get(&id).cloned().unwrap_or_else(|| "Codex".into()),
+            name: t
+                .codex_titles
+                .1
+                .get(&id)
+                .cloned()
+                .unwrap_or_else(|| "Codex".into()),
             project: folder_name(&f.cwd),
             host: f.host.clone(),
             busy: f.busy && silent < CODEX_STALE_TURN,
             waiting: false,
             since: f.since,
             last_message: f.last_message.clone(),
-            activity: f.activity.clone().filter(|_| f.busy && silent < CODEX_STALE_TURN),
+            activity: f
+                .activity
+                .clone()
+                .filter(|_| f.busy && silent < CODEX_STALE_TURN),
             pid: None,
             host_exe: match f.host.as_str() {
                 // The Codex desktop app (package OpenAI.Codex) runs as ChatGPT.exe.
@@ -525,9 +607,16 @@ fn poll(app: &AppHandle) {
 
 /// A toast for a session that finished, or (`asking`) stopped on a question.
 fn notify(app: &AppHandle, a: &Agent, asking: bool) {
-    let who = if a.kind == "claude" { "Claude" } else { "Codex" };
+    let who = if a.kind == "claude" {
+        "Claude"
+    } else {
+        "Codex"
+    };
     let (title, body) = if asking {
-        (format!("{who} ждёт вас · {}", a.project), format!("{}\n{}", a.name, a.activity.as_deref().unwrap_or(ASKING)))
+        (
+            format!("{who} ждёт вас · {}", a.project),
+            format!("{}\n{}", a.name, a.activity.as_deref().unwrap_or(ASKING)),
+        )
     } else {
         let body = match &a.last_message {
             Some(m) => format!("{}\n{}", a.name, preview(m, 140)),
@@ -550,7 +639,11 @@ fn notify(app: &AppHandle, a: &Agent, asking: bool) {
 
 /// Sessions waiting for the user, for the taskbar button.
 pub fn waiting_count() -> usize {
-    TRACKER.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map_or(0, |t| t.waiting.len())
+    TRACKER
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .map_or(0, |t| t.waiting.len())
 }
 
 fn settings_path(app: &AppHandle) -> Option<PathBuf> {
@@ -582,8 +675,16 @@ pub struct AgentsState {
 
 #[tauri::command]
 pub fn agents_list() -> AgentsState {
-    let agents = TRACKER.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|t| t.agents.clone()).unwrap_or_default();
-    AgentsState { agents, notify: NOTIFY.load(Ordering::SeqCst) }
+    let agents = TRACKER
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .map(|t| t.agents.clone())
+        .unwrap_or_default();
+    AgentsState {
+        agents,
+        notify: NOTIFY.load(Ordering::SeqCst),
+    }
 }
 
 /// Clears "waiting" for one session, or for all with `None`.
@@ -624,7 +725,11 @@ pub fn agents_set_notify(app: AppHandle, on: bool) {
 pub fn agents_focus(app: AppHandle, id: String) -> Result<(), String> {
     agents_dismiss(Some(id.clone()));
     crate::panel::request_hide(&app);
-    if focus(&id) { Ok(()) } else { Err("Не нашёл окно этой сессии".into()) }
+    if focus(&id) {
+        Ok(())
+    } else {
+        Err("Не нашёл окно этой сессии".into())
+    }
 }
 
 fn focus(id: &str) -> bool {
@@ -632,8 +737,15 @@ fn focus(id: &str) -> bool {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .as_ref()
-        .and_then(|t| t.agents.iter().find(|a| a.id == id).map(|a| (a.pid, a.host_exe)));
-    let Some((pid, exe)) = target else { return false };
+        .and_then(|t| {
+            t.agents
+                .iter()
+                .find(|a| a.id == id)
+                .map(|a| (a.pid, a.host_exe))
+        });
+    let Some((pid, exe)) = target else {
+        return false;
+    };
     #[cfg(windows)]
     {
         process::focus(pid, exe)
@@ -654,17 +766,22 @@ mod process {
     use windows::core::BOOL;
     use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, STILL_ACTIVE};
     use windows::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
     };
-    use windows::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    use windows::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindow, GetWindowTextLengthW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
-        SetForegroundWindow, ShowWindow, GW_OWNER, SW_RESTORE,
+        EnumWindows, GetWindow, GetWindowTextLengthW, GetWindowThreadProcessId, IsIconic,
+        IsWindowVisible, SetForegroundWindow, ShowWindow, GW_OWNER, SW_RESTORE,
     };
 
     pub fn alive(pid: u32) -> bool {
         unsafe {
-            let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return false };
+            let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
+                return false;
+            };
             let mut code = 0u32;
             let ok = GetExitCodeProcess(h, &mut code).is_ok() && code == STILL_ACTIVE.0 as u32;
             let _ = CloseHandle(h);
@@ -676,11 +793,20 @@ mod process {
     fn processes() -> HashMap<u32, (String, u32)> {
         let mut out = HashMap::new();
         unsafe {
-            let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return out };
-            let mut e = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+            let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
+                return out;
+            };
+            let mut e = PROCESSENTRY32W {
+                dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+                ..Default::default()
+            };
             let mut more = Process32FirstW(snap, &mut e).is_ok();
             while more {
-                let len = e.szExeFile.iter().position(|&c| c == 0).unwrap_or(e.szExeFile.len());
+                let len = e
+                    .szExeFile
+                    .iter()
+                    .position(|&c| c == 0)
+                    .unwrap_or(e.szExeFile.len());
                 let name = String::from_utf16_lossy(&e.szExeFile[..len]).to_lowercase();
                 out.insert(e.th32ProcessID, (name, e.th32ParentProcessID));
                 more = Process32NextW(snap, &mut e).is_ok();
@@ -719,7 +845,10 @@ mod process {
         let procs = processes();
         let windows = app_windows();
         let by_exe = exe.and_then(|exe| {
-            windows.iter().find(|(p, _)| procs.get(p).is_some_and(|(name, _)| name == exe)).map(|(_, &h)| h)
+            windows
+                .iter()
+                .find(|(p, _)| procs.get(p).is_some_and(|(name, _)| name == exe))
+                .map(|(_, &h)| h)
         });
         let by_parent = || {
             let mut cur = pid?;
@@ -731,7 +860,9 @@ mod process {
             }
             None
         };
-        let Some(hwnd) = by_exe.or_else(by_parent) else { return false };
+        let Some(hwnd) = by_exe.or_else(by_parent) else {
+            return false;
+        };
         unsafe {
             if IsIconic(hwnd).as_bool() {
                 let _ = ShowWindow(hwnd, SW_RESTORE);
@@ -760,17 +891,38 @@ mod tests {
         let mut all = claude_sessions();
         all.extend(codex_sessions(&mut t));
         for a in all {
-            println!("{} | {} | busy={} | activity={:?}", a.kind, a.name, a.busy, a.activity);
+            println!(
+                "{} | {} | busy={} | activity={:?}",
+                a.kind, a.name, a.busy, a.activity
+            );
         }
     }
 
     #[test]
     fn describes_claude_tool_calls() {
         let d = |name, input: Value| describe_tool(name, &input);
-        assert_eq!(d("Bash", serde_json::json!({"command": "cargo test", "description": "Run tests"})), "Bash: Run tests");
-        assert_eq!(d("Bash", serde_json::json!({"command": "cargo test"})), "Bash: cargo test");
-        assert_eq!(d("Edit", serde_json::json!({"file_path": "C:\\a\\b\\agents.rs"})), "Edit: agents.rs");
-        assert_eq!(d("Grep", serde_json::json!({"pattern": "fn poll"})), "Grep: fn poll");
+        assert_eq!(
+            d(
+                "Bash",
+                serde_json::json!({"command": "cargo test", "description": "Run tests"})
+            ),
+            "Bash: Run tests"
+        );
+        assert_eq!(
+            d("Bash", serde_json::json!({"command": "cargo test"})),
+            "Bash: cargo test"
+        );
+        assert_eq!(
+            d(
+                "Edit",
+                serde_json::json!({"file_path": "C:\\a\\b\\agents.rs"})
+            ),
+            "Edit: agents.rs"
+        );
+        assert_eq!(
+            d("Grep", serde_json::json!({"pattern": "fn poll"})),
+            "Grep: fn poll"
+        );
         assert_eq!(d("mcp__srv__do_thing", serde_json::json!({})), "do_thing");
         assert_eq!(d("Read", serde_json::json!({})), "Read");
     }
@@ -781,9 +933,15 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("s.jsonl");
         let call = |id: &str, name: &str, input: &str| {
-            format!(r#"{{"type":"assistant","message":{{"content":[{{"type":"tool_use","id":"{id}","name":"{name}","input":{input}}}]}}}}"#)
+            format!(
+                r#"{{"type":"assistant","message":{{"content":[{{"type":"tool_use","id":"{id}","name":"{name}","input":{input}}}]}}}}"#
+            )
         };
-        let result = |id: &str| format!(r#"{{"type":"user","message":{{"content":[{{"type":"tool_result","tool_use_id":"{id}"}}]}}}}"#);
+        let result = |id: &str| {
+            format!(
+                r#"{{"type":"user","message":{{"content":[{{"type":"tool_result","tool_use_id":"{id}"}}]}}}}"#
+            )
+        };
         let activity = |lines: &[String]| {
             std::fs::write(&path, lines.join("\n") + "\n").unwrap();
             transcript_activity(&path, std::fs::metadata(&path).unwrap().len())
@@ -791,13 +949,25 @@ mod tests {
 
         let read = call("t1", "Read", r#"{"file_path":"/x/lib.rs"}"#);
         assert_eq!(activity(&[read.clone()]).as_deref(), Some("Read: lib.rs"));
-        assert_eq!(activity(&[read.clone(), result("t1")]).as_deref(), Some("Read: lib.rs"));
+        assert_eq!(
+            activity(&[read.clone(), result("t1")]).as_deref(),
+            Some("Read: lib.rs")
+        );
 
         let ask = call("t2", "AskUserQuestion", "{}");
-        assert_eq!(activity(&[read.clone(), result("t1"), ask.clone()]).as_deref(), Some(ASKING));
+        assert_eq!(
+            activity(&[read.clone(), result("t1"), ask.clone()]).as_deref(),
+            Some(ASKING)
+        );
         // Once answered it is just the latest tool again.
-        assert_eq!(activity(&[ask.clone(), result("t2")]).as_deref(), Some("AskUserQuestion"));
-        assert_eq!(activity(&[call("t3", "ExitPlanMode", "{}")]).as_deref(), Some(PLAN));
+        assert_eq!(
+            activity(&[ask.clone(), result("t2")]).as_deref(),
+            Some("AskUserQuestion")
+        );
+        assert_eq!(
+            activity(&[call("t3", "ExitPlanMode", "{}")]).as_deref(),
+            Some(PLAN)
+        );
         assert_eq!(activity(&[r#"{"type":"user"}"#.to_string()]), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -833,7 +1003,10 @@ mod tests {
     #[test]
     fn parses_log_timestamps() {
         assert_eq!(rfc3339_ms("1970-01-01T00:00:01.500Z"), Some(1500));
-        assert_eq!(rfc3339_ms("2026-09-26T21:18:23.506Z"), Some(1_790_457_503_506));
+        assert_eq!(
+            rfc3339_ms("2026-09-26T21:18:23.506Z"),
+            Some(1_790_457_503_506)
+        );
     }
 
     #[test]

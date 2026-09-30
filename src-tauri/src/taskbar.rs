@@ -102,9 +102,9 @@ mod native {
     use windows::core::{w, PCWSTR};
     use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
     use windows::Win32::Graphics::Gdi::{
-        CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetMonitorInfoW, MonitorFromWindow,
-        SelectObject, AC_SRC_ALPHA, AC_SRC_OVER, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION, DIB_RGB_COLORS,
-        HDC, HGDIOBJ, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+        CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetMonitorInfoW,
+        MonitorFromWindow, SelectObject, AC_SRC_ALPHA, AC_SRC_OVER, BITMAPINFO, BITMAPINFOHEADER,
+        BI_RGB, BLENDFUNCTION, DIB_RGB_COLORS, HDC, HGDIOBJ, MONITORINFO, MONITOR_DEFAULTTONEAREST,
     };
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
@@ -113,12 +113,13 @@ mod native {
         ReleaseCapture, SetCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowW, GetMessageW, GetWindow, GetWindowRect,
-        SetWindowPos, GW_HWNDPREV, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
-        IsWindowVisible, LoadCursorW, PostQuitMessage, RegisterClassW, SetTimer, ShowWindow, TranslateMessage,
-        UpdateLayeredWindow, IDC_ARROW, MA_NOACTIVATE, MSG, SW_HIDE, SW_SHOWNOACTIVATE, ULW_ALPHA, WM_DESTROY,
-        WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_TIMER, WNDCLASSW, WS_EX_LAYERED,
-        WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+        CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowW, GetMessageW, GetWindow,
+        GetWindowRect, IsWindowVisible, LoadCursorW, PostQuitMessage, RegisterClassW, SetTimer,
+        SetWindowPos, ShowWindow, TranslateMessage, UpdateLayeredWindow, GW_HWNDPREV, HWND_TOPMOST,
+        IDC_ARROW, MA_NOACTIVATE, MSG, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
+        SW_HIDE, SW_SHOWNOACTIVATE, ULW_ALPHA, WM_DESTROY, WM_LBUTTONDOWN, WM_LBUTTONUP,
+        WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+        WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
     };
 
     use crate::{agents, discord, gcal, mail, media, panel, pomodoro};
@@ -210,7 +211,12 @@ mod native {
     impl Ink {
         /// Premultiplied BGRA at `cover` (0-1).
         fn at(self, cover: f64) -> (f64, f64, f64, f64) {
-            (self.2 * cover, self.1 * cover, self.0 * cover, 255.0 * cover)
+            (
+                self.2 * cover,
+                self.1 * cover,
+                self.0 * cover,
+                255.0 * cover,
+            )
         }
     }
 
@@ -270,12 +276,23 @@ mod native {
         }
 
         fn width(&self) -> i32 {
-            [Some(self.panel), self.mic, self.pomodoro, self.mail, self.tasks, self.agents, self.info, self.prev, self.toggle, self.next]
-                .into_iter()
-                .flatten()
-                .map(|z| z.x + z.w)
-                .max()
-                .unwrap_or(0)
+            [
+                Some(self.panel),
+                self.mic,
+                self.pomodoro,
+                self.mail,
+                self.tasks,
+                self.agents,
+                self.info,
+                self.prev,
+                self.toggle,
+                self.next,
+            ]
+            .into_iter()
+            .flatten()
+            .map(|z| z.x + z.w)
+            .max()
+            .unwrap_or(0)
         }
     }
 
@@ -327,8 +344,14 @@ mod native {
             width: i.width() as usize,
             height: i.height() as usize,
         });
-        std::thread::Builder::new().name("taskbar-button".into()).spawn(move || run(icon)).ok();
-        std::thread::Builder::new().name("taskbar-media".into()).spawn(poll_media).ok();
+        std::thread::Builder::new()
+            .name("taskbar-button".into())
+            .spawn(move || run(icon))
+            .ok();
+        std::thread::Builder::new()
+            .name("taskbar-media".into())
+            .spawn(poll_media)
+            .ok();
     }
 
     // ---- media ------------------------------------------------------------------
@@ -340,7 +363,9 @@ mod native {
         loop {
             let wanted = super::enabled() && super::player_enabled();
             // The panel's own YouTube player (mpv) isn't a system media session: show it first.
-            if let Some((title, channel, playing)) = wanted.then(crate::player::now_playing).flatten() {
+            if let Some((title, channel, playing)) =
+                wanted.then(crate::player::now_playing).flatten()
+            {
                 *MEDIA.lock().unwrap_or_else(|e| e.into_inner()) = Some(Media {
                     title,
                     artist: channel,
@@ -359,7 +384,11 @@ mod native {
                 }
                 continue;
             }
-            let now = if wanted { media::win::now_playing().ok().flatten() } else { None };
+            let now = if wanted {
+                media::win::now_playing().ok().flatten()
+            } else {
+                None
+            };
             let next = now.filter(|n| !n.title.is_empty()).map(|n| {
                 let new_key = (n.title.clone(), n.artist.clone());
                 if new_key != key {
@@ -370,7 +399,10 @@ mod native {
                 // Players often publish the art a moment after the title.
                 if cover.is_none() && cover_tries < 3 {
                     cover_tries += 1;
-                    cover = media::win::cover_pixels(COVER_PX).ok().flatten().map(Arc::new);
+                    cover = media::win::cover_pixels(COVER_PX)
+                        .ok()
+                        .flatten()
+                        .map(Arc::new);
                 }
                 Media {
                     title: n.title,
@@ -415,7 +447,9 @@ mod native {
 
     fn run(icon: Option<Icon>) {
         STATE.with_borrow_mut(|s| s.icon = icon);
-        let Ok(module) = (unsafe { GetModuleHandleW(None) }) else { return };
+        let Ok(module) = (unsafe { GetModuleHandleW(None) }) else {
+            return;
+        };
         let class = WNDCLASSW {
             lpfnWndProc: Some(wndproc),
             hInstance: module.into(),
@@ -479,7 +513,12 @@ mod native {
         ((lparam.0 >> 16) & 0xFFFF) as i16 as i32
     }
 
-    unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    unsafe extern "system" fn wndproc(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
         match msg {
             WM_TIMER => update(hwnd),
             WM_MOUSEACTIVATE => return LRESULT(MA_NOACTIVATE as isize),
@@ -517,7 +556,11 @@ mod native {
                     let mut r = RECT::default();
                     let _ = unsafe { GetWindowRect(hwnd, &mut r) };
                     let y = mouse_y(lparam);
-                    let on = if y >= 0 && y < r.bottom - r.top { s.layout.hit(mouse_x(lparam)) } else { None };
+                    let on = if y >= 0 && y < r.bottom - r.top {
+                        s.layout.hit(mouse_x(lparam))
+                    } else {
+                        None
+                    };
                     (s.pressed.take(), on)
                 });
                 update(hwnd);
@@ -594,7 +637,10 @@ mod native {
 
         let mut bar = RECT::default();
         unsafe { GetWindowRect(taskbar, &mut bar) }.ok()?;
-        let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
         let monitor = unsafe { MonitorFromWindow(taskbar, MONITOR_DEFAULTTONEAREST) };
         unsafe { GetMonitorInfoW(monitor, &mut info) }.ok().ok()?;
         let top = bar.top.max(info.rcMonitor.top);
@@ -616,7 +662,11 @@ mod native {
 
     /// "7", "42", "99+".
     fn badge_label(count: usize) -> String {
-        if count > 99 { "99+".into() } else { count.to_string() }
+        if count > 99 {
+            "99+".into()
+        } else {
+            count.to_string()
+        }
     }
 
     /// "24:59".
@@ -634,8 +684,22 @@ mod native {
         px(COUNTER_PAD + GLYPH + COUNTER_GAP + COUNTER_PAD, scale) + number
     }
 
-    fn layout(scale: f64, media: Option<&Media>, mic: bool, timer: Option<&str>, unread: usize, due: usize, waiting: usize) -> Layout {
-        let mut l = Layout { panel: Zone { x: 0, w: px(BUTTON_W, scale) }, ..Default::default() };
+    fn layout(
+        scale: f64,
+        media: Option<&Media>,
+        mic: bool,
+        timer: Option<&str>,
+        unread: usize,
+        due: usize,
+        waiting: usize,
+    ) -> Layout {
+        let mut l = Layout {
+            panel: Zone {
+                x: 0,
+                w: px(BUTTON_W, scale),
+            },
+            ..Default::default()
+        };
         let gap = px(GAP, scale);
         let mut x = l.panel.w + gap;
         if mic {
@@ -667,7 +731,9 @@ mod native {
 
         let title = text::width(&m.title, px(TITLE_PX, scale), 600);
         let artist = text::width(&m.artist, px(ARTIST_PX, scale), 400);
-        l.text_w = title.max(artist).clamp(px(TEXT_MIN, scale), px(TEXT_MAX, scale));
+        l.text_w = title
+            .max(artist)
+            .clamp(px(TEXT_MIN, scale), px(TEXT_MAX, scale));
 
         // The track and its controls are one group: no gaps inside it.
         let info_w = px(INFO_PAD + COVER + TEXT_GAP + INFO_PAD, scale) + l.text_w;
@@ -701,12 +767,36 @@ mod native {
                 w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
                 w!("SystemUsesLightTheme"),
             ) == Some(1);
-            let media = if super::player_enabled() { media_now() } else { None };
-            let unread = if super::mail_enabled() { mail::unread_total() } else { 0 };
-            let due = if super::tasks_enabled() { gcal::due_today() } else { 0 };
-            let waiting = if super::agents_enabled() { agents::waiting_count() } else { 0 };
-            let mic = if super::mic_enabled() { discord::mic_state() } else { None };
-            let timer = if super::pomodoro_enabled() { pomodoro::taskbar_state() } else { None };
+            let media = if super::player_enabled() {
+                media_now()
+            } else {
+                None
+            };
+            let unread = if super::mail_enabled() {
+                mail::unread_total()
+            } else {
+                0
+            };
+            let due = if super::tasks_enabled() {
+                gcal::due_today()
+            } else {
+                0
+            };
+            let waiting = if super::agents_enabled() {
+                agents::waiting_count()
+            } else {
+                0
+            };
+            let mic = if super::mic_enabled() {
+                discord::mic_state()
+            } else {
+                None
+            };
+            let timer = if super::pomodoro_enabled() {
+                pomodoro::taskbar_state()
+            } else {
+                None
+            };
             let timer_label = timer.map(|(_, secs, _)| clock_label(secs));
             // Text is measured only when the track (or a counter's label) changes.
             let same_track = s.drawn.as_ref().is_some_and(|d| {
@@ -716,16 +806,42 @@ mod native {
                     && badge_label(d.unread) == badge_label(unread)
                     && badge_label(d.due) == badge_label(due)
                     && badge_label(d.waiting) == badge_label(waiting)
-                    && d.media.as_ref().map(|m| (&m.title, &m.artist, m.can_prev, m.can_next))
-                        == media.as_ref().map(|m| (&m.title, &m.artist, m.can_prev, m.can_next))
+                    && d.media
+                        .as_ref()
+                        .map(|m| (&m.title, &m.artist, m.can_prev, m.can_next))
+                        == media
+                            .as_ref()
+                            .map(|m| (&m.title, &m.artist, m.can_prev, m.can_next))
             });
             let layout = match &s.drawn {
                 Some(d) if same_track => d.layout.clone(),
-                _ => layout(scale, media.as_ref(), mic.is_some(), timer_label.as_deref(), unread, due, waiting),
+                _ => layout(
+                    scale,
+                    media.as_ref(),
+                    mic.is_some(),
+                    timer_label.as_deref(),
+                    unread,
+                    due,
+                    waiting,
+                ),
             };
             s.layout = layout.clone();
-            let look =
-                Look { x, y, h, scale, light, hover: s.hover, pressed: s.pressed, media, mic, pomodoro: timer, unread, due, waiting, layout };
+            let look = Look {
+                x,
+                y,
+                h,
+                scale,
+                light,
+                hover: s.hover,
+                pressed: s.pressed,
+                media,
+                mic,
+                pomodoro: timer,
+                unread,
+                due,
+                waiting,
+                layout,
+            };
             if s.drawn.as_ref() != Some(&look) && draw(hwnd, &look, s.icon.as_ref()).is_some() {
                 s.drawn = Some(look);
             }
@@ -781,7 +897,11 @@ mod native {
             let (w, h) = (w.max(1) as usize, h.max(1) as usize);
             // Alpha 1 everywhere: fully transparent pixels of a layered window
             // don't receive the mouse.
-            Canvas { w, h, px: [0u8, 0, 0, 1].repeat(w * h) }
+            Canvas {
+                w,
+                h,
+                px: [0u8, 0, 0, 1].repeat(w * h),
+            }
         }
 
         /// "Over" blend of a premultiplied colour at (x, y).
@@ -804,10 +924,22 @@ mod native {
             (0.5 - ((dx * dx + dy * dy).sqrt() - r)).clamp(0.0, 1.0)
         }
 
-        fn round_rect(&mut self, rect: (f64, f64, f64, f64), r: f64, ink: impl Into<Ink>, alpha: f64) {
+        fn round_rect(
+            &mut self,
+            rect: (f64, f64, f64, f64),
+            r: f64,
+            ink: impl Into<Ink>,
+            alpha: f64,
+        ) {
             let ink = ink.into();
-            let (x0, y0) = (rect.0.floor().max(0.0) as usize, rect.1.floor().max(0.0) as usize);
-            let (x1, y1) = ((rect.0 + rect.2).ceil() as usize, (rect.1 + rect.3).ceil() as usize);
+            let (x0, y0) = (
+                rect.0.floor().max(0.0) as usize,
+                rect.1.floor().max(0.0) as usize,
+            );
+            let (x1, y1) = (
+                (rect.0 + rect.2).ceil() as usize,
+                (rect.1 + rect.3).ceil() as usize,
+            );
             for y in y0..y1.min(self.h) {
                 for x in x0..x1.min(self.w) {
                     let c = Self::round_cover(x as f64 + 0.5, y as f64 + 0.5, rect, r) * alpha;
@@ -819,18 +951,34 @@ mod native {
         }
 
         /// The outline of a rounded rectangle, the stroke inside its edge.
-        fn round_rect_outline(&mut self, rect: (f64, f64, f64, f64), r: f64, stroke: f64, ink: impl Into<Ink>, alpha: f64) {
+        fn round_rect_outline(
+            &mut self,
+            rect: (f64, f64, f64, f64),
+            r: f64,
+            stroke: f64,
+            ink: impl Into<Ink>,
+            alpha: f64,
+        ) {
             let ink = ink.into();
             let (cx, cy) = (rect.0 + rect.2 / 2.0, rect.1 + rect.3 / 2.0);
-            let (x0, y0) = (rect.0.floor().max(0.0) as usize, rect.1.floor().max(0.0) as usize);
-            let (x1, y1) = ((rect.0 + rect.2).ceil() as usize, (rect.1 + rect.3).ceil() as usize);
+            let (x0, y0) = (
+                rect.0.floor().max(0.0) as usize,
+                rect.1.floor().max(0.0) as usize,
+            );
+            let (x1, y1) = (
+                (rect.0 + rect.2).ceil() as usize,
+                (rect.1 + rect.3).ceil() as usize,
+            );
             for y in y0..y1.min(self.h) {
                 for x in x0..x1.min(self.w) {
                     // Signed distance to the rectangle's edge, negative inside.
                     let qx = (x as f64 + 0.5 - cx).abs() - (rect.2 / 2.0 - r);
                     let qy = (y as f64 + 0.5 - cy).abs() - (rect.3 / 2.0 - r);
-                    let d = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + qx.max(qy).min(0.0) - r;
-                    let cover = (stroke / 2.0 + 0.5 - (d + stroke / 2.0).abs()).clamp(0.0, 1.0) * alpha;
+                    let d = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt()
+                        + qx.max(qy).min(0.0)
+                        - r;
+                    let cover =
+                        (stroke / 2.0 + 0.5 - (d + stroke / 2.0).abs()).clamp(0.0, 1.0) * alpha;
                     if cover > 0.0 {
                         self.blend(x, y, ink.at(cover));
                     }
@@ -839,10 +987,20 @@ mod native {
         }
 
         /// A circle outline of radius `r` (to the stroke's middle), antialiased.
-        fn ring(&mut self, (cx, cy): (f64, f64), r: f64, stroke: f64, ink: impl Into<Ink>, alpha: f64) {
+        fn ring(
+            &mut self,
+            (cx, cy): (f64, f64),
+            r: f64,
+            stroke: f64,
+            ink: impl Into<Ink>,
+            alpha: f64,
+        ) {
             let ink = ink.into();
             let reach = r + stroke;
-            let (x0, y0) = ((cx - reach).floor().max(0.0) as usize, (cy - reach).floor().max(0.0) as usize);
+            let (x0, y0) = (
+                (cx - reach).floor().max(0.0) as usize,
+                (cy - reach).floor().max(0.0) as usize,
+            );
             let (x1, y1) = ((cx + reach).ceil() as usize, (cy + reach).ceil() as usize);
             for y in y0..y1.min(self.h) {
                 for x in x0..x1.min(self.w) {
@@ -861,7 +1019,9 @@ mod native {
             let ink = ink.into();
             let seg_dist = |(px, py): (f64, f64), a: (f64, f64), b: (f64, f64)| {
                 let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-                let t = (((px - a.0) * dx + (py - a.1) * dy) / (dx * dx + dy * dy).max(f64::EPSILON)).clamp(0.0, 1.0);
+                let t = (((px - a.0) * dx + (py - a.1) * dy)
+                    / (dx * dx + dy * dy).max(f64::EPSILON))
+                .clamp(0.0, 1.0);
                 ((px - a.0 - t * dx).powi(2) + (py - a.1 - t * dy).powi(2)).sqrt()
             };
             let x0 = points.iter().map(|p| p.0).fold(f64::MAX, f64::min) - w;
@@ -871,7 +1031,10 @@ mod native {
             for y in (y0.floor().max(0.0) as usize)..(y1.ceil() as usize).min(self.h) {
                 for x in (x0.floor().max(0.0) as usize)..(x1.ceil() as usize).min(self.w) {
                     let p = (x as f64 + 0.5, y as f64 + 0.5);
-                    let d = points.windows(2).map(|s| seg_dist(p, s[0], s[1])).fold(f64::MAX, f64::min);
+                    let d = points
+                        .windows(2)
+                        .map(|s| seg_dist(p, s[0], s[1]))
+                        .fold(f64::MAX, f64::min);
                     let cover = (w / 2.0 + 0.5 - d).clamp(0.0, 1.0) * alpha;
                     if cover > 0.0 {
                         self.blend(x, y, ink.at(cover));
@@ -891,9 +1054,15 @@ mod native {
         ) {
             let rect = (ox as f64, oy as f64, size as f64, size as f64);
             for ty in 0..size {
-                let (y0, y1) = (ty * sh / size, ((ty + 1) * sh / size).max(ty * sh / size + 1).min(sh));
+                let (y0, y1) = (
+                    ty * sh / size,
+                    ((ty + 1) * sh / size).max(ty * sh / size + 1).min(sh),
+                );
                 for tx in 0..size {
-                    let (x0, x1) = (tx * sw / size, ((tx + 1) * sw / size).max(tx * sw / size + 1).min(sw));
+                    let (x0, x1) = (
+                        tx * sw / size,
+                        ((tx + 1) * sw / size).max(tx * sw / size + 1).min(sw),
+                    );
                     let mut acc = [0.0; 4];
                     let mut n = 0.0;
                     for sy in y0..y1 {
@@ -908,7 +1077,11 @@ mod native {
                         continue;
                     }
                     let (x, y) = (ox + tx, oy + ty);
-                    let clip = if r > 0.0 { Self::round_cover(x as f64 + 0.5, y as f64 + 0.5, rect, r) } else { 1.0 };
+                    let clip = if r > 0.0 {
+                        Self::round_cover(x as f64 + 0.5, y as f64 + 0.5, rect, r)
+                    } else {
+                        1.0
+                    };
                     let k = clip / n;
                     self.blend(x, y, (acc[0] * k, acc[1] * k, acc[2] * k, acc[3] * k));
                 }
@@ -917,22 +1090,37 @@ mod native {
 
         /// Filled triangle, antialiased by 4×4 supersampling.
         fn triangle(&mut self, p: [(f64, f64); 3], tone: f64, alpha: f64) {
-            let edge = |a: (f64, f64), b: (f64, f64), x: f64, y: f64| (b.0 - a.0) * (y - a.1) - (b.1 - a.1) * (x - a.0);
+            let edge = |a: (f64, f64), b: (f64, f64), x: f64, y: f64| {
+                (b.0 - a.0) * (y - a.1) - (b.1 - a.1) * (x - a.0)
+            };
             let area = edge(p[0], p[1], p[2].0, p[2].1);
             let inside = |x: f64, y: f64| {
-                let e = [edge(p[0], p[1], x, y), edge(p[1], p[2], x, y), edge(p[2], p[0], x, y)];
+                let e = [
+                    edge(p[0], p[1], x, y),
+                    edge(p[1], p[2], x, y),
+                    edge(p[2], p[0], x, y),
+                ];
                 e.iter().all(|&v| v * area >= 0.0)
             };
             let xs = p.map(|q| q.0);
             let ys = p.map(|q| q.1);
-            let (x0, x1) = (xs.iter().cloned().fold(f64::MAX, f64::min), xs.iter().cloned().fold(f64::MIN, f64::max));
-            let (y0, y1) = (ys.iter().cloned().fold(f64::MAX, f64::min), ys.iter().cloned().fold(f64::MIN, f64::max));
+            let (x0, x1) = (
+                xs.iter().cloned().fold(f64::MAX, f64::min),
+                xs.iter().cloned().fold(f64::MIN, f64::max),
+            );
+            let (y0, y1) = (
+                ys.iter().cloned().fold(f64::MAX, f64::min),
+                ys.iter().cloned().fold(f64::MIN, f64::max),
+            );
             for y in (y0.floor().max(0.0) as usize)..(y1.ceil() as usize).min(self.h) {
                 for x in (x0.floor().max(0.0) as usize)..(x1.ceil() as usize).min(self.w) {
                     let mut hits = 0;
                     for sy in 0..4 {
                         for sx in 0..4 {
-                            if inside(x as f64 + (sx as f64 + 0.5) / 4.0, y as f64 + (sy as f64 + 0.5) / 4.0) {
+                            if inside(
+                                x as f64 + (sx as f64 + 0.5) / 4.0,
+                                y as f64 + (sy as f64 + 0.5) / 4.0,
+                            ) {
                                 hits += 1;
                             }
                         }
@@ -946,7 +1134,13 @@ mod native {
         }
 
         /// Tints an alpha mask (e.g. rendered text) into the canvas at (ox, oy).
-        fn mask(&mut self, mask: &[u8], (ox, oy, mw, mh): (usize, usize, usize, usize), ink: impl Into<Ink>, alpha: f64) {
+        fn mask(
+            &mut self,
+            mask: &[u8],
+            (ox, oy, mw, mh): (usize, usize, usize, usize),
+            ink: impl Into<Ink>,
+            alpha: f64,
+        ) {
             let ink = ink.into();
             for y in 0..mh {
                 for x in 0..mw {
@@ -971,20 +1165,24 @@ mod native {
             D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
         };
         use windows::Win32::Graphics::Direct2D::{
-            D2D1CreateFactory, ID2D1Factory, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_FACTORY_TYPE_SINGLE_THREADED,
-            D2D1_RENDER_TARGET_PROPERTIES, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE,
+            D2D1CreateFactory, ID2D1Factory, D2D1_DRAW_TEXT_OPTIONS_NONE,
+            D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_RENDER_TARGET_PROPERTIES,
+            D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE,
         };
         use windows::Win32::Graphics::DirectWrite::{
-            DWriteCreateFactory, IDWriteFactory, IDWriteTextFormat, IDWriteTextLayout, DWRITE_FACTORY_TYPE_SHARED,
-            DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT,
-            DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_METRICS, DWRITE_TRIMMING,
-            DWRITE_TRIMMING_GRANULARITY_CHARACTER, DWRITE_WORD_WRAPPING_NO_WRAP,
+            DWriteCreateFactory, IDWriteFactory, IDWriteTextFormat, IDWriteTextLayout,
+            DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_WEIGHT, DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_METRICS,
+            DWRITE_TRIMMING, DWRITE_TRIMMING_GRANULARITY_CHARACTER, DWRITE_WORD_WRAPPING_NO_WRAP,
         };
         use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
         use windows::Win32::Graphics::Imaging::{
-            CLSID_WICImagingFactory, GUID_WICPixelFormat32bppPBGRA, IWICImagingFactory, WICBitmapCacheOnLoad,
+            CLSID_WICImagingFactory, GUID_WICPixelFormat32bppPBGRA, IWICImagingFactory,
+            WICBitmapCacheOnLoad,
         };
-        use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+        use windows::Win32::System::Com::{
+            CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
+        };
 
         /// Windows 11's UI font; DirectWrite falls back on its own if it's missing.
         const FAMILY: &str = "Segoe UI Variable Text";
@@ -1007,14 +1205,22 @@ mod native {
                     Some(Factories {
                         d2d: D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None).ok()?,
                         dwrite: DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED).ok()?,
-                        wic: CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER).ok()?,
+                        wic: CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)
+                            .ok()?,
                     })
                 });
                 factories.as_ref().and_then(|x| f(x).ok())
             })
         }
 
-        fn layout(f: &Factories, text: &str, px: i32, weight: i32, w: f32, h: f32) -> Result<IDWriteTextLayout> {
+        fn layout(
+            f: &Factories,
+            text: &str,
+            px: i32,
+            weight: i32,
+            w: f32,
+            h: f32,
+        ) -> Result<IDWriteTextLayout> {
             unsafe {
                 let format: IDWriteTextFormat = f.dwrite.CreateTextFormat(
                     &HSTRING::from(FAMILY),
@@ -1028,7 +1234,10 @@ mod native {
                 format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
                 format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
                 let ellipsis = f.dwrite.CreateEllipsisTrimmingSign(&format)?;
-                let trimming = DWRITE_TRIMMING { granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER, ..Default::default() };
+                let trimming = DWRITE_TRIMMING {
+                    granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER,
+                    ..Default::default()
+                };
                 format.SetTrimming(&trimming, &ellipsis)?;
                 let wide: Vec<u16> = text.encode_utf16().collect();
                 f.dwrite.CreateTextLayout(&wide, &format, w, h)
@@ -1050,7 +1259,12 @@ mod native {
         pub fn mask(text: &str, px: i32, weight: i32, w: i32, h: i32) -> Vec<u8> {
             let (w, h) = (w.max(1), h.max(1));
             with(|f| unsafe {
-                let bitmap = f.wic.CreateBitmap(w as u32, h as u32, &GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad)?;
+                let bitmap = f.wic.CreateBitmap(
+                    w as u32,
+                    h as u32,
+                    &GUID_WICPixelFormat32bppPBGRA,
+                    WICBitmapCacheOnLoad,
+                )?;
                 let props = D2D1_RENDER_TARGET_PROPERTIES {
                     pixelFormat: D2D1_PIXEL_FORMAT {
                         format: DXGI_FORMAT_B8G8R8A8_UNORM,
@@ -1062,12 +1276,22 @@ mod native {
                 };
                 let target = f.d2d.CreateWicBitmapRenderTarget(&bitmap, &props)?;
                 target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
-                let white = D2D1_COLOR_F { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
+                let white = D2D1_COLOR_F {
+                    r: 1.0,
+                    g: 1.0,
+                    b: 1.0,
+                    a: 1.0,
+                };
                 let brush = target.CreateSolidColorBrush(&white, None)?;
                 let l = layout(f, text, px, weight, w as f32, h as f32)?;
                 target.BeginDraw();
                 target.Clear(Some(&D2D1_COLOR_F::default()));
-                target.DrawTextLayout(windows_numerics::Vector2 { X: 0.0, Y: 0.0 }, &l, &brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+                target.DrawTextLayout(
+                    windows_numerics::Vector2 { X: 0.0, Y: 0.0 },
+                    &l,
+                    &brush,
+                    D2D1_DRAW_TEXT_OPTIONS_NONE,
+                );
                 target.EndDraw(None, None)?;
                 let mut px_buf = vec![0u8; (w * h * 4) as usize];
                 bitmap.CopyPixels(std::ptr::null(), (w * 4) as u32, &mut px_buf)?;
@@ -1103,13 +1327,21 @@ mod native {
                     ..Default::default()
                 };
                 let mut bits = std::ptr::null_mut();
-                let Ok(bitmap) = CreateDIBSection(Some(dc), &info, DIB_RGB_COLORS, &mut bits, None, 0) else {
+                let Ok(bitmap) =
+                    CreateDIBSection(Some(dc), &info, DIB_RGB_COLORS, &mut bits, None, 0)
+                else {
                     let _ = DeleteDC(dc);
                     return None;
                 };
                 let bitmap = HGDIOBJ(bitmap.0);
                 let old = SelectObject(dc, bitmap);
-                Some(Surface { dc, bitmap, old, bits: bits as *mut u8, len: (w * h * 4) as usize })
+                Some(Surface {
+                    dc,
+                    bitmap,
+                    old,
+                    bits: bits as *mut u8,
+                    len: (w * h * 4) as usize,
+                })
             }
         }
 
@@ -1128,7 +1360,6 @@ mod native {
         }
     }
 
-
     fn draw(hwnd: HWND, look: &Look, icon: Option<&Icon>) -> Option<()> {
         present(hwnd, look, &render(look, icon))
     }
@@ -1142,11 +1373,21 @@ mod native {
         let fg = if look.light { 0.0 } else { 255.0 };
         let mid = h as f64 / 2.0;
         // Pressed parts nudge down a pixel, like the taskbar's own buttons.
-        let nudge = |hit: Hit| if look.pressed == Some(hit) { s.round() } else { 0.0 };
+        let nudge = |hit: Hit| {
+            if look.pressed == Some(hit) {
+                s.round()
+            } else {
+                0.0
+            }
+        };
 
         // Hover / pressed plates.
         let plate = |hit: Hit| -> f64 {
-            match (look.pressed == Some(hit), look.hover == Some(hit), look.light) {
+            match (
+                look.pressed == Some(hit),
+                look.hover == Some(hit),
+                look.light,
+            ) {
                 (true, _, false) => 0.045,
                 (false, true, false) => 0.075,
                 (true, _, true) => 0.035,
@@ -1179,13 +1420,24 @@ mod native {
 
         // App icon.
         if let Some(icon) = icon {
-            let size = (px(ICON, s) as usize).min(l.panel.w as usize).min(h as usize).max(1);
-            let origin =
-                ((l.panel.w as usize - size) / 2, (h as usize - size) / 2 + nudge(Hit::Panel) as usize, size);
+            let size = (px(ICON, s) as usize)
+                .min(l.panel.w as usize)
+                .min(h as usize)
+                .max(1);
+            let origin = (
+                (l.panel.w as usize - size) / 2,
+                (h as usize - size) / 2 + nudge(Hit::Panel) as usize,
+                size,
+            );
             c.image(origin, (icon.width, icon.height), 0.0, |x, y| {
                 let p = &icon.rgba[(y * icon.width + x) * 4..][..4];
                 let a = p[3] as f64 / 255.0;
-                [p[2] as f64 * a, p[1] as f64 * a, p[0] as f64 * a, p[3] as f64]
+                [
+                    p[2] as f64 * a,
+                    p[1] as f64 * a,
+                    p[0] as f64 * a,
+                    p[3] as f64,
+                ]
             });
         }
 
@@ -1205,7 +1457,13 @@ mod native {
             let k = 0.85;
             let at = |x: f64, y: f64| (cx + x * k * s, cy + y * k * s);
             let (x0, y0) = at(-3.0, -10.0);
-            c.round_rect_outline((x0, y0, 6.0 * k * s, 13.0 * k * s), 3.0 * k * s, stroke, ink, INK);
+            c.round_rect_outline(
+                (x0, y0, 6.0 * k * s, 13.0 * k * s),
+                3.0 * k * s,
+                stroke,
+                ink,
+                INK,
+            );
             let r = 7.0;
             let mut cradle = vec![at(r, -2.0)];
             cradle.extend((0..=12).map(|i| {
@@ -1228,7 +1486,11 @@ mod native {
                 (false, true) => GREEN_LIGHT,
                 (false, false) => GREEN_DARK,
             };
-            let (ink, alpha) = if running { (ink, INK) } else { (Ink::from(fg), INK_DIM) };
+            let (ink, alpha) = if running {
+                (ink, INK)
+            } else {
+                (Ink::from(fg), INK_DIM)
+            };
             let cy = mid + nudge(Hit::Pomodoro);
             let gx = z.x as f64 + COUNTER_PAD * s + GLYPH * s / 2.0;
             // Lucide's "timer" at 18 DIPs: dial, crown, hand.
@@ -1241,11 +1503,20 @@ mod native {
             let (tw, line) = (z.x + z.w - px(COUNTER_PAD, s) - tx + 2, px(LINE, s));
             let mask = text::mask(&clock_label(secs), px(TITLE_PX, s), 600, tw, line);
             let top = (cy - line as f64 / 2.0).round() as usize;
-            c.mask(&mask, (tx as usize, top, tw as usize, line as usize), ink, alpha);
+            c.mask(
+                &mask,
+                (tx as usize, top, tw as usize, line as usize),
+                ink,
+                alpha,
+            );
         }
 
         // Counters: an outline glyph in an 18-DIP box, then the number.
-        let counter = |c: &mut Canvas, z: Zone, hit: Hit, count: usize, glyph: &dyn Fn(&mut Canvas, (f64, f64))| {
+        let counter = |c: &mut Canvas,
+                       z: Zone,
+                       hit: Hit,
+                       count: usize,
+                       glyph: &dyn Fn(&mut Canvas, (f64, f64))| {
             let cy = mid + nudge(hit);
             let gx = z.x as f64 + COUNTER_PAD * s + GLYPH * s / 2.0;
             glyph(c, (gx, cy));
@@ -1253,7 +1524,12 @@ mod native {
             let (tw, line) = (z.x + z.w - px(COUNTER_PAD, s) - tx + 2, px(LINE, s));
             let mask = text::mask(&badge_label(count), px(TITLE_PX, s), 600, tw, line);
             let top = (cy - line as f64 / 2.0).round() as usize;
-            c.mask(&mask, (tx as usize, top, tw as usize, line as usize), fg, INK);
+            c.mask(
+                &mask,
+                (tx as usize, top, tw as usize, line as usize),
+                fg,
+                INK,
+            );
         };
         if let Some(z) = l.mail {
             counter(&mut c, z, Hit::Mail, look.unread, &|c, (cx, cy)| {
@@ -1262,7 +1538,16 @@ mod native {
                 let (x, y) = (cx - w / 2.0, cy - hh / 2.0);
                 c.round_rect_outline((x, y, w, hh), 2.5 * s, stroke, fg, INK);
                 let inset = stroke * 1.5;
-                c.polyline(&[(x + inset, y + inset), (cx, cy + 0.5 * s), (x + w - inset, y + inset)], stroke, fg, INK);
+                c.polyline(
+                    &[
+                        (x + inset, y + inset),
+                        (cx, cy + 0.5 * s),
+                        (x + w - inset, y + inset),
+                    ],
+                    stroke,
+                    fg,
+                    INK,
+                );
             });
         }
         if let Some(z) = l.tasks {
@@ -1270,7 +1555,12 @@ mod native {
                 // Ticked circle, as in Google Tasks: the stroke's outer edge fills the 18-DIP box.
                 c.ring((cx, cy), (GLYPH * s - stroke) / 2.0, stroke, fg, INK);
                 let at = |x: f64, y: f64| (cx + x * s, cy + y * s);
-                c.polyline(&[at(-3.6, 0.2), at(-1.0, 2.8), at(3.9, -2.4)], stroke, fg, INK);
+                c.polyline(
+                    &[at(-3.6, 0.2), at(-1.0, 2.8), at(3.9, -2.4)],
+                    stroke,
+                    fg,
+                    INK,
+                );
             });
         }
         if let Some(z) = l.agents {
@@ -1279,7 +1569,17 @@ mod native {
                 let at = |x: f64, y: f64| (cx + x * s, cy + y * s);
                 let (r, k) = (8.25, 2.1);
                 c.polyline(
-                    &[at(0.0, -r), at(k, -k), at(r, 0.0), at(k, k), at(0.0, r), at(-k, k), at(-r, 0.0), at(-k, -k), at(0.0, -r)],
+                    &[
+                        at(0.0, -r),
+                        at(k, -k),
+                        at(r, 0.0),
+                        at(k, k),
+                        at(0.0, r),
+                        at(-k, k),
+                        at(-r, 0.0),
+                        at(-k, -k),
+                        at(0.0, -r),
+                    ],
                     stroke,
                     fg,
                     INK,
@@ -1295,22 +1595,40 @@ mod native {
             match &m.cover {
                 Some(pixels) => {
                     let n = COVER_PX as usize;
-                    c.image((cx, cy, cover as usize), (n, n), COVER_RADIUS * s, |x, y| {
-                        let p = &pixels[(y * n + x) * 4..][..4];
-                        [p[0] as f64, p[1] as f64, p[2] as f64, p[3] as f64]
-                    });
+                    c.image(
+                        (cx, cy, cover as usize),
+                        (n, n),
+                        COVER_RADIUS * s,
+                        |x, y| {
+                            let p = &pixels[(y * n + x) * 4..][..4];
+                            [p[0] as f64, p[1] as f64, p[2] as f64, p[3] as f64]
+                        },
+                    );
                 }
-                None => c.round_rect((cx as f64, cy as f64, cover as f64, cover as f64), COVER_RADIUS * s, fg, 0.08),
+                None => c.round_rect(
+                    (cx as f64, cy as f64, cover as f64, cover as f64),
+                    COVER_RADIUS * s,
+                    fg,
+                    0.08,
+                ),
             }
 
             let tx = cx + (cover + px(TEXT_GAP, s)) as usize;
             let line = px(LINE, s);
-            let (tw, top) = (l.text_w, (h / 2 - line) as usize + nudge(Hit::Info) as usize);
+            let (tw, top) = (
+                l.text_w,
+                (h / 2 - line) as usize + nudge(Hit::Info) as usize,
+            );
             let title = text::mask(&m.title, px(TITLE_PX, s), 600, tw, line);
             c.mask(&title, (tx, top, tw as usize, line as usize), fg, INK);
             if !m.artist.is_empty() {
                 let artist = text::mask(&m.artist, px(ARTIST_PX, s), 400, tw, line);
-                c.mask(&artist, (tx, top + line as usize, tw as usize, line as usize), fg, INK_DIM);
+                c.mask(
+                    &artist,
+                    (tx, top + line as usize, tw as usize, line as usize),
+                    fg,
+                    INK_DIM,
+                );
             }
 
             // Control glyphs: filled shapes, 12 DIPs tall, around the zone's centre.
@@ -1323,7 +1641,9 @@ mod native {
                     c.round_rect((ax, ay, (x1 - x0) * s, 12.0 * s), 1.0 * s, fg, INK);
                 };
                 match shape {
-                    Glyph::Play => c.triangle([at(-4.0, -6.5), at(-4.0, 6.5), at(6.5, 0.0)], fg, INK),
+                    Glyph::Play => {
+                        c.triangle([at(-4.0, -6.5), at(-4.0, 6.5), at(6.5, 0.0)], fg, INK)
+                    }
                     Glyph::Pause => {
                         bar(c, -4.5, -1.25);
                         bar(c, 1.25, 4.5);
@@ -1339,7 +1659,12 @@ mod native {
                 }
             };
             glyph(&mut c, l.prev, Glyph::Prev, Hit::Prev);
-            glyph(&mut c, l.toggle, if m.playing { Glyph::Pause } else { Glyph::Play }, Hit::Toggle);
+            glyph(
+                &mut c,
+                l.toggle,
+                if m.playing { Glyph::Pause } else { Glyph::Play },
+                Hit::Toggle,
+            );
             glyph(&mut c, l.next, Glyph::Next, Hit::Next);
         }
 
@@ -1360,7 +1685,10 @@ mod native {
             UpdateLayeredWindow(
                 hwnd,
                 None,
-                Some(&POINT { x: look.x, y: look.y }),
+                Some(&POINT {
+                    x: look.x,
+                    y: look.y,
+                }),
                 Some(&SIZE { cx: w, cy: h }),
                 Some(surface.dc),
                 Some(&POINT { x: 0, y: 0 }),
@@ -1383,7 +1711,11 @@ mod native {
             let mut reader = decoder.read_info().unwrap();
             let mut buf = vec![0; reader.output_buffer_size()];
             let info = reader.next_frame(&mut buf).unwrap();
-            Icon { rgba: buf[..info.buffer_size()].to_vec(), width: info.width as usize, height: info.height as usize }
+            Icon {
+                rgba: buf[..info.buffer_size()].to_vec(),
+                width: info.width as usize,
+                height: info.height as usize,
+            }
         }
 
         /// A stand-in album cover: a diagonal gradient.
@@ -1393,7 +1725,12 @@ mod native {
                 (0..n * n)
                     .flat_map(|i| {
                         let t = ((i % n) + (i / n)) as f64 / (2 * n) as f64;
-                        [(200.0 - 120.0 * t) as u8, (90.0 + 60.0 * t) as u8, (40.0 + 150.0 * t) as u8, 255]
+                        [
+                            (200.0 - 120.0 * t) as u8,
+                            (90.0 + 60.0 * t) as u8,
+                            (40.0 + 150.0 * t) as u8,
+                            255,
+                        ]
                     })
                     .collect(),
             )
@@ -1413,7 +1750,15 @@ mod native {
             let mic = Some((light, !light));
             // Light rows: focus running; dark rows: a paused break.
             let pomodoro = Some((light, 754, light));
-            let layout = layout(scale, Some(&media), true, Some(&clock_label(754)), unread, due, waiting);
+            let layout = layout(
+                scale,
+                Some(&media),
+                true,
+                Some(&clock_label(754)),
+                unread,
+                due,
+                waiting,
+            );
             Look {
                 x: 0,
                 y: 0,
@@ -1453,7 +1798,10 @@ mod native {
         fn taskbar_preview() {
             let icon = app_icon();
             // PREVIEW_SCALE=1 shows the real size at 100 % display scaling.
-            let scale = std::env::var("PREVIEW_SCALE").ok().and_then(|s| s.parse().ok()).unwrap_or(2.0);
+            let scale = std::env::var("PREVIEW_SCALE")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(2.0);
             let pad = 12usize;
             let light_bg = (238.0, 242.0, 246.0);
             let dark_bg = (28.0, 30.0, 34.0);
@@ -1479,7 +1827,8 @@ mod native {
                 }
             }
             let path = std::env::temp_dir().join("taskbar-preview.png");
-            let mut enc = png::Encoder::new(std::fs::File::create(&path).unwrap(), w as u32, h as u32);
+            let mut enc =
+                png::Encoder::new(std::fs::File::create(&path).unwrap(), w as u32, h as u32);
             enc.set_color(png::ColorType::Rgba);
             enc.set_depth(png::BitDepth::Eight);
             enc.write_header().unwrap().write_image_data(&out).unwrap();

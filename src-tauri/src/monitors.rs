@@ -55,7 +55,9 @@ fn feature_code(feature: &str) -> Option<u8> {
 /// that have them: `vcp(10 12 60(11 12 0F) D6(01 04))`.
 fn parse_vcp(caps: &str) -> Vec<(u8, Vec<u32>)> {
     let lower = caps.to_ascii_lowercase();
-    let Some(start) = lower.find("vcp(") else { return Vec::new() };
+    let Some(start) = lower.find("vcp(") else {
+        return Vec::new();
+    };
     let body = &caps[start + 4..];
     let mut out: Vec<(u8, Vec<u32>)> = Vec::new();
     let mut depth = 0;
@@ -103,13 +105,17 @@ pub fn warm_up() {
 
 #[tauri::command]
 pub async fn monitors_list() -> Result<Vec<Monitor>, String> {
-    tauri::async_runtime::spawn_blocking(win::list).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(win::list)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub async fn monitor_set(id: String, feature: String, value: u32) -> Result<(), String> {
     let code = feature_code(&feature).ok_or("неизвестная настройка")?;
-    tauri::async_runtime::spawn_blocking(move || win::set(&id, code, value)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || win::set(&id, code, value))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Blacks out every screen and turns monitors' brightness to the minimum.
@@ -158,15 +164,16 @@ mod blackout {
     use tauri::{AppHandle, Emitter};
     use windows::core::w;
     use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-    use windows::Win32::Graphics::Gdi::{GetStockObject, HBRUSH, BLACK_BRUSH};
+    use windows::Win32::Graphics::Gdi::{GetStockObject, BLACK_BRUSH, HBRUSH};
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::System::Threading::GetCurrentThreadId;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, LoadCursorW, PostQuitMessage,
-        PostThreadMessageW, RegisterClassW, SetCursor, SetForegroundWindow, SetWindowPos, TranslateMessage,
-        HWND_TOPMOST, IDC_ARROW, MSG, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WM_KEYDOWN, WM_LBUTTONDOWN,
-        WM_MBUTTONDOWN, WM_QUIT, WM_RBUTTONDOWN, WM_SETCURSOR, WM_SYSKEYDOWN, WNDCLASSW, WS_EX_TOOLWINDOW,
-        WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, LoadCursorW,
+        PostQuitMessage, PostThreadMessageW, RegisterClassW, SetCursor, SetForegroundWindow,
+        SetWindowPos, TranslateMessage, HWND_TOPMOST, IDC_ARROW, MSG, SWP_NOACTIVATE, SWP_NOMOVE,
+        SWP_NOSIZE, WM_KEYDOWN, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_QUIT, WM_RBUTTONDOWN,
+        WM_SETCURSOR, WM_SYSKEYDOWN, WNDCLASSW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+        WS_VISIBLE,
     };
 
     use super::{win, BRIGHTNESS};
@@ -209,12 +216,24 @@ mod blackout {
                 None
             };
             // The panel's own monitor keeps its brightness, or the panel would be unreadable.
-            let keep = panel.and_then(win::device_of).map(|device| format!("{device}#"));
+            let keep = panel
+                .and_then(win::device_of)
+                .map(|device| format!("{device}#"));
 
             let windows = cover(panel.is_none());
             if let Some(panel) = panel {
                 // The black windows came later, so they're above the panel: put it back on top.
-                let _ = unsafe { SetWindowPos(panel, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
+                let _ = unsafe {
+                    SetWindowPos(
+                        panel,
+                        Some(HWND_TOPMOST),
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                    )
+                };
                 let _ = unsafe { SetForegroundWindow(panel) };
             }
             *STARTED_AT.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
@@ -259,7 +278,9 @@ mod blackout {
     /// One black window per screen, on this thread; `focus` takes the keyboard
     /// so any key can end the blackout.
     fn cover(focus: bool) -> Vec<HWND> {
-        let Ok(module) = (unsafe { GetModuleHandleW(None) }) else { return Vec::new() };
+        let Ok(module) = (unsafe { GetModuleHandleW(None) }) else {
+            return Vec::new();
+        };
         let class = WNDCLASSW {
             lpfnWndProc: Some(wndproc),
             hInstance: module.into(),
@@ -297,10 +318,19 @@ mod blackout {
         windows
     }
 
-    unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    unsafe extern "system" fn wndproc(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
         match msg {
             WM_SETCURSOR => {
-                let cursor = if HIDE_CURSOR.load(Ordering::SeqCst) { None } else { unsafe { LoadCursorW(None, IDC_ARROW) }.ok() };
+                let cursor = if HIDE_CURSOR.load(Ordering::SeqCst) {
+                    None
+                } else {
+                    unsafe { LoadCursorW(None, IDC_ARROW) }.ok()
+                };
                 unsafe { SetCursor(cursor) };
                 return LRESULT(1);
             }
@@ -323,18 +353,20 @@ mod win {
     use std::sync::Mutex;
     use std::time::Duration;
 
+    use windows::core::BOOL;
     use windows::Win32::Devices::Display::{
-        CapabilitiesRequestAndCapabilitiesReply, DestroyPhysicalMonitors, DisplayConfigGetDeviceInfo,
-        GetCapabilitiesStringLength, GetDisplayConfigBufferSizes, GetNumberOfPhysicalMonitorsFromHMONITOR,
-        GetPhysicalMonitorsFromHMONITOR, GetVCPFeatureAndVCPFeatureReply, QueryDisplayConfig, SetVCPFeature,
+        CapabilitiesRequestAndCapabilitiesReply, DestroyPhysicalMonitors,
+        DisplayConfigGetDeviceInfo, GetCapabilitiesStringLength, GetDisplayConfigBufferSizes,
+        GetNumberOfPhysicalMonitorsFromHMONITOR, GetPhysicalMonitorsFromHMONITOR,
+        GetVCPFeatureAndVCPFeatureReply, QueryDisplayConfig, SetVCPFeature,
         DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
         DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO, DISPLAYCONFIG_SOURCE_DEVICE_NAME,
         DISPLAYCONFIG_TARGET_DEVICE_NAME, PHYSICAL_MONITOR, QDC_ONLY_ACTIVE_PATHS,
     };
-    use windows::core::BOOL;
     use windows::Win32::Foundation::{LPARAM, RECT};
     use windows::Win32::Graphics::Gdi::{
-        EnumDisplayMonitors, GetMonitorInfoW, MonitorFromWindow, HDC, HMONITOR, MONITORINFOEXW, MONITOR_DEFAULTTONEAREST,
+        EnumDisplayMonitors, GetMonitorInfoW, MonitorFromWindow, HDC, HMONITOR, MONITORINFOEXW,
+        MONITOR_DEFAULTTONEAREST,
     };
 
     use super::{parse_vcp, Choice, Level, Monitor, BRIGHTNESS, CONTRAST, INPUT, POWER, VOLUME};
@@ -360,8 +392,15 @@ mod win {
             }
             let mut paths = vec![DISPLAYCONFIG_PATH_INFO::default(); np as usize];
             let mut modes = vec![DISPLAYCONFIG_MODE_INFO::default(); nm as usize];
-            if QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &mut np, paths.as_mut_ptr(), &mut nm, modes.as_mut_ptr(), None)
-                .is_err()
+            if QueryDisplayConfig(
+                QDC_ONLY_ACTIVE_PATHS,
+                &mut np,
+                paths.as_mut_ptr(),
+                &mut nm,
+                modes.as_mut_ptr(),
+                None,
+            )
+            .is_err()
             {
                 return names;
             }
@@ -376,7 +415,9 @@ mod win {
                 target.header.size = std::mem::size_of_val(&target) as u32;
                 target.header.adapterId = path.targetInfo.adapterId;
                 target.header.id = path.targetInfo.id;
-                if DisplayConfigGetDeviceInfo(&mut source.header) == 0 && DisplayConfigGetDeviceInfo(&mut target.header) == 0 {
+                if DisplayConfigGetDeviceInfo(&mut source.header) == 0
+                    && DisplayConfigGetDeviceInfo(&mut target.header) == 0
+                {
                     let name = wide(&target.monitorFriendlyDeviceName);
                     if !name.is_empty() {
                         names.insert(wide(&source.viewGdiDeviceName), name);
@@ -403,14 +444,21 @@ mod win {
         }
         let mut handles: Vec<HMONITOR> = Vec::new();
         unsafe {
-            let _ = EnumDisplayMonitors(None, None, Some(collect), LPARAM(&mut handles as *mut _ as isize));
+            let _ = EnumDisplayMonitors(
+                None,
+                None,
+                Some(collect),
+                LPARAM(&mut handles as *mut _ as isize),
+            );
         }
         let mut out: Vec<Screen> = handles
             .into_iter()
             .filter_map(|handle| {
                 let mut info = MONITORINFOEXW::default();
                 info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
-                unsafe { GetMonitorInfoW(handle, &mut info.monitorInfo) }.ok().ok()?;
+                unsafe { GetMonitorInfoW(handle, &mut info.monitorInfo) }
+                    .ok()
+                    .ok()?;
                 Some(Screen {
                     handle,
                     device: wide(&info.szDevice),
@@ -434,7 +482,9 @@ mod win {
         let screen = unsafe { MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST) };
         let mut info = MONITORINFOEXW::default();
         info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
-        unsafe { GetMonitorInfoW(screen, &mut info.monitorInfo) }.ok().ok()?;
+        unsafe { GetMonitorInfoW(screen, &mut info.monitorInfo) }
+            .ok()
+            .ok()?;
         Some(wide(&info.szDevice))
     }
 
@@ -450,7 +500,8 @@ mod win {
     impl Physical {
         fn of(screen: HMONITOR) -> Self {
             let mut n = 0u32;
-            if unsafe { GetNumberOfPhysicalMonitorsFromHMONITOR(screen, &mut n) }.is_err() || n == 0 {
+            if unsafe { GetNumberOfPhysicalMonitorsFromHMONITOR(screen, &mut n) }.is_err() || n == 0
+            {
                 return Physical(Vec::new());
             }
             let mut list = vec![PHYSICAL_MONITOR::default(); n as usize];
@@ -472,9 +523,12 @@ mod win {
     fn capabilities(m: &PHYSICAL_MONITOR) -> Option<String> {
         for _ in 0..2 {
             let mut len = 0u32;
-            if unsafe { GetCapabilitiesStringLength(m.hPhysicalMonitor, &mut len) } != 0 && len > 0 {
+            if unsafe { GetCapabilitiesStringLength(m.hPhysicalMonitor, &mut len) } != 0 && len > 0
+            {
                 let mut buf = vec![0u8; len as usize];
-                if unsafe { CapabilitiesRequestAndCapabilitiesReply(m.hPhysicalMonitor, &mut buf) } != 0 {
+                if unsafe { CapabilitiesRequestAndCapabilitiesReply(m.hPhysicalMonitor, &mut buf) }
+                    != 0
+                {
                     let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
                     return Some(String::from_utf8_lossy(&buf[..end]).into_owned());
                 }
@@ -488,7 +542,16 @@ mod win {
     fn read(m: &PHYSICAL_MONITOR, code: u8) -> Option<(u32, u32)> {
         for _ in 0..3 {
             let (mut cur, mut max) = (0u32, 0u32);
-            if unsafe { GetVCPFeatureAndVCPFeatureReply(m.hPhysicalMonitor, code, None, &mut cur, Some(&mut max)) } != 0 {
+            if unsafe {
+                GetVCPFeatureAndVCPFeatureReply(
+                    m.hPhysicalMonitor,
+                    code,
+                    None,
+                    &mut cur,
+                    Some(&mut max),
+                )
+            } != 0
+            {
                 return Some((cur, max));
             }
             std::thread::sleep(Duration::from_millis(60));
@@ -496,12 +559,21 @@ mod win {
         None
     }
 
-    fn monitor(id: String, name: String, primary: bool, m: &PHYSICAL_MONITOR, vcp: &[(u8, Vec<u32>)]) -> Monitor {
+    fn monitor(
+        id: String,
+        name: String,
+        primary: bool,
+        m: &PHYSICAL_MONITOR,
+        vcp: &[(u8, Vec<u32>)],
+    ) -> Monitor {
         let has = |code: u8| vcp.iter().find(|(c, _)| *c == code);
         let level = |code: u8| {
             has(code)?;
             let (value, max) = read(m, code)?;
-            (max > 0).then_some(Level { value: value.min(max), max })
+            (max > 0).then_some(Level {
+                value: value.min(max),
+                max,
+            })
         };
         let choice = |code: u8| {
             let options = has(code)?.1.clone();
@@ -543,7 +615,12 @@ mod win {
                     let description = m.szPhysicalMonitorDescription;
                     wide(&description)
                 });
-                found.push((format!("{}#{i}", screen.device), name, screen.primary, Shared(*m)));
+                found.push((
+                    format!("{}#{i}", screen.device),
+                    name,
+                    screen.primary,
+                    Shared(*m),
+                ));
             }
             keep.push(physical);
         }
@@ -555,13 +632,22 @@ mod win {
                 .map(|(id, name, primary, m)| {
                     s.spawn(move || {
                         let key = format!("{id}|{name}");
-                        let cached = CAPS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|c| c.get(&key).cloned());
+                        let cached = CAPS
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .as_ref()
+                            .and_then(|c| c.get(&key).cloned());
                         let vcp = match cached {
                             Some(v) => v,
                             None => {
-                                let v = capabilities(&m.0).map(|c| parse_vcp(&c)).unwrap_or_default();
+                                let v = capabilities(&m.0)
+                                    .map(|c| parse_vcp(&c))
+                                    .unwrap_or_default();
                                 if !v.is_empty() {
-                                    CAPS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_default().insert(key, v.clone());
+                                    CAPS.lock()
+                                        .unwrap_or_else(|e| e.into_inner())
+                                        .get_or_insert_default()
+                                        .insert(key, v.clone());
                                 }
                                 v
                             }
@@ -570,7 +656,9 @@ mod win {
                     })
                 })
                 .collect();
-            jobs.into_iter().filter_map(|j| j.join().ok()).collect::<Vec<_>>()
+            jobs.into_iter()
+                .filter_map(|j| j.join().ok())
+                .collect::<Vec<_>>()
         });
         drop(keep);
         Ok(monitors)
@@ -646,7 +734,12 @@ mod tests {
     fn real_monitors_accept_writes() {
         for m in win::list().unwrap() {
             if let Some(b) = m.brightness {
-                println!("{} ({}): {:?}", m.name, b.value, win::set(&m.id, BRIGHTNESS, b.value));
+                println!(
+                    "{} ({}): {:?}",
+                    m.name,
+                    b.value,
+                    win::set(&m.id, BRIGHTNESS, b.value)
+                );
             }
         }
     }

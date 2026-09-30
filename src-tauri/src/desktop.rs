@@ -22,7 +22,10 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::menu::{Menu, MenuItem};
-use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
+};
 
 const FILE: &str = "desktop.json";
 /// Window labels are this plus the widget id; the page reads its widget from it.
@@ -116,16 +119,22 @@ pub fn init(app: &AppHandle) {
     {
         let lift = app.clone();
         let handle = app.clone();
-        native::on_drag(move |hwnd| show_grid(&lift, hwnd, true), move |hwnd| {
-            hide_grid(&handle);
-            let handle = handle.clone();
-            // Off the window procedure: snapping moves windows.
-            std::thread::spawn(move || {
-                if let Some(win) = windows(&handle).into_iter().find(|w| w.hwnd().is_ok_and(|h| h.0 as isize == hwnd)) {
-                    snap(&handle, &win, true);
-                }
-            });
-        });
+        native::on_drag(
+            move |hwnd| show_grid(&lift, hwnd, true),
+            move |hwnd| {
+                hide_grid(&handle);
+                let handle = handle.clone();
+                // Off the window procedure: snapping moves windows.
+                std::thread::spawn(move || {
+                    if let Some(win) = windows(&handle)
+                        .into_iter()
+                        .find(|w| w.hwnd().is_ok_and(|h| h.0 as isize == hwnd))
+                    {
+                        snap(&handle, &win, true);
+                    }
+                });
+            },
+        );
     }
 }
 
@@ -236,8 +245,12 @@ struct GridView {
 /// on the main thread mid-drag, so it reads windows natively.
 #[cfg(windows)]
 fn show_grid(app: &AppHandle, hwnd: isize, first: bool) {
-    let Some(me) = native::rect_of(hwnd) else { return };
-    let Some((work, scale)) = native::work_area_at(me.x + me.w / 2, me.y + me.h / 2) else { return };
+    let Some(me) = native::rect_of(hwnd) else {
+        return;
+    };
+    let Some((work, scale)) = native::work_area_at(me.x + me.w / 2, me.y + me.h / 2) else {
+        return;
+    };
     let grid = Grid::new(work, scale);
     let others: Vec<Rect> = hwnds()
         .iter()
@@ -245,13 +258,24 @@ fn show_grid(app: &AppHandle, hwnd: isize, first: bool) {
         .filter_map(|&(_, h)| native::rect_of(h))
         .collect();
     let target = grid.place((me.w, me.h), (me.x, me.y), &others);
-    let rel = |r: Rect| Rect { x: r.x - work.x, y: r.y - work.y, ..r };
+    let rel = |r: Rect| Rect {
+        x: r.x - work.x,
+        y: r.y - work.y,
+        ..r
+    };
     let view = GridView {
         area: rel(grid.area),
         columns: grid.columns(me.w).into_iter().map(|x| x - work.x).collect(),
         width: me.w,
         step: grid.step,
-        target: target.map(|(x, y)| rel(Rect { x, y, w: me.w, h: me.h })),
+        target: target.map(|(x, y)| {
+            rel(Rect {
+                x,
+                y,
+                w: me.w,
+                h: me.h,
+            })
+        }),
     };
     // Over the work area of the widget's monitor (it may have crossed to
     // another one), right below the widget.
@@ -259,7 +283,11 @@ fn show_grid(app: &AppHandle, hwnd: isize, first: bool) {
     if overlay != 0 {
         native::place_below(overlay, hwnd, work);
     }
-    let _ = app.emit_to(GRID_LABEL, if first { "grid:show" } else { "grid:update" }, view);
+    let _ = app.emit_to(
+        GRID_LABEL,
+        if first { "grid:show" } else { "grid:update" },
+        view,
+    );
 }
 
 /// Closes the overlay, unless a widget is being dragged over it.
@@ -320,7 +348,10 @@ fn remove(app: &AppHandle, id: &str) {
 
 /// The open widget windows.
 fn windows(app: &AppHandle) -> Vec<WebviewWindow> {
-    ids().iter().filter_map(|id| app.get_webview_window(&format!("{PREFIX}{id}"))).collect()
+    ids()
+        .iter()
+        .filter_map(|id| app.get_webview_window(&format!("{PREFIX}{id}")))
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -345,7 +376,12 @@ impl Rect {
 
 fn rect(win: &WebviewWindow) -> Option<Rect> {
     let (pos, size) = (win.outer_position().ok()?, win.outer_size().ok()?);
-    Some(Rect { x: pos.x, y: pos.y, w: size.width as i32, h: size.height as i32 })
+    Some(Rect {
+        x: pos.x,
+        y: pos.y,
+        w: size.width as i32,
+        h: size.height as i32,
+    })
 }
 
 /// The grid of one monitor, physical px.
@@ -362,7 +398,12 @@ impl Grid {
     fn new(work: Rect, scale: f64) -> Grid {
         let px = |v: f64| (v * scale).round() as i32;
         Grid {
-            area: Rect { x: work.x + px(INSET), y: work.y + px(INSET), w: work.w - 2 * px(INSET), h: work.h - 2 * px(INSET) },
+            area: Rect {
+                x: work.x + px(INSET),
+                y: work.y + px(INSET),
+                w: work.w - 2 * px(INSET),
+                h: work.h - 2 * px(INSET),
+            },
             gap: px(GAP),
             step: px(STEP),
         }
@@ -375,14 +416,21 @@ impl Grid {
             .flatten()
             .or_else(|| app.primary_monitor().ok().flatten())?;
         let work = m.work_area();
-        let work = Rect { x: work.position.x, y: work.position.y, w: work.size.width as i32, h: work.size.height as i32 };
+        let work = Rect {
+            x: work.position.x,
+            y: work.position.y,
+            w: work.size.width as i32,
+            h: work.size.height as i32,
+        };
         Some(Grid::new(work, m.scale_factor()))
     }
 
     /// Left edges of the columns for a widget `w` wide, rightmost first.
     fn columns(&self, w: i32) -> Vec<i32> {
         let count = ((self.area.w + self.gap) / (w + self.gap)).max(1);
-        (0..count).map(|c| self.area.right() - w - c * (w + self.gap)).collect()
+        (0..count)
+            .map(|c| self.area.right() - w - c * (w + self.gap))
+            .collect()
     }
 
     /// Where a widget of `size` dropped at `want` goes: the nearest spot in a
@@ -396,12 +444,16 @@ impl Grid {
             let me = Rect { x, y: 0, w, h };
             let column: Vec<&Rect> = others.iter().filter(|o| o.overlaps_x(&me)).collect();
             let rows = (0..=(lowest - top) / self.step.max(1)).map(|k| top + k * self.step);
-            let beside = column.iter().flat_map(|o| [o.bottom() + self.gap, o.y - self.gap - h]);
+            let beside = column
+                .iter()
+                .flat_map(|o| [o.bottom() + self.gap, o.y - self.gap - h]);
             for y in rows.chain(beside) {
                 if y < top || y > lowest {
                     continue;
                 }
-                let free = column.iter().all(|o| y >= o.bottom() + self.gap || y + h + self.gap <= o.y);
+                let free = column
+                    .iter()
+                    .all(|o| y >= o.bottom() + self.gap || y + h + self.gap <= o.y);
                 if !free {
                     continue;
                 }
@@ -421,13 +473,17 @@ impl Grid {
 fn snap(app: &AppHandle, win: &WebviewWindow, animate: bool) {
     let _layout = LAYOUT.lock().unwrap_or_else(|e| e.into_inner());
     let Some(me) = rect(win) else { return };
-    let Some(grid) = Grid::for_point(app, me.x + me.w / 2, me.y + me.h / 2) else { return };
+    let Some(grid) = Grid::for_point(app, me.x + me.w / 2, me.y + me.h / 2) else {
+        return;
+    };
     let others: Vec<Rect> = windows(app)
         .iter()
         .filter(|w| w.label() != win.label())
         .filter_map(rect)
         .collect();
-    let Some((x, y)) = grid.place((me.w, me.h), (me.x, me.y), &others) else { return };
+    let Some((x, y)) = grid.place((me.w, me.h), (me.x, me.y), &others) else {
+        return;
+    };
     if animate {
         glide(win, (me.x, me.y), (x, y));
     } else {
@@ -440,7 +496,9 @@ fn snap(app: &AppHandle, win: &WebviewWindow, animate: bool) {
 /// each other) by a gap.
 fn push_down(app: &AppHandle, win: &WebviewWindow) {
     let Some(me) = rect(win) else { return };
-    let Some(grid) = Grid::for_point(app, me.x + me.w / 2, me.y + me.h / 2) else { return };
+    let Some(grid) = Grid::for_point(app, me.x + me.w / 2, me.y + me.h / 2) else {
+        return;
+    };
     let mut below: Vec<(WebviewWindow, Rect)> = windows(app)
         .into_iter()
         .filter(|w| w.label() != win.label())
@@ -514,7 +572,10 @@ pub async fn desktop_set(app: AppHandle, id: String, on: bool) -> Result<Vec<Str
 #[tauri::command]
 pub async fn desktop_fit(app: AppHandle, window: WebviewWindow, width: f64, height: f64) {
     let old_width = window.outer_size().map(|s| s.width).unwrap_or(0);
-    let _ = window.set_size(LogicalSize::new(width.clamp(MIN_WIDTH, MAX_WIDTH), height.clamp(1.0, MAX_HEIGHT)));
+    let _ = window.set_size(LogicalSize::new(
+        width.clamp(MIN_WIDTH, MAX_WIDTH),
+        height.clamp(1.0, MAX_HEIGHT),
+    ));
     if window.is_visible().unwrap_or(true) {
         if window.outer_size().map(|s| s.width).unwrap_or(0) != old_width {
             snap(&app, &window, true);
@@ -560,10 +621,18 @@ pub fn desktop_drag(window: WebviewWindow) {
 /// The right-click menu of a widget window.
 #[tauri::command]
 pub fn desktop_menu(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
-    let Some(id) = window.label().strip_prefix(PREFIX) else { return Ok(()) };
+    let Some(id) = window.label().strip_prefix(PREFIX) else {
+        return Ok(());
+    };
     let menu = (|| {
         let open = MenuItem::with_id(&app, "desk-open", "Открыть панель", true, None::<&str>)?;
-        let remove = MenuItem::with_id(&app, format!("desk-remove:{id}"), "Убрать с рабочего стола", true, None::<&str>)?;
+        let remove = MenuItem::with_id(
+            &app,
+            format!("desk-remove:{id}"),
+            "Убрать с рабочего стола",
+            true,
+            None::<&str>,
+        )?;
         Menu::with_items(&app, &[&open, &remove])
     })()
     .map_err(|e| e.to_string())?;
@@ -577,14 +646,17 @@ mod native {
 
     use windows::core::w;
     use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
-    use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST};
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    };
     use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
     use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
     use windows::Win32::UI::WindowsAndMessaging::{
-        FindWindowW, GetWindowLongPtrW, GetWindowRect, SendMessageW, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-        GWLP_HWNDPARENT, GWL_EXSTYLE, HWND_BOTTOM, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE,
-        SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_SHOWNOACTIVATE, WINDOWPOS, WM_ENTERSIZEMOVE,
-        WM_EXITSIZEMOVE, WM_NCACTIVATE, WM_WINDOWPOSCHANGING, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+        FindWindowW, GetWindowLongPtrW, GetWindowRect, SendMessageW, SetWindowLongPtrW,
+        SetWindowPos, ShowWindow, GWLP_HWNDPARENT, GWL_EXSTYLE, HWND_BOTTOM, HWND_NOTOPMOST,
+        HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
+        SW_SHOWNOACTIVATE, WINDOWPOS, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_NCACTIVATE,
+        WM_WINDOWPOSCHANGING, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     };
 
     use super::Rect;
@@ -596,7 +668,10 @@ mod native {
     static DRAGGING: AtomicIsize = AtomicIsize::new(0);
 
     /// Called with the window's handle when a drag of it starts and when it ends.
-    pub fn on_drag(lift: impl Fn(isize) + Send + Sync + 'static, drop: impl Fn(isize) + Send + Sync + 'static) {
+    pub fn on_drag(
+        lift: impl Fn(isize) + Send + Sync + 'static,
+        drop: impl Fn(isize) + Send + Sync + 'static,
+    ) {
         let _ = ON_LIFT.set(Box::new(lift));
         let _ = ON_DROP.set(Box::new(drop));
     }
@@ -614,7 +689,15 @@ mod native {
                 SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, desktop.0 as isize);
             }
             let _ = SetWindowSubclass(hwnd, Some(subclass), 1, 0);
-            let _ = SetWindowPos(hwnd, Some(HWND_BOTTOM), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            let _ = SetWindowPos(
+                hwnd,
+                Some(HWND_BOTTOM),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
         }
     }
 
@@ -639,7 +722,15 @@ mod native {
             WM_NCACTIVATE => return DefSubclassProc(hwnd, msg, WPARAM(1), lparam),
             WM_ENTERSIZEMOVE => {
                 DRAGGING.store(hwnd.0 as isize, Ordering::SeqCst);
-                let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                let _ = SetWindowPos(
+                    hwnd,
+                    Some(HWND_TOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                );
                 if let Some(f) = ON_LIFT.get() {
                     f(hwnd.0 as isize);
                 }
@@ -647,7 +738,15 @@ mod native {
             WM_EXITSIZEMOVE => {
                 DRAGGING.store(0, Ordering::SeqCst);
                 // Back down: the rule above turns this into HWND_BOTTOM, which drops topmost too.
-                let _ = SetWindowPos(hwnd, Some(HWND_NOTOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                let _ = SetWindowPos(
+                    hwnd,
+                    Some(HWND_NOTOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                );
                 if let Some(f) = ON_DROP.get() {
                     f(hwnd.0 as isize);
                 }
@@ -669,21 +768,37 @@ mod native {
     pub fn rect_of(hwnd: isize) -> Option<Rect> {
         let mut r = RECT::default();
         unsafe { GetWindowRect(HWND(hwnd as _), &mut r).ok()? };
-        Some(Rect { x: r.left, y: r.top, w: r.right - r.left, h: r.bottom - r.top })
+        Some(Rect {
+            x: r.left,
+            y: r.top,
+            w: r.right - r.left,
+            h: r.bottom - r.top,
+        })
     }
 
     /// Work area and scale factor of the monitor nearest to a point.
     pub fn work_area_at(x: i32, y: i32) -> Option<(Rect, f64)> {
         unsafe {
             let monitor = MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST);
-            let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+            let mut info = MONITORINFO {
+                cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
             if !GetMonitorInfoW(monitor, &mut info).as_bool() {
                 return None;
             }
             let (mut dpi, mut dpi_y) = (96u32, 96u32);
             let _ = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut dpi_y);
             let w = info.rcWork;
-            Some((Rect { x: w.left, y: w.top, w: w.right - w.left, h: w.bottom - w.top }, dpi as f64 / 96.0))
+            Some((
+                Rect {
+                    x: w.left,
+                    y: w.top,
+                    w: w.right - w.left,
+                    h: w.bottom - w.top,
+                },
+                dpi as f64 / 96.0,
+            ))
         }
     }
 
@@ -707,7 +822,8 @@ mod native {
         let hwnd = HWND(raw);
         unsafe {
             let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-            let ex = (ex | WS_EX_TOOLWINDOW.0 as isize | WS_EX_NOACTIVATE.0 as isize) & !(WS_EX_APPWINDOW.0 as isize);
+            let ex = (ex | WS_EX_TOOLWINDOW.0 as isize | WS_EX_NOACTIVATE.0 as isize)
+                & !(WS_EX_APPWINDOW.0 as isize);
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex);
         }
     }
@@ -719,7 +835,16 @@ mod tests {
 
     /// 1000×800 work area inside the margins, 300-wide widgets: columns at 700 and 380.
     fn grid() -> Grid {
-        Grid { area: Rect { x: 0, y: 0, w: 1000, h: 800 }, gap: 20, step: 10 }
+        Grid {
+            area: Rect {
+                x: 0,
+                y: 0,
+                w: 1000,
+                h: 800,
+            },
+            gap: 20,
+            step: 10,
+        }
     }
 
     #[test]
@@ -740,14 +865,30 @@ mod tests {
 
     #[test]
     fn a_drop_onto_another_widget_goes_beside_it() {
-        let other = Rect { x: 700, y: 0, w: 300, h: 205 };
+        let other = Rect {
+            x: 700,
+            y: 0,
+            w: 300,
+            h: 205,
+        };
         // Just below it, off the row grid, rather than overlapping.
-        assert_eq!(grid().place((300, 100), (700, 150), &[other]), Some((700, 225)));
+        assert_eq!(
+            grid().place((300, 100), (700, 150), &[other]),
+            Some((700, 225))
+        );
     }
 
     #[test]
     fn a_full_column_sends_it_to_the_next() {
-        let other = Rect { x: 700, y: 0, w: 300, h: 800 };
-        assert_eq!(grid().place((300, 100), (700, 100), &[other]), Some((380, 100)));
+        let other = Rect {
+            x: 700,
+            y: 0,
+            w: 300,
+            h: 800,
+        };
+        assert_eq!(
+            grid().place((300, 100), (700, 100), &[other]),
+            Some((380, 100))
+        );
     }
 }

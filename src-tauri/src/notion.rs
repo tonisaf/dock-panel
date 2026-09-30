@@ -30,7 +30,12 @@ pub(crate) fn token() -> Result<String, String> {
 
 // ---- HTTP -----------------------------------------------------------------------
 
-pub(crate) async fn call(token: &str, method: Method, path: &str, body: Option<Value>) -> Result<Value, String> {
+pub(crate) async fn call(
+    token: &str,
+    method: Method,
+    path: &str,
+    body: Option<Value>,
+) -> Result<Value, String> {
     let mut req = net::client()
         .request(method, format!("{API}{path}"))
         .bearer_auth(token)
@@ -38,7 +43,10 @@ pub(crate) async fn call(token: &str, method: Method, path: &str, body: Option<V
     if let Some(body) = body {
         req = req.json(&body);
     }
-    let res = req.send().await.map_err(|e| format!("Нет связи с Notion: {e}"))?;
+    let res = req
+        .send()
+        .await
+        .map_err(|e| format!("Нет связи с Notion: {e}"))?;
     let status = res.status();
     let v: Value = res.json().await.unwrap_or(Value::Null);
     if status.is_success() {
@@ -95,12 +103,22 @@ fn matches_any(name: &str, needles: &[&str]) -> bool {
 
 fn detect(ds: &Value) -> Result<Schema, String> {
     let props = ds["properties"].as_object().ok_or("У базы нет свойств")?;
-    let of_type = |t: &'static str| props.iter().filter(move |(_, p)| p["type"] == t).map(|(n, p)| (n.clone(), p));
+    let of_type = |t: &'static str| {
+        props
+            .iter()
+            .filter(move |(_, p)| p["type"] == t)
+            .map(|(n, p)| (n.clone(), p))
+    };
     let prefer = |t: &'static str, hints: &[&str]| {
-        of_type(t).find(|(n, _)| matches_any(n, hints)).or_else(|| of_type(t).next())
+        of_type(t)
+            .find(|(n, _)| matches_any(n, hints))
+            .or_else(|| of_type(t).next())
     };
 
-    let title = of_type("title").next().map(|(n, _)| n).ok_or("В базе нет поля названия")?;
+    let title = of_type("title")
+        .next()
+        .map(|(n, _)| n)
+        .ok_or("В базе нет поля названия")?;
 
     let status = of_type("status").next().map(|(name, p)| {
         let options: HashMap<&str, &str> = p["status"]["options"]
@@ -114,13 +132,27 @@ fn detect(ds: &Value) -> Result<Schema, String> {
                 .as_array()
                 .into_iter()
                 .flatten()
-                .filter(|g| g["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(group)))
+                .filter(|g| {
+                    g["name"]
+                        .as_str()
+                        .is_some_and(|n| n.eq_ignore_ascii_case(group))
+                })
                 .flat_map(|g| g["option_ids"].as_array().cloned().unwrap_or_default())
                 .filter_map(|id| options.get(id.as_str()?).map(|n| n.to_string()))
                 .collect()
         };
-        let all = p["status"]["options"].as_array().into_iter().flatten().filter_map(badge).collect();
-        StatusProp { name, options: all, done: group("Complete"), in_progress: group("In progress") }
+        let all = p["status"]["options"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(badge)
+            .collect();
+        StatusProp {
+            name,
+            options: all,
+            done: group("Complete"),
+            in_progress: group("In progress"),
+        }
     });
 
     let checkbox = if status.is_none() {
@@ -129,8 +161,12 @@ fn detect(ds: &Value) -> Result<Schema, String> {
         None
     };
     let date = prefer("date", &["due", "срок", "дедлайн", "deadline", "дата"]).map(|(n, _)| n);
-    let priority = of_type("select").find(|(n, _)| matches_any(n, &["priority", "приоритет"])).map(|(n, _)| n);
-    let tag = of_type("select").find(|(n, _)| Some(n) != priority.as_ref()).map(|(n, _)| n);
+    let priority = of_type("select")
+        .find(|(n, _)| matches_any(n, &["priority", "приоритет"]))
+        .map(|(n, _)| n);
+    let tag = of_type("select")
+        .find(|(n, _)| Some(n) != priority.as_ref())
+        .map(|(n, _)| n);
     let options = |name: &Option<String>| -> Vec<Badge> {
         name.as_ref()
             .and_then(|n| props[n]["select"]["options"].as_array())
@@ -141,7 +177,16 @@ fn detect(ds: &Value) -> Result<Schema, String> {
     };
     let (priority_options, tag_options) = (options(&priority), options(&tag));
 
-    Ok(Schema { title, status, checkbox, date, priority, tag, priority_options, tag_options })
+    Ok(Schema {
+        title,
+        status,
+        checkbox,
+        date,
+        priority,
+        tag,
+        priority_options,
+        tag_options,
+    })
 }
 
 static SCHEMAS: Mutex<Option<HashMap<String, (Instant, Schema)>>> = Mutex::new(None);
@@ -157,7 +202,13 @@ async fn schema(token: &str, source_id: &str) -> Result<Schema, String> {
     {
         return Ok(s);
     }
-    let ds = call(token, Method::GET, &format!("/data_sources/{source_id}"), None).await?;
+    let ds = call(
+        token,
+        Method::GET,
+        &format!("/data_sources/{source_id}"),
+        None,
+    )
+    .await?;
     let s = detect(&ds)?;
     SCHEMAS
         .lock()
@@ -206,7 +257,10 @@ fn badge(v: &Value) -> Option<Badge> {
 
 fn to_task(page: &Value, schema: &Schema) -> Task {
     let props = &page["properties"];
-    let status = schema.status.as_ref().and_then(|s| badge(&props[&s.name]["status"]));
+    let status = schema
+        .status
+        .as_ref()
+        .and_then(|s| badge(&props[&s.name]["status"]));
     let in_progress = match (&schema.status, &status) {
         (Some(s), Some(b)) => s.in_progress.contains(&b.name),
         _ => false,
@@ -217,8 +271,14 @@ fn to_task(page: &Value, schema: &Schema) -> Task {
         title: plain_text(&props[&schema.title]["title"]),
         status,
         in_progress,
-        due: schema.date.as_ref().and_then(|d| props[d]["date"]["start"].as_str().map(str::to_string)),
-        priority: schema.priority.as_ref().and_then(|p| badge(&props[p]["select"])),
+        due: schema
+            .date
+            .as_ref()
+            .and_then(|d| props[d]["date"]["start"].as_str().map(str::to_string)),
+        priority: schema
+            .priority
+            .as_ref()
+            .and_then(|p| badge(&props[p]["select"])),
         tag: schema.tag.as_ref().and_then(|t| badge(&props[t]["select"])),
     }
 }
@@ -241,11 +301,23 @@ async fn whoami(token: &str) -> Result<Option<String>, String> {
 #[tauri::command]
 pub async fn notion_status() -> NotionStatus {
     let Ok(token) = token() else {
-        return NotionStatus { connected: false, workspace: None, error: None };
+        return NotionStatus {
+            connected: false,
+            workspace: None,
+            error: None,
+        };
     };
     match whoami(&token).await {
-        Ok(workspace) => NotionStatus { connected: true, workspace, error: None },
-        Err(e) => NotionStatus { connected: true, workspace: None, error: Some(e) },
+        Ok(workspace) => NotionStatus {
+            connected: true,
+            workspace,
+            error: None,
+        },
+        Err(e) => NotionStatus {
+            connected: true,
+            workspace: None,
+            error: Some(e),
+        },
     }
 }
 
@@ -281,7 +353,8 @@ pub struct Source {
 #[tauri::command]
 pub async fn notion_list_sources() -> Result<Vec<Source>, String> {
     let token = token()?;
-    let body = json!({ "filter": { "property": "object", "value": "data_source" }, "page_size": 100 });
+    let body =
+        json!({ "filter": { "property": "object", "value": "data_source" }, "page_size": 100 });
     let res = call(&token, Method::POST, "/search", Some(body)).await?;
     Ok(res["results"]
         .as_array()
@@ -291,7 +364,11 @@ pub async fn notion_list_sources() -> Result<Vec<Source>, String> {
             let title = plain_text(&ds["title"]);
             Some(Source {
                 id: ds["id"].as_str()?.to_string(),
-                title: if title.is_empty() { "Без названия".into() } else { title },
+                title: if title.is_empty() {
+                    "Без названия".into()
+                } else {
+                    title
+                },
                 database_id: ds["parent"]["database_id"].as_str().map(str::to_string),
             })
         })
@@ -319,7 +396,10 @@ pub async fn notion_tasks(source_id: String) -> Result<TaskList, String> {
             .collect();
         (!clauses.is_empty()).then(|| json!({ "and": clauses }))
     } else {
-        schema.checkbox.as_ref().map(|c| json!({ "property": c, "checkbox": { "equals": false } }))
+        schema
+            .checkbox
+            .as_ref()
+            .map(|c| json!({ "property": c, "checkbox": { "equals": false } }))
     };
     let mut sorts = Vec::new();
     if let Some(p) = &schema.priority {
@@ -334,8 +414,19 @@ pub async fn notion_tasks(source_id: String) -> Result<TaskList, String> {
     if let Some(f) = filter {
         body["filter"] = f;
     }
-    let res = call(&token, Method::POST, &format!("/data_sources/{source_id}/query"), Some(body)).await?;
-    let tasks = res["results"].as_array().into_iter().flatten().map(|p| to_task(p, &schema)).collect();
+    let res = call(
+        &token,
+        Method::POST,
+        &format!("/data_sources/{source_id}/query"),
+        Some(body),
+    )
+    .await?;
+    let tasks = res["results"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|p| to_task(p, &schema))
+        .collect();
     Ok(TaskList {
         tasks,
         can_complete: schema.done_option().is_some() || schema.checkbox.is_some(),
@@ -353,13 +444,23 @@ pub async fn notion_complete(source_id: String, page_id: String) -> Result<(), S
     } else {
         return Err("В базе нет статуса или флажка «выполнено»".into());
     };
-    call(&token, Method::PATCH, &format!("/pages/{page_id}"), Some(json!({ "properties": props }))).await?;
+    call(
+        &token,
+        Method::PATCH,
+        &format!("/pages/{page_id}"),
+        Some(json!({ "properties": props })),
+    )
+    .await?;
     Ok(())
 }
 
 /// Undo for `notion_complete`: puts the previous status back (or unchecks).
 #[tauri::command]
-pub async fn notion_restore(source_id: String, page_id: String, status: Option<String>) -> Result<(), String> {
+pub async fn notion_restore(
+    source_id: String,
+    page_id: String,
+    status: Option<String>,
+) -> Result<(), String> {
     let token = token()?;
     let schema = schema(&token, &source_id).await?;
     let props = match (&schema.status, status, &schema.checkbox) {
@@ -368,7 +469,13 @@ pub async fn notion_restore(source_id: String, page_id: String, status: Option<S
         (None, _, Some(c)) => json!({ c.clone(): { "checkbox": false } }),
         _ => return Ok(()),
     };
-    call(&token, Method::PATCH, &format!("/pages/{page_id}"), Some(json!({ "properties": props }))).await?;
+    call(
+        &token,
+        Method::PATCH,
+        &format!("/pages/{page_id}"),
+        Some(json!({ "properties": props })),
+    )
+    .await?;
     Ok(())
 }
 
@@ -402,7 +509,11 @@ pub async fn notion_task_schema(source_id: String) -> Result<TaskSchema, String>
     let token = token()?;
     let s = schema(&token, &source_id).await?;
     Ok(TaskSchema {
-        statuses: s.status.as_ref().map(|st| st.options.clone()).unwrap_or_default(),
+        statuses: s
+            .status
+            .as_ref()
+            .map(|st| st.options.clone())
+            .unwrap_or_default(),
         priorities: s.priority_options.clone(),
         tags: s.tag_options.clone(),
         has_status: s.status.is_some(),
@@ -434,12 +545,19 @@ pub struct TaskChange {
 }
 
 #[tauri::command]
-pub async fn notion_update(source_id: String, page_id: String, change: TaskChange) -> Result<Task, String> {
+pub async fn notion_update(
+    source_id: String,
+    page_id: String,
+    change: TaskChange,
+) -> Result<Task, String> {
     let token = token()?;
     let schema = schema(&token, &source_id).await?;
     let mut props = serde_json::Map::new();
     if let Some(t) = &change.title {
-        props.insert(schema.title.clone(), json!({ "title": [{ "text": { "content": t.trim() } }] }));
+        props.insert(
+            schema.title.clone(),
+            json!({ "title": [{ "text": { "content": t.trim() } }] }),
+        );
     }
     if let (Some(st), Some(prop)) = (&change.status, &schema.status) {
         props.insert(prop.name.clone(), json!({ "status": { "name": st } }));
@@ -451,7 +569,10 @@ pub async fn notion_update(source_id: String, page_id: String, change: TaskChang
         };
         props.insert(prop.clone(), json!({ "date": value }));
     }
-    for (value, prop) in [(&change.priority, &schema.priority), (&change.tag, &schema.tag)] {
+    for (value, prop) in [
+        (&change.priority, &schema.priority),
+        (&change.tag, &schema.tag),
+    ] {
         if let (Some(v), Some(prop)) = (value, prop) {
             let select = match v.as_str().filter(|s| !s.is_empty()) {
                 Some(name) => json!({ "name": name }),
@@ -460,7 +581,13 @@ pub async fn notion_update(source_id: String, page_id: String, change: TaskChang
             props.insert(prop.clone(), json!({ "select": select }));
         }
     }
-    let page = call(&token, Method::PATCH, &format!("/pages/{page_id}"), Some(json!({ "properties": props }))).await?;
+    let page = call(
+        &token,
+        Method::PATCH,
+        &format!("/pages/{page_id}"),
+        Some(json!({ "properties": props })),
+    )
+    .await?;
     Ok(to_task(&page, &schema))
 }
 
@@ -468,7 +595,13 @@ pub async fn notion_update(source_id: String, page_id: String, change: TaskChang
 #[tauri::command]
 pub async fn notion_delete(page_id: String) -> Result<(), String> {
     let token = token()?;
-    call(&token, Method::PATCH, &format!("/pages/{page_id}"), Some(json!({ "in_trash": true }))).await?;
+    call(
+        &token,
+        Method::PATCH,
+        &format!("/pages/{page_id}"),
+        Some(json!({ "in_trash": true })),
+    )
+    .await?;
     Ok(())
 }
 
@@ -479,7 +612,8 @@ mod tests {
 
     #[test]
     fn a_null_field_clears_and_a_missing_one_stays() {
-        let c: TaskChange = serde_json::from_value(json!({ "due": null, "priority": "Высокий" })).unwrap();
+        let c: TaskChange =
+            serde_json::from_value(json!({ "due": null, "priority": "Высокий" })).unwrap();
         assert_eq!(c.due, Some(serde_json::Value::Null));
         assert_eq!(c.priority, Some(json!("Высокий")));
         assert!(c.tag.is_none() && c.title.is_none() && c.status.is_none());

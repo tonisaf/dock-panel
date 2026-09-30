@@ -43,7 +43,13 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 /// The user reads and clicks Discord's authorize window.
 const AUTHORIZE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const EVENT: &str = "discord:changed";
-const VOICE_EVENTS: [&str; 5] = ["VOICE_STATE_CREATE", "VOICE_STATE_UPDATE", "VOICE_STATE_DELETE", "SPEAKING_START", "SPEAKING_STOP"];
+const VOICE_EVENTS: [&str; 5] = [
+    "VOICE_STATE_CREATE",
+    "VOICE_STATE_UPDATE",
+    "VOICE_STATE_DELETE",
+    "SPEAKING_START",
+    "SPEAKING_STOP",
+];
 
 // ---- saved settings ----------------------------------------------------------------
 
@@ -62,7 +68,10 @@ fn stored() -> Option<Stored> {
 }
 
 fn store(s: &Stored) -> Result<(), String> {
-    secrets::write(SECRET, &serde_json::to_string(s).map_err(|e| e.to_string())?)
+    secrets::write(
+        SECRET,
+        &serde_json::to_string(s).map_err(|e| e.to_string())?,
+    )
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
@@ -86,7 +95,11 @@ struct Saved {
 
 impl Default for Saved {
     fn default() -> Self {
-        Saved { watched: Vec::new(), notify: true, mute_shortcut: None }
+        Saved {
+            watched: Vec::new(),
+            notify: true,
+            mute_shortcut: None,
+        }
     }
 }
 
@@ -94,11 +107,19 @@ static APP: OnceLock<AppHandle> = OnceLock::new();
 static SAVED: Mutex<Option<Saved>> = Mutex::new(None);
 
 fn saved() -> Saved {
-    SAVED.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default()
+    SAVED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .unwrap_or_default()
 }
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join(FILE))
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join(FILE))
 }
 
 fn update_saved(app: &AppHandle, f: impl FnOnce(&mut Saved)) -> Result<(), String> {
@@ -108,7 +129,11 @@ fn update_saved(app: &AppHandle, f: impl FnOnce(&mut Saved)) -> Result<(), Strin
     if let Some(dir) = p.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    std::fs::write(p, serde_json::to_string_pretty(&s).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    std::fs::write(
+        p,
+        serde_json::to_string_pretty(&s).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     *SAVED.lock().unwrap_or_else(|e| e.into_inner()) = Some(s);
     Ok(())
 }
@@ -212,7 +237,11 @@ fn snapshot() -> State {
             error: l.error.clone(),
             user: l.user.clone(),
             voice: l.voice.clone(),
-            current: l.current.as_ref().and_then(|id| l.channels.get(id)).cloned(),
+            current: l
+                .current
+                .as_ref()
+                .and_then(|id| l.channels.get(id))
+                .cloned(),
             watched,
             notify: s.notify,
             mute_shortcut: s.mute_shortcut,
@@ -233,7 +262,10 @@ fn avatar(user: &Value) -> String {
     match user["avatar"].as_str() {
         Some(hash) => format!("https://cdn.discordapp.com/avatars/{id}/{hash}.png?size=64"),
         // Discord's default avatars, picked the way the client picks them.
-        None => format!("https://cdn.discordapp.com/embed/avatars/{}.png", (id.parse::<u64>().unwrap_or(0) >> 22) % 6),
+        None => format!(
+            "https://cdn.discordapp.com/embed/avatars/{}.png",
+            (id.parse::<u64>().unwrap_or(0) >> 22) % 6
+        ),
     }
 }
 
@@ -275,13 +307,21 @@ fn parse_voice(v: &Value) -> Voice {
         mute: v["mute"].as_bool().unwrap_or(false),
         deaf: v["deaf"].as_bool().unwrap_or(false),
         input_volume: input["volume"].as_f64().unwrap_or(100.0),
-        mode: v["mode"]["type"].as_str().unwrap_or("VOICE_ACTIVITY").to_string(),
+        mode: v["mode"]["type"]
+            .as_str()
+            .unwrap_or("VOICE_ACTIVITY")
+            .to_string(),
         input_device: input["device_id"].as_str().unwrap_or("default").to_string(),
         input_devices: input["available_devices"]
             .as_array()
             .into_iter()
             .flatten()
-            .filter_map(|d| Some(Device { id: d["id"].as_str()?.to_string(), name: d["name"].as_str()?.to_string() }))
+            .filter_map(|d| {
+                Some(Device {
+                    id: d["id"].as_str()?.to_string(),
+                    name: d["name"].as_str()?.to_string(),
+                })
+            })
             .collect(),
     }
 }
@@ -307,13 +347,18 @@ impl Link {
     async fn send(&self, op: u32, payload: &Value) -> Result<(), String> {
         let frame = ipc::encode(op, payload);
         let mut w = self.writer.lock().await;
-        w.write_all(&frame).await.map_err(|e| format!("Связь с Discord прервалась: {e}"))
+        w.write_all(&frame)
+            .await
+            .map_err(|e| format!("Связь с Discord прервалась: {e}"))
     }
 
     async fn call(&self, cmd: &str, args: Value, evt: Option<&str>, timeout: Duration) -> Reply {
         let nonce = NONCE.fetch_add(1, Ordering::Relaxed).to_string();
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap_or_else(|e| e.into_inner()).insert(nonce.clone(), tx);
+        self.pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(nonce.clone(), tx);
         let mut msg = json!({ "cmd": cmd, "args": args, "nonce": nonce });
         if let Some(evt) = evt {
             msg["evt"] = json!(evt);
@@ -323,7 +368,10 @@ impl Link {
             Ok(Ok(reply)) => reply,
             Ok(Err(_)) => Err("Discord закрылся".into()),
             Err(_) => {
-                self.pending.lock().unwrap_or_else(|e| e.into_inner()).remove(&nonce);
+                self.pending
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&nonce);
                 Err("Discord не ответил".into())
             }
         }
@@ -334,7 +382,12 @@ impl Link {
     }
 
     fn fail_pending(&self) {
-        for (_, tx) in self.pending.lock().unwrap_or_else(|e| e.into_inner()).drain() {
+        for (_, tx) in self
+            .pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain()
+        {
             let _ = tx.send(Err("Discord закрылся".into()));
         }
     }
@@ -344,7 +397,13 @@ fn link() -> Result<Arc<Link>, String> {
     LINK.lock()
         .unwrap_or_else(|e| e.into_inner())
         .clone()
-        .ok_or_else(|| if stored().is_some() { "Discord не запущен".into() } else { "Discord не подключён".to_string() })
+        .ok_or_else(|| {
+            if stored().is_some() {
+                "Discord не запущен".into()
+            } else {
+                "Discord не подключён".to_string()
+            }
+        })
 }
 
 fn rpc_error(data: &Value) -> String {
@@ -365,7 +424,8 @@ async fn open(client_id: &str) -> Result<(Arc<Link>, ReadHalf<NamedPipeClient>),
         stop: Notify::new(),
         resync: Notify::new(),
     });
-    link.send(ipc::HANDSHAKE, &json!({ "v": 1, "client_id": client_id })).await?;
+    link.send(ipc::HANDSHAKE, &json!({ "v": 1, "client_id": client_id }))
+        .await?;
     let (op, v) = tokio::time::timeout(CALL_TIMEOUT, ipc::read(&mut rd))
         .await
         .map_err(|_| "Discord не ответил")?
@@ -373,7 +433,10 @@ async fn open(client_id: &str) -> Result<(Arc<Link>, ReadHalf<NamedPipeClient>),
     if op == ipc::CLOSE || v["evt"].as_str() != Some("READY") {
         return Err(match v["code"].as_u64() {
             Some(4000) => "Discord не принял Application ID".into(),
-            _ => format!("Discord: {}", v["message"].as_str().unwrap_or("отказал в подключении")),
+            _ => format!(
+                "Discord: {}",
+                v["message"].as_str().unwrap_or("отказал в подключении")
+            ),
         });
     }
     Ok((link, rd))
@@ -395,8 +458,17 @@ async fn read_loop(link: Arc<Link>, mut rd: ReadHalf<NamedPipeClient>) {
             ipc::FRAME => {
                 if v["cmd"].as_str() == Some("DISPATCH") {
                     on_event(&link, v["evt"].as_str().unwrap_or(""), &v["data"]);
-                } else if let Some(tx) = v["nonce"].as_str().and_then(|n| link.pending.lock().unwrap_or_else(|e| e.into_inner()).remove(n)) {
-                    let reply = if v["evt"].as_str() == Some("ERROR") { Err(rpc_error(&v["data"])) } else { Ok(v["data"].clone()) };
+                } else if let Some(tx) = v["nonce"].as_str().and_then(|n| {
+                    link.pending
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(n)
+                }) {
+                    let reply = if v["evt"].as_str() == Some("ERROR") {
+                        Err(rpc_error(&v["data"]))
+                    } else {
+                        Ok(v["data"].clone())
+                    };
                     let _ = tx.send(reply);
                 }
             }
@@ -413,11 +485,18 @@ fn on_event(link: &Link, evt: &str, data: &Value) {
             changed();
         }
         "SPEAKING_START" | "SPEAKING_STOP" => {
-            let Some(user) = data["user_id"].as_str() else { return };
+            let Some(user) = data["user_id"].as_str() else {
+                return;
+            };
             let speaking = evt == "SPEAKING_START";
             let hit = with_live(|l| {
                 let mut hit = false;
-                for m in l.channels.values_mut().flat_map(|c| c.members.iter_mut()).filter(|m| m.id == user) {
+                for m in l
+                    .channels
+                    .values_mut()
+                    .flat_map(|c| c.members.iter_mut())
+                    .filter(|m| m.id == user)
+                {
                     hit |= m.speaking != speaking;
                     m.speaking = speaking;
                 }
@@ -442,7 +521,9 @@ fn on_event(link: &Link, evt: &str, data: &Value) {
 // ---- tokens ------------------------------------------------------------------------
 
 fn now_secs() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }
 
 async fn token_request(form: &[(&str, &str)]) -> Result<Value, String> {
@@ -460,21 +541,37 @@ async fn token_request(form: &[(&str, &str)]) -> Result<Value, String> {
     Err(match v["error"].as_str() {
         Some("invalid_client") => "Неверный Application ID или Client Secret".into(),
         Some("invalid_grant") => "Вход в Discord истёк или отозван. Войдите снова.".into(),
-        _ => format!("Discord: {}", v["error_description"].as_str().or(v["error"].as_str()).unwrap_or("ошибка входа")),
+        _ => format!(
+            "Discord: {}",
+            v["error_description"]
+                .as_str()
+                .or(v["error"].as_str())
+                .unwrap_or("ошибка входа")
+        ),
     })
 }
 
 fn with_tokens(s: Stored, v: &Value) -> Result<Stored, String> {
     Ok(Stored {
-        access_token: v["access_token"].as_str().ok_or("Discord не выдал токен")?.to_string(),
-        refresh_token: v["refresh_token"].as_str().map_or(s.refresh_token, str::to_string),
+        access_token: v["access_token"]
+            .as_str()
+            .ok_or("Discord не выдал токен")?
+            .to_string(),
+        refresh_token: v["refresh_token"]
+            .as_str()
+            .map_or(s.refresh_token, str::to_string),
         expires_at: now_secs() + v["expires_in"].as_u64().unwrap_or(3600),
         ..s
     })
 }
 
 /// Swaps an AUTHORIZE code for tokens.
-async fn exchange(code: &str, client_id: &str, client_secret: &str, redirect: Option<&str>) -> Result<Value, String> {
+async fn exchange(
+    code: &str,
+    client_id: &str,
+    client_secret: &str,
+    redirect: Option<&str>,
+) -> Result<Value, String> {
     let mut form = vec![
         ("grant_type", "authorization_code"),
         ("code", code),
@@ -504,12 +601,16 @@ async fn authenticate(link: &Link, mut s: Stored) -> Result<Member, String> {
     if s.expires_at < now_secs() + 60 {
         s = refresh(s).await?;
     }
-    let data = match link.cmd("AUTHENTICATE", json!({ "access_token": s.access_token })).await {
+    let data = match link
+        .cmd("AUTHENTICATE", json!({ "access_token": s.access_token }))
+        .await
+    {
         Ok(d) => d,
         // The token may have been revoked or cut short; one refresh, then give up.
         Err(_) => {
             let s = refresh(s).await?;
-            link.cmd("AUTHENTICATE", json!({ "access_token": s.access_token })).await?
+            link.cmd("AUTHENTICATE", json!({ "access_token": s.access_token }))
+                .await?
         }
     };
     parse_user(&data["user"]).ok_or("Discord не назвал пользователя".into())
@@ -524,7 +625,11 @@ pub fn init(app: &AppHandle) {
         .and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|t| serde_json::from_str::<Saved>(&t).ok())
         .unwrap_or_default();
-    if let Some(sc) = s.mute_shortcut.as_deref().and_then(|t| t.parse::<Shortcut>().ok()) {
+    if let Some(sc) = s
+        .mute_shortcut
+        .as_deref()
+        .and_then(|t| t.parse::<Shortcut>().ok())
+    {
         if let Err(e) = app.global_shortcut().register(sc) {
             eprintln!("Discord mute shortcut is unavailable: {e}");
         }
@@ -538,7 +643,10 @@ pub fn init(app: &AppHandle) {
                 }
                 with_live(|l| {
                     let error = l.error.take();
-                    *l = Live { error, ..Live::default() };
+                    *l = Live {
+                        error,
+                        ..Live::default()
+                    };
                 });
                 changed();
             }
@@ -565,7 +673,8 @@ async fn session(s: Stored) -> Result<(), String> {
             l.error = None;
         });
         for evt in ["VOICE_SETTINGS_UPDATE", "VOICE_CHANNEL_SELECT"] {
-            link.call("SUBSCRIBE", json!({}), Some(evt), CALL_TIMEOUT).await?;
+            link.call("SUBSCRIBE", json!({}), Some(evt), CALL_TIMEOUT)
+                .await?;
         }
         let voice = link.cmd("GET_VOICE_SETTINGS", json!({})).await?;
         let current = link.cmd("GET_SELECTED_VOICE_CHANNEL", json!({})).await?;
@@ -624,7 +733,15 @@ fn tracked() -> Vec<String> {
 async fn subscribe(link: &Link, channel: &str, on: bool) {
     let cmd = if on { "SUBSCRIBE" } else { "UNSUBSCRIBE" };
     for evt in VOICE_EVENTS {
-        if let Err(e) = link.call(cmd, json!({ "channel_id": channel }), Some(evt), CALL_TIMEOUT).await {
+        if let Err(e) = link
+            .call(
+                cmd,
+                json!({ "channel_id": channel }),
+                Some(evt),
+                CALL_TIMEOUT,
+            )
+            .await
+        {
             eprintln!("discord: {cmd} {evt} for {channel}: {e}");
         }
     }
@@ -676,19 +793,28 @@ async fn resync(link: &Link, notify: bool) {
             _ if guild_id.is_empty() => "Личный звонок".into(),
             _ => guild_name(link, &guild_id).await,
         };
-        let mut members: Vec<Member> = data["voice_states"].as_array().into_iter().flatten().filter_map(parse_member).collect();
+        let mut members: Vec<Member> = data["voice_states"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(parse_member)
+            .collect();
 
         let joined = with_live(|l| {
             let before = l.channels.get(&id);
             for m in &mut members {
-                m.speaking = before.and_then(|c| c.members.iter().find(|b| b.id == m.id)).is_some_and(|b| b.speaking);
+                m.speaking = before
+                    .and_then(|c| c.members.iter().find(|b| b.id == m.id))
+                    .is_some_and(|b| b.speaking);
             }
             let me = l.user.as_ref().map(|u| u.id.clone());
             // Only a channel read before can have news; the first read is just who's there.
             let joined: Vec<String> = match before {
                 Some(before) if l.current.as_deref() != Some(id.as_str()) => members
                     .iter()
-                    .filter(|m| Some(&m.id) != me.as_ref() && !before.members.iter().any(|b| b.id == m.id))
+                    .filter(|m| {
+                        Some(&m.id) != me.as_ref() && !before.members.iter().any(|b| b.id == m.id)
+                    })
                     .map(|m| m.name.clone())
                     .collect(),
                 _ => Vec::new(),
@@ -714,7 +840,9 @@ async fn resync(link: &Link, notify: bool) {
 
 fn toast(channel_id: &str, names: &[String]) {
     let Some(app) = APP.get() else { return };
-    let Some(channel) = with_live(|l| l.channels.get(channel_id).cloned()) else { return };
+    let Some(channel) = with_live(|l| l.channels.get(channel_id).cloned()) else {
+        return;
+    };
     let who = match names {
         [one] => format!("{one} зашёл"),
         [a, b] => format!("{a} и {b} зашли"),
@@ -722,7 +850,10 @@ fn toast(channel_id: &str, names: &[String]) {
         [] => return,
     };
     let present = channel.members.len();
-    let body = format!("{} · сейчас в канале: {present}. Нажмите, чтобы зайти.", channel.guild_name);
+    let body = format!(
+        "{} · сейчас в канале: {present}. Нажмите, чтобы зайти.",
+        channel.guild_name
+    );
     let id = channel_id.to_string();
     crate::alerts::notify_then(
         app,
@@ -741,7 +872,11 @@ fn toast(channel_id: &str, names: &[String]) {
 
 async fn join(channel: Option<String>) -> Result<(), String> {
     let link = link()?;
-    link.cmd("SELECT_VOICE_CHANNEL", json!({ "channel_id": channel, "force": true })).await?;
+    link.cmd(
+        "SELECT_VOICE_CHANNEL",
+        json!({ "channel_id": channel, "force": true }),
+    )
+    .await?;
     Ok(())
 }
 
@@ -755,20 +890,34 @@ pub fn discord_state() -> State {
 /// Asks the running client to authorize the user's app, then keeps its tokens.
 #[tauri::command]
 pub async fn discord_login(client_id: String, client_secret: String) -> Result<State, String> {
-    let (client_id, client_secret) = (client_id.trim().to_string(), client_secret.trim().to_string());
-    if client_id.is_empty() || !client_id.bytes().all(|b| b.is_ascii_digit()) || client_secret.is_empty() {
+    let (client_id, client_secret) = (
+        client_id.trim().to_string(),
+        client_secret.trim().to_string(),
+    );
+    if client_id.is_empty()
+        || !client_id.bytes().all(|b| b.is_ascii_digit())
+        || client_secret.is_empty()
+    {
         return Err("Вставьте Application ID (только цифры) и Client Secret приложения".into());
     }
     stop_session();
     let (link, rd) = open(&client_id).await?;
     let reader = tauri::async_runtime::spawn(read_loop(link.clone(), rd));
     let authorized = link
-        .call("AUTHORIZE", json!({ "client_id": client_id, "scopes": SCOPES }), None, AUTHORIZE_TIMEOUT)
+        .call(
+            "AUTHORIZE",
+            json!({ "client_id": client_id, "scopes": SCOPES }),
+            None,
+            AUTHORIZE_TIMEOUT,
+        )
         .await;
     link.stop.notify_one();
     let _ = reader.await;
     let code = match authorized {
-        Ok(d) => d["code"].as_str().ok_or("Discord не вернул код входа")?.to_string(),
+        Ok(d) => d["code"]
+            .as_str()
+            .ok_or("Discord не вернул код входа")?
+            .to_string(),
         Err(e) if e.contains("cancel") || e.contains("denied") => return Err("Вход отменён".into()),
         Err(e) => return Err(e),
     };
@@ -776,12 +925,20 @@ pub async fn discord_login(client_id: String, client_secret: String) -> Result<S
     let v = match exchange(&code, &client_id, &client_secret, None).await {
         Ok(v) => v,
         Err(e) if !e.contains("Client Secret") => {
-            exchange(&code, &client_id, &client_secret, Some(REDIRECT)).await.map_err(|_| e)?
+            exchange(&code, &client_id, &client_secret, Some(REDIRECT))
+                .await
+                .map_err(|_| e)?
         }
         Err(e) => return Err(e),
     };
     let s = with_tokens(
-        Stored { client_id, client_secret, refresh_token: String::new(), access_token: String::new(), expires_at: 0 },
+        Stored {
+            client_id,
+            client_secret,
+            refresh_token: String::new(),
+            access_token: String::new(),
+            expires_at: 0,
+        },
         &v,
     )?;
     if s.refresh_token.is_empty() {
@@ -837,7 +994,9 @@ pub async fn discord_guilds() -> Result<Vec<Guild>, String> {
 #[tauri::command]
 pub async fn discord_channels(guild_id: String) -> Result<Vec<WatchedChannel>, String> {
     let link = link()?;
-    let data = link.cmd("GET_CHANNELS", json!({ "guild_id": guild_id })).await?;
+    let data = link
+        .cmd("GET_CHANNELS", json!({ "guild_id": guild_id }))
+        .await?;
     let guild_name = guild_name(&link, &guild_id).await;
     Ok(data["channels"]
         .as_array()
@@ -856,7 +1015,10 @@ pub async fn discord_channels(guild_id: String) -> Result<Vec<WatchedChannel>, S
 }
 
 #[tauri::command]
-pub async fn discord_set_watched(app: AppHandle, channels: Vec<WatchedChannel>) -> Result<State, String> {
+pub async fn discord_set_watched(
+    app: AppHandle,
+    channels: Vec<WatchedChannel>,
+) -> Result<State, String> {
     let before: HashSet<String> = tracked().into_iter().collect();
     update_saved(&app, |s| s.watched = channels)?;
     if let Ok(link) = link() {
@@ -928,10 +1090,11 @@ pub fn mic_state() -> Option<(bool, bool)> {
         let voice = l.voice.as_ref().filter(|_| l.ready)?;
         let current = l.current.as_ref()?;
         let me = l.user.as_ref().map(|u| u.id.as_str());
-        let speaking = l
-            .channels
-            .get(current)
-            .is_some_and(|c| c.members.iter().any(|m| Some(m.id.as_str()) == me && m.speaking));
+        let speaking = l.channels.get(current).is_some_and(|c| {
+            c.members
+                .iter()
+                .any(|m| Some(m.id.as_str()) == me && m.speaking)
+        });
         Some((voice.mute || voice.deaf, speaking))
     })
 }
@@ -940,13 +1103,24 @@ pub fn mic_state() -> Option<(bool, bool)> {
 
 /// Whether the global shortcut that fired is the microphone toggle.
 pub fn is_mute_shortcut(shortcut: &Shortcut) -> bool {
-    saved().mute_shortcut.and_then(|t| t.parse::<Shortcut>().ok()).is_some_and(|sc| sc == *shortcut)
+    saved()
+        .mute_shortcut
+        .and_then(|t| t.parse::<Shortcut>().ok())
+        .is_some_and(|sc| sc == *shortcut)
 }
 
 pub fn toggle_mute() {
     tauri::async_runtime::spawn(async {
-        let Some(mute) = with_live(|l| l.voice.as_ref().map(|v| v.mute)) else { return };
-        let change = VoiceChange { mute: Some(!mute), deaf: None, input_volume: None, mode: None, input_device: None };
+        let Some(mute) = with_live(|l| l.voice.as_ref().map(|v| v.mute)) else {
+            return;
+        };
+        let change = VoiceChange {
+            mute: Some(!mute),
+            deaf: None,
+            input_volume: None,
+            mode: None,
+            input_device: None,
+        };
         if let Err(e) = discord_voice(change).await {
             eprintln!("discord: mute shortcut: {e}");
         }
@@ -955,20 +1129,30 @@ pub fn toggle_mute() {
 
 /// Swaps the microphone shortcut; `None` removes it.
 #[tauri::command]
-pub fn discord_set_mute_shortcut(app: AppHandle, shortcut: Option<String>) -> Result<State, String> {
+pub fn discord_set_mute_shortcut(
+    app: AppHandle,
+    shortcut: Option<String>,
+) -> Result<State, String> {
     let new = match shortcut.as_deref() {
-        Some(t) => Some(t.parse::<Shortcut>().map_err(|e| format!("Не получилось разобрать сочетание: {e}"))?),
+        Some(t) => Some(
+            t.parse::<Shortcut>()
+                .map_err(|e| format!("Не получилось разобрать сочетание: {e}"))?,
+        ),
         None => None,
     };
     let gs = app.global_shortcut();
     if new.is_some_and(|n| gs.is_registered(n)) && saved().mute_shortcut != shortcut {
         return Err("Это сочетание уже занято панелью".into());
     }
-    if let Some(old) = saved().mute_shortcut.and_then(|t| t.parse::<Shortcut>().ok()) {
+    if let Some(old) = saved()
+        .mute_shortcut
+        .and_then(|t| t.parse::<Shortcut>().ok())
+    {
         let _ = gs.unregister(old);
     }
     if let Some(n) = new {
-        gs.register(n).map_err(|e| format!("Сочетание занято другой программой ({e})"))?;
+        gs.register(n)
+            .map_err(|e| format!("Сочетание занято другой программой ({e})"))?;
     }
     update_saved(&app, |s| s.mute_shortcut = shortcut)?;
     Ok(snapshot())
@@ -991,9 +1175,15 @@ mod tests {
         assert_eq!(m.name, "Капитан");
         assert!(m.muted && !m.deafened);
         assert_eq!(m.avatar, "https://cdn.discordapp.com/embed/avatars/5.png");
-        let named = parse_user(&json!({ "id": "1", "username": "nelly", "global_name": null, "avatar": "abc" })).unwrap();
+        let named = parse_user(
+            &json!({ "id": "1", "username": "nelly", "global_name": null, "avatar": "abc" }),
+        )
+        .unwrap();
         assert_eq!(named.name, "nelly");
-        assert_eq!(named.avatar, "https://cdn.discordapp.com/avatars/1/abc.png?size=64");
+        assert_eq!(
+            named.avatar,
+            "https://cdn.discordapp.com/avatars/1/abc.png?size=64"
+        );
     }
 
     #[test]
@@ -1005,6 +1195,9 @@ mod tests {
             "deaf": false
         }));
         assert!(v.mute && !v.deaf);
-        assert_eq!((v.input_volume, v.mode.as_str(), v.input_devices.len()), (72.5, "PUSH_TO_TALK", 1));
+        assert_eq!(
+            (v.input_volume, v.mode.as_str(), v.input_devices.len()),
+            (72.5, "PUSH_TO_TALK", 1)
+        );
     }
 }

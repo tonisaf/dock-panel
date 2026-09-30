@@ -78,9 +78,13 @@ pub fn discover(local_ips: &[Ipv4Addr], wait: Duration) -> HashMap<String, Known
             let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)).ok()?;
             socket.bind(&SocketAddr::from((*ip, 0)).into()).ok()?;
             socket.set_multicast_if_v4(ip).ok()?;
-            socket.set_read_timeout(Some(Duration::from_millis(100))).ok()?;
+            socket
+                .set_read_timeout(Some(Duration::from_millis(100)))
+                .ok()?;
             let socket: UdpSocket = socket.into();
-            socket.send_to(request.as_bytes(), SocketAddrV4::new(MULTICAST, PORT)).ok()?;
+            socket
+                .send_to(request.as_bytes(), SocketAddrV4::new(MULTICAST, PORT))
+                .ok()?;
             Some(socket)
         })
         .collect();
@@ -115,7 +119,12 @@ fn parse_reply(text: &str) -> Option<(String, Known)> {
             ip: *addr.ip(),
             port: addr.port(),
             model: headers.get("model").unwrap_or(&"").to_string(),
-            support: headers.get("support").unwrap_or(&"").split_whitespace().map(str::to_string).collect(),
+            support: headers
+                .get("support")
+                .unwrap_or(&"")
+                .split_whitespace()
+                .map(str::to_string)
+                .collect(),
         },
     ))
 }
@@ -124,10 +133,15 @@ fn parse_reply(text: &str) -> Option<(String, Known)> {
 /// `props` notifications on the socket, which are skipped.
 pub fn call(lamp: &Known, method: &str, params: Value) -> Result<Value, String> {
     let addr = SocketAddr::from((lamp.ip, lamp.port));
-    let mut stream = TcpStream::connect_timeout(&addr, IO_TIMEOUT).map_err(|e| format!("лампа не отвечает: {e}"))?;
-    stream.set_read_timeout(Some(IO_TIMEOUT)).map_err(|e| e.to_string())?;
+    let mut stream = TcpStream::connect_timeout(&addr, IO_TIMEOUT)
+        .map_err(|e| format!("лампа не отвечает: {e}"))?;
+    stream
+        .set_read_timeout(Some(IO_TIMEOUT))
+        .map_err(|e| e.to_string())?;
     let request = json!({ "id": 1, "method": method, "params": params });
-    stream.write_all(format!("{request}\r\n").as_bytes()).map_err(|e| e.to_string())?;
+    stream
+        .write_all(format!("{request}\r\n").as_bytes())
+        .map_err(|e| e.to_string())?;
 
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
@@ -136,7 +150,9 @@ pub fn call(lamp: &Known, method: &str, params: Value) -> Result<Value, String> 
         if reader.read_line(&mut line).map_err(|e| e.to_string())? == 0 {
             return Err("лампа закрыла соединение".into());
         }
-        let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
         if v["id"] != 1 {
             continue;
         }
@@ -158,7 +174,12 @@ pub fn state(lamp: &Known) -> Result<LampState, String> {
     }
     let r = call(lamp, "get_prop", json!(props))?;
     let light = |at: usize| {
-        let num = |i: usize| r[at + i].as_str().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+        let num = |i: usize| {
+            r[at + i]
+                .as_str()
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(0)
+        };
         Light {
             power: r[at] == "on",
             bright: num(1).clamp(1, 100) as u8,
@@ -167,7 +188,10 @@ pub fn state(lamp: &Known) -> Result<LampState, String> {
             color_mode: num(4) as u8,
         }
     };
-    Ok(LampState { main: light(0), bg: has_bg.then(|| light(MAIN_PROPS.len())) })
+    Ok(LampState {
+        main: light(0),
+        bg: has_bg.then(|| light(MAIN_PROPS.len())),
+    })
 }
 
 /// Changes requested from the UI; unset fields stay as they are.
@@ -186,7 +210,8 @@ pub struct Change {
 /// slider on a light that is off turns it on first.
 pub fn apply(lamp: &Known, change: &Change) -> Result<(), String> {
     let prefix = if change.background { "bg_" } else { "" };
-    let send = |method: &str, params: Value| call(lamp, &format!("{prefix}{method}"), params).map(drop);
+    let send =
+        |method: &str, params: Value| call(lamp, &format!("{prefix}{method}"), params).map(drop);
     let adjusts = change.bright.is_some() || change.ct.is_some() || change.rgb.is_some();
     match change.power {
         Some(false) => return send("set_power", json!(["off", "smooth", FADE])),
@@ -198,7 +223,10 @@ pub fn apply(lamp: &Known, change: &Change) -> Result<(), String> {
         send("set_bright", json!([b.clamp(1, 100), "smooth", FADE]))?;
     }
     if let Some(ct) = change.ct {
-        send("set_ct_abx", json!([ct.clamp(CT_MIN, CT_MAX), "smooth", FADE]))?;
+        send(
+            "set_ct_abx",
+            json!([ct.clamp(CT_MIN, CT_MAX), "smooth", FADE]),
+        )?;
     }
     if let Some(rgb) = change.rgb {
         send("set_rgb", json!([rgb.clamp(1, 0xFF_FF_FF), "smooth", FADE]))?;

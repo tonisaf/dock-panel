@@ -68,7 +68,10 @@ pub fn spans(rich: &Value) -> Vec<Span> {
                 strike: flag("strikethrough"),
                 underline: flag("underline"),
                 code: flag("code"),
-                color: a["color"].as_str().filter(|c| *c != "default").map(str::to_string),
+                color: a["color"]
+                    .as_str()
+                    .filter(|c| *c != "default")
+                    .map(str::to_string),
                 href: t["href"].as_str().map(str::to_string),
             }
         })
@@ -114,7 +117,10 @@ pub fn parse(b: &Value) -> Option<Block> {
         "callout" => block.note = body["icon"]["emoji"].as_str().map(str::to_string),
         "code" => block.note = body["language"].as_str().map(str::to_string),
         "image" => {
-            block.url = body["file"]["url"].as_str().or(body["external"]["url"].as_str()).map(str::to_string);
+            block.url = body["file"]["url"]
+                .as_str()
+                .or(body["external"]["url"].as_str())
+                .map(str::to_string);
             block.text = spans(&body["caption"]);
         }
         "bookmark" | "embed" | "link_preview" => {
@@ -123,11 +129,20 @@ pub fn parse(b: &Value) -> Option<Block> {
             block.kind = "bookmark".into();
         }
         "child_page" => {
-            block.text = vec![Span { text: body["title"].as_str().unwrap_or_default().to_string(), ..Default::default() }];
+            block.text = vec![Span {
+                text: body["title"].as_str().unwrap_or_default().to_string(),
+                ..Default::default()
+            }];
             // A sub-page is its own note-sized thing: shown as a link, not inlined.
             block.has_children = false;
         }
-        "equation" => block.text = vec![Span { text: body["expression"].as_str().unwrap_or_default().to_string(), code: true, ..Default::default() }],
+        "equation" => {
+            block.text = vec![Span {
+                text: body["expression"].as_str().unwrap_or_default().to_string(),
+                code: true,
+                ..Default::default()
+            }]
+        }
         k if DRAWN.contains(&k) => {}
         other => {
             block.kind = "unsupported".into();
@@ -200,7 +215,10 @@ pub fn local_blocks(body: &str, id_prefix: &str) -> Vec<Block> {
             let mut v = v.clone();
             v["id"] = json!(format!("{id_prefix}-{i}"));
             let kind = v["type"].as_str()?.to_string();
-            let text = v[&kind]["rich_text"][0]["text"]["content"].as_str().unwrap_or_default().to_string();
+            let text = v[&kind]["rich_text"][0]["text"]["content"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
             v[&kind]["rich_text"] = json!([{ "plain_text": text }]);
             parse(&v)
         })
@@ -222,10 +240,15 @@ mod tests {
         });
         let b = parse(&todo).unwrap();
         assert_eq!((b.kind.as_str(), b.checked), ("to_do", Some(true)));
-        assert!(b.text[1].bold && b.text[1].href.is_some() && b.text[1].color.as_deref() == Some("red"));
+        assert!(
+            b.text[1].bold && b.text[1].href.is_some() && b.text[1].color.as_deref() == Some("red")
+        );
         let table = json!({ "id": "b2", "type": "table", "has_children": true, "table": {} });
         let t = parse(&table).unwrap();
-        assert_eq!((t.kind.as_str(), t.note.as_deref(), t.has_children), ("unsupported", Some("table"), false));
+        assert_eq!(
+            (t.kind.as_str(), t.note.as_deref(), t.has_children),
+            ("unsupported", Some("table"), false)
+        );
         assert_eq!(plain_text(&[b]), "Купить хлеб\n");
     }
 
@@ -233,9 +256,25 @@ mod tests {
     fn text_to_blocks() {
         let blocks = from_text("# План\nкупить:\n- [ ] хлеб\n[x] молоко\n- позвонить\n\n");
         let kinds: Vec<&str> = blocks.iter().map(|b| b["type"].as_str().unwrap()).collect();
-        assert_eq!(kinds, ["heading_3", "paragraph", "to_do", "to_do", "bulleted_list_item"]);
+        assert_eq!(
+            kinds,
+            [
+                "heading_3",
+                "paragraph",
+                "to_do",
+                "to_do",
+                "bulleted_list_item"
+            ]
+        );
         assert_eq!(blocks[3]["to_do"]["checked"], true);
         let local = local_blocks("- [ ] хлеб", "local-1");
-        assert_eq!((local[0].id.as_str(), local[0].checked, local[0].text[0].text.as_str()), ("local-1-0", Some(false), "хлеб"));
+        assert_eq!(
+            (
+                local[0].id.as_str(),
+                local[0].checked,
+                local[0].text[0].text.as_str()
+            ),
+            ("local-1-0", Some(false), "хлеб")
+        );
     }
 }

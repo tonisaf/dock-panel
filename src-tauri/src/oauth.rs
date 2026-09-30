@@ -55,7 +55,8 @@ pub fn wait_for_redirect(listener: TcpListener, path: &str) -> Result<String, St
                 let request = read_head(&mut stream);
                 let target = request.split_whitespace().nth(1).unwrap_or("");
                 let Some(query) = target.strip_prefix(prefix.as_str()) else {
-                    let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+                    let _ =
+                        stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
                     continue;
                 };
                 let body = "<!doctype html><meta charset=utf-8><title>Dock Panel</title>\
@@ -82,7 +83,11 @@ pub fn wait_for_redirect(listener: TcpListener, path: &str) -> Result<String, St
 pub fn query_param(query: &str, key: &str) -> Option<String> {
     query.split('&').find_map(|pair| {
         let (k, v) = pair.split_once('=')?;
-        (k == key).then(|| percent_encoding::percent_decode_str(v).decode_utf8_lossy().into_owned())
+        (k == key).then(|| {
+            percent_encoding::percent_decode_str(v)
+                .decode_utf8_lossy()
+                .into_owned()
+        })
     })
 }
 
@@ -106,7 +111,11 @@ mod tests {
 
     #[test]
     fn joins_a_request_split_across_reads() {
-        let mut stream = Pieces(vec![b"GET /callback?code=ab", b"c&state=xyz HTTP/1.1\r\nHo", b"st: 127.0.0.1\r\n\r\n"]);
+        let mut stream = Pieces(vec![
+            b"GET /callback?code=ab",
+            b"c&state=xyz HTTP/1.1\r\nHo",
+            b"st: 127.0.0.1\r\n\r\n",
+        ]);
         let head = read_head(&mut stream);
         let target = head.split_whitespace().nth(1).unwrap();
         assert_eq!(target, "/callback?code=abc&state=xyz");
@@ -128,7 +137,10 @@ mod tests {
 
     #[test]
     fn query_param_decodes() {
-        assert_eq!(query_param("code=a%20b&state=s", "code").as_deref(), Some("a b"));
+        assert_eq!(
+            query_param("code=a%20b&state=s", "code").as_deref(),
+            Some("a b")
+        );
         assert_eq!(query_param("code=a", "state"), None);
     }
 }

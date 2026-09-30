@@ -64,7 +64,9 @@ async fn github_get(token: &str, path: &str) -> Result<Value, String> {
     match res.status() {
         s if s.is_success() => res.json().await.map_err(|e| e.to_string()),
         StatusCode::UNAUTHORIZED => Err("Токен GitHub недействителен или истёк".into()),
-        StatusCode::NOT_FOUND => Err("Нет доступа к репозиторию или ещё нет ни одного релиза".into()),
+        StatusCode::NOT_FOUND => {
+            Err("Нет доступа к репозиторию или ещё нет ни одного релиза".into())
+        }
         s => Err(format!("GitHub ответил {s}")),
     }
 }
@@ -102,7 +104,13 @@ async fn find_update(app: &AppHandle) -> Result<Option<tauri_plugin_updater::Upd
 async fn check_and_remember(app: &AppHandle) -> UpdateStatus {
     let result = find_update(app).await;
     let (available, error) = match result {
-        Ok(update) => (update.map(|u| Available { version: u.version, notes: u.body }), None),
+        Ok(update) => (
+            update.map(|u| Available {
+                version: u.version,
+                notes: u.body,
+            }),
+            None,
+        ),
         Err(e) => (None, Some(e)),
     };
     *LAST.lock().unwrap_or_else(|e| e.into_inner()) = (available.clone(), error.clone());

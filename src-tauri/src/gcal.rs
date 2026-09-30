@@ -28,7 +28,8 @@ const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const CALENDAR_API: &str = "https://www.googleapis.com/calendar/v3";
 const TASKS_API: &str = "https://tasks.googleapis.com/tasks/v1";
-const SCOPES: &str = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/tasks \
+const SCOPES: &str =
+    "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/tasks \
                       https://www.googleapis.com/auth/youtube.readonly";
 /// Added after the calendar; older sign-ins lack it until the user signs in again.
 pub const YOUTUBE_SCOPE: &str = "https://www.googleapis.com/auth/youtube.readonly";
@@ -37,8 +38,8 @@ const FILE: &str = "gcal.json";
 
 /// Google's event colour palette (`colorId` 1–11), as the Colors API reports it.
 const EVENT_COLORS: [&str; 11] = [
-    "#a4bdfc", "#7ae7bf", "#dbadff", "#ff887c", "#fbd75b", "#ffb878", "#46d6db", "#e1e1e1", "#5484ed", "#51b749",
-    "#dc2127",
+    "#a4bdfc", "#7ae7bf", "#dbadff", "#ff887c", "#fbd75b", "#ffb878", "#46d6db", "#e1e1e1",
+    "#5484ed", "#51b749", "#dc2127",
 ];
 
 #[derive(Serialize, Deserialize)]
@@ -64,7 +65,11 @@ fn stored() -> Option<Stored> {
 }
 
 fn path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join(FILE))
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join(FILE))
 }
 
 fn load_local(app: &AppHandle) -> Local {
@@ -80,7 +85,8 @@ fn save_local(app: &AppHandle, local: &Local) -> Result<(), String> {
     if let Some(dir) = p.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    std::fs::write(p, serde_json::to_string(local).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    std::fs::write(p, serde_json::to_string(local).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
 }
 
 fn enc(s: &str) -> String {
@@ -116,7 +122,8 @@ fn remember_access(v: &Value) {
     }
     if let Some(token) = v["access_token"].as_str() {
         let ttl = v["expires_in"].as_u64().unwrap_or(3600).saturating_sub(60);
-        *ACCESS.lock().unwrap_or_else(|e| e.into_inner()) = Some((token.to_string(), Instant::now() + Duration::from_secs(ttl)));
+        *ACCESS.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some((token.to_string(), Instant::now() + Duration::from_secs(ttl)));
     }
 }
 
@@ -135,7 +142,10 @@ async fn access_token() -> Result<String, String> {
     ])
     .await?;
     remember_access(&v);
-    v["access_token"].as_str().map(str::to_string).ok_or("Google не выдал токен".into())
+    v["access_token"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or("Google не выдал токен".into())
 }
 
 async fn api(method: Method, url: &str, body: Option<Value>) -> Result<Value, String> {
@@ -144,7 +154,10 @@ async fn api(method: Method, url: &str, body: Option<Value>) -> Result<Value, St
     if let Some(b) = body {
         req = req.json(&b);
     }
-    let res = req.send().await.map_err(|e| format!("Нет связи с Google: {e}"))?;
+    let res = req
+        .send()
+        .await
+        .map_err(|e| format!("Нет связи с Google: {e}"))?;
     let status = res.status();
     let v: Value = res.json().await.unwrap_or(Value::Null);
     if status.is_success() {
@@ -155,13 +168,20 @@ async fn api(method: Method, url: &str, body: Option<Value>) -> Result<Value, St
     }
     let msg = v["error"]["message"].as_str().unwrap_or("");
     Err(match status {
-        StatusCode::FORBIDDEN if msg.contains("has not been used") || msg.contains("is disabled") => {
+        StatusCode::FORBIDDEN
+            if msg.contains("has not been used") || msg.contains("is disabled") =>
+        {
             // "YouTube Data API v3 has not been used in project 123 before or it is disabled..."
-            let api = msg.split(" has not been used").next().filter(|a| a.len() < msg.len()).unwrap_or("нужный API");
+            let api = msg
+                .split(" has not been used")
+                .next()
+                .filter(|a| a.len() < msg.len())
+                .unwrap_or("нужный API");
             format!("В Google Cloud для этого проекта не включён {api}: APIs & Services → Library.")
         }
         StatusCode::FORBIDDEN if msg.contains("insufficient") || msg.contains("scope") => {
-            "Не хватает разрешений: выйдите из Google в настройках календаря и войдите снова.".into()
+            "Не хватает разрешений: выйдите из Google в настройках календаря и войдите снова."
+                .into()
         }
         StatusCode::FORBIDDEN => format!("Google отказал в доступе: {msg}"),
         StatusCode::NOT_FOUND => "Событие не найдено: возможно, его уже удалили".into(),
@@ -173,14 +193,27 @@ async fn api(method: Method, url: &str, body: Option<Value>) -> Result<Value, St
 // ---- sign-in -----------------------------------------------------------------------
 
 #[tauri::command]
-pub async fn gcal_login(app: AppHandle, client_id: String, client_secret: String) -> Result<String, String> {
-    let (client_id, client_secret) = (client_id.trim().to_string(), client_secret.trim().to_string());
+pub async fn gcal_login(
+    app: AppHandle,
+    client_id: String,
+    client_secret: String,
+) -> Result<String, String> {
+    let (client_id, client_secret) = (
+        client_id.trim().to_string(),
+        client_secret.trim().to_string(),
+    );
     if !client_id.ends_with(".apps.googleusercontent.com") || client_secret.is_empty() {
-        return Err("Вставьте Client ID (…apps.googleusercontent.com) и Client Secret из Google Cloud".into());
+        return Err(
+            "Вставьте Client ID (…apps.googleusercontent.com) и Client Secret из Google Cloud"
+                .into(),
+        );
     }
     // Desktop clients accept any loopback port.
     let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|e| e.to_string())?;
-    let redirect = format!("http://127.0.0.1:{}/callback", listener.local_addr().map_err(|e| e.to_string())?.port());
+    let redirect = format!(
+        "http://127.0.0.1:{}/callback",
+        listener.local_addr().map_err(|e| e.to_string())?.port()
+    );
     let (verifier, challenge) = oauth::pkce()?;
     let state = oauth::random_urlsafe(16)?;
     let auth = reqwest::Url::parse_with_params(
@@ -199,13 +232,21 @@ pub async fn gcal_login(app: AppHandle, client_id: String, client_secret: String
         ],
     )
     .map_err(|e| e.to_string())?;
-    tauri_plugin_opener::OpenerExt::opener(&app).open_url(auth.as_str(), None::<&str>).map_err(|e| e.to_string())?;
+    tauri_plugin_opener::OpenerExt::opener(&app)
+        .open_url(auth.as_str(), None::<&str>)
+        .map_err(|e| e.to_string())?;
 
-    let query = tauri::async_runtime::spawn_blocking(move || oauth::wait_for_redirect(listener, "/callback"))
-        .await
-        .map_err(|e| e.to_string())??;
+    let query = tauri::async_runtime::spawn_blocking(move || {
+        oauth::wait_for_redirect(listener, "/callback")
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     if let Some(err) = oauth::query_param(&query, "error") {
-        return Err(if err == "access_denied" { "Вход отменён".into() } else { format!("Google: {err}") });
+        return Err(if err == "access_denied" {
+            "Вход отменён".into()
+        } else {
+            format!("Google: {err}")
+        });
     }
     if oauth::query_param(&query, "state").as_deref() != Some(state.as_str()) {
         return Err("Ответ Google не прошёл проверку, попробуйте ещё раз".into());
@@ -220,16 +261,31 @@ pub async fn gcal_login(app: AppHandle, client_id: String, client_secret: String
         ("code_verifier", &verifier),
     ])
     .await?;
-    let refresh_token = v["refresh_token"].as_str().ok_or("Google не выдал refresh token")?.to_string();
-    let stored = Stored { client_id, client_secret, refresh_token };
-    secrets::write(SECRET, &serde_json::to_string(&stored).map_err(|e| e.to_string())?)?;
+    let refresh_token = v["refresh_token"]
+        .as_str()
+        .ok_or("Google не выдал refresh token")?
+        .to_string();
+    let stored = Stored {
+        client_id,
+        client_secret,
+        refresh_token,
+    };
+    secrets::write(
+        SECRET,
+        &serde_json::to_string(&stored).map_err(|e| e.to_string())?,
+    )?;
     remember_access(&v);
     primary_email().await
 }
 
 /// The primary calendar's ID is the account's address.
 async fn primary_email() -> Result<String, String> {
-    let v = api(Method::GET, &format!("{CALENDAR_API}/calendars/primary"), None).await?;
+    let v = api(
+        Method::GET,
+        &format!("{CALENDAR_API}/calendars/primary"),
+        None,
+    )
+    .await?;
     Ok(v["id"].as_str().unwrap_or("Google").to_string())
 }
 
@@ -245,11 +301,26 @@ pub struct Status {
 #[tauri::command]
 pub async fn gcal_status() -> Status {
     if stored().is_none() {
-        return Status { connected: false, email: None, error: None, youtube: false };
+        return Status {
+            connected: false,
+            email: None,
+            error: None,
+            youtube: false,
+        };
     }
     match primary_email().await {
-        Ok(email) => Status { connected: true, email: Some(email), error: None, youtube: granted(YOUTUBE_SCOPE) },
-        Err(e) => Status { connected: true, email: None, error: Some(e), youtube: granted(YOUTUBE_SCOPE) },
+        Ok(email) => Status {
+            connected: true,
+            email: Some(email),
+            error: None,
+            youtube: granted(YOUTUBE_SCOPE),
+        },
+        Err(e) => Status {
+            connected: true,
+            email: None,
+            error: Some(e),
+            youtube: granted(YOUTUBE_SCOPE),
+        },
     }
 }
 
@@ -262,7 +333,11 @@ pub fn gcal_logout() {
 }
 
 fn granted(scope: &str) -> bool {
-    GRANTED.lock().unwrap_or_else(|e| e.into_inner()).as_deref().is_some_and(|s| s.split(' ').any(|x| x == scope))
+    GRANTED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_deref()
+        .is_some_and(|s| s.split(' ').any(|x| x == scope))
 }
 
 /// Whether other features can call Google with `scope` (fetching a token if needed).
@@ -289,7 +364,12 @@ pub struct Calendar {
 }
 
 async fn calendars(app: &AppHandle) -> Result<Vec<Calendar>, String> {
-    let v = api(Method::GET, &format!("{CALENDAR_API}/users/me/calendarList?maxResults=250"), None).await?;
+    let v = api(
+        Method::GET,
+        &format!("{CALENDAR_API}/users/me/calendarList?maxResults=250"),
+        None,
+    )
+    .await?;
     let local = load_local(app);
     let mut list: Vec<Calendar> = v["items"]
         .as_array()
@@ -300,9 +380,20 @@ async fn calendars(app: &AppHandle) -> Result<Vec<Calendar>, String> {
             let id = c["id"].as_str()?.to_string();
             let default = c["selected"] == true || c["primary"] == true;
             Some(Calendar {
-                visible: if local.hidden.contains(&id) { false } else { default || local.shown.contains(&id) },
-                name: c["summaryOverride"].as_str().or(c["summary"].as_str()).unwrap_or(&id).to_string(),
-                color: c["backgroundColor"].as_str().unwrap_or("#4285f4").to_string(),
+                visible: if local.hidden.contains(&id) {
+                    false
+                } else {
+                    default || local.shown.contains(&id)
+                },
+                name: c["summaryOverride"]
+                    .as_str()
+                    .or(c["summary"].as_str())
+                    .unwrap_or(&id)
+                    .to_string(),
+                color: c["backgroundColor"]
+                    .as_str()
+                    .unwrap_or("#4285f4")
+                    .to_string(),
                 primary: c["primary"] == true,
                 writable: matches!(c["accessRole"].as_str(), Some("owner" | "writer")),
                 id,
@@ -358,7 +449,12 @@ fn event_from(v: &Value, cal: &Calendar) -> Option<Event> {
         return None;
     }
     let all_day = v["start"]["date"].is_string();
-    let field = |k: &str| v[k]["dateTime"].as_str().or(v[k]["date"].as_str()).map(str::to_string);
+    let field = |k: &str| {
+        v[k]["dateTime"]
+            .as_str()
+            .or(v[k]["date"].as_str())
+            .map(str::to_string)
+    };
     let color = v["colorId"]
         .as_str()
         .and_then(|c| c.parse::<usize>().ok())
@@ -376,7 +472,11 @@ fn event_from(v: &Value, cal: &Calendar) -> Option<Event> {
     Some(Event {
         calendar_id: cal.id.clone(),
         id: v["id"].as_str()?.to_string(),
-        title: v["summary"].as_str().filter(|s| !s.trim().is_empty()).unwrap_or("(Без названия)").to_string(),
+        title: v["summary"]
+            .as_str()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or("(Без названия)")
+            .to_string(),
         start: field("start")?,
         end: field("end")?,
         all_day,
@@ -390,7 +490,11 @@ fn event_from(v: &Value, cal: &Calendar) -> Option<Event> {
     })
 }
 
-async fn calendar_events(cal: &Calendar, time_min: &str, time_max: &str) -> Result<Vec<Event>, String> {
+async fn calendar_events(
+    cal: &Calendar,
+    time_min: &str,
+    time_max: &str,
+) -> Result<Vec<Event>, String> {
     let mut out = Vec::new();
     let mut page: Option<String> = None;
     loop {
@@ -404,7 +508,13 @@ async fn calendar_events(cal: &Calendar, time_min: &str, time_max: &str) -> Resu
             url.push_str(&format!("&pageToken={}", enc(p)));
         }
         let v = api(Method::GET, &url, None).await?;
-        out.extend(v["items"].as_array().into_iter().flatten().filter_map(|e| event_from(e, cal)));
+        out.extend(
+            v["items"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|e| event_from(e, cal)),
+        );
         match v["nextPageToken"].as_str() {
             Some(p) => page = Some(p.to_string()),
             None => return Ok(out),
@@ -414,9 +524,21 @@ async fn calendar_events(cal: &Calendar, time_min: &str, time_max: &str) -> Resu
 
 /// Events of every visible calendar between two RFC 3339 instants.
 #[tauri::command]
-pub async fn gcal_events(app: AppHandle, time_min: String, time_max: String) -> Result<Vec<Event>, String> {
-    let cals: Vec<Calendar> = calendars(&app).await?.into_iter().filter(|c| c.visible).collect();
-    let results = futures_util::future::join_all(cals.iter().map(|c| calendar_events(c, &time_min, &time_max))).await;
+pub async fn gcal_events(
+    app: AppHandle,
+    time_min: String,
+    time_max: String,
+) -> Result<Vec<Event>, String> {
+    let cals: Vec<Calendar> = calendars(&app)
+        .await?
+        .into_iter()
+        .filter(|c| c.visible)
+        .collect();
+    let results = futures_util::future::join_all(
+        cals.iter()
+            .map(|c| calendar_events(c, &time_min, &time_max)),
+    )
+    .await;
     // One broken calendar (a removed subscription, say) shouldn't hide the rest.
     let mut events = Vec::new();
     let mut first_error = None;
@@ -439,29 +561,55 @@ pub async fn gcal_events(app: AppHandle, time_min: String, time_max: String) -> 
 }
 
 async fn calendar(app: &AppHandle, id: &str) -> Result<Calendar, String> {
-    calendars(app).await?.into_iter().find(|c| c.id == id).ok_or_else(|| "Календарь не найден".into())
+    calendars(app)
+        .await?
+        .into_iter()
+        .find(|c| c.id == id)
+        .ok_or_else(|| "Календарь не найден".into())
 }
 
 /// Creates an event from a Google event body (summary, start, end...).
 #[tauri::command]
-pub async fn gcal_create(app: AppHandle, calendar_id: String, event: Value) -> Result<Event, String> {
+pub async fn gcal_create(
+    app: AppHandle,
+    calendar_id: String,
+    event: Value,
+) -> Result<Event, String> {
     let cal = calendar(&app, &calendar_id).await?;
-    let v = api(Method::POST, &format!("{CALENDAR_API}/calendars/{}/events", enc(&calendar_id)), Some(event)).await?;
+    let v = api(
+        Method::POST,
+        &format!("{CALENDAR_API}/calendars/{}/events", enc(&calendar_id)),
+        Some(event),
+    )
+    .await?;
     event_from(&v, &cal).ok_or_else(|| "Google вернул непонятное событие".into())
 }
 
 /// Changes some fields of an event (a single occurrence, for recurring ones).
 #[tauri::command]
-pub async fn gcal_update(app: AppHandle, calendar_id: String, event_id: String, patch: Value) -> Result<Event, String> {
+pub async fn gcal_update(
+    app: AppHandle,
+    calendar_id: String,
+    event_id: String,
+    patch: Value,
+) -> Result<Event, String> {
     let cal = calendar(&app, &calendar_id).await?;
-    let url = format!("{CALENDAR_API}/calendars/{}/events/{}", enc(&calendar_id), enc(&event_id));
+    let url = format!(
+        "{CALENDAR_API}/calendars/{}/events/{}",
+        enc(&calendar_id),
+        enc(&event_id)
+    );
     let v = api(Method::PATCH, &url, Some(patch)).await?;
     event_from(&v, &cal).ok_or_else(|| "Google вернул непонятное событие".into())
 }
 
 #[tauri::command]
 pub async fn gcal_delete(calendar_id: String, event_id: String) -> Result<(), String> {
-    let url = format!("{CALENDAR_API}/calendars/{}/events/{}", enc(&calendar_id), enc(&event_id));
+    let url = format!(
+        "{CALENDAR_API}/calendars/{}/events/{}",
+        enc(&calendar_id),
+        enc(&event_id)
+    );
     match api(Method::DELETE, &url, None).await {
         // Already gone is what we wanted.
         Err(e) if e.contains("удален") => Ok(()),
@@ -493,12 +641,22 @@ fn date_only_due(date: &str) -> String {
 
 /// The account's task lists as (id, title), in Google's order (the default list first).
 async fn task_lists() -> Result<Vec<(String, String)>, String> {
-    let lists = api(Method::GET, &format!("{TASKS_API}/users/@me/lists?maxResults=100"), None).await?;
+    let lists = api(
+        Method::GET,
+        &format!("{TASKS_API}/users/@me/lists?maxResults=100"),
+        None,
+    )
+    .await?;
     Ok(lists["items"]
         .as_array()
         .into_iter()
         .flatten()
-        .filter_map(|l| Some((l["id"].as_str()?.to_string(), l["title"].as_str().unwrap_or_default().to_string())))
+        .filter_map(|l| {
+            Some((
+                l["id"].as_str()?.to_string(),
+                l["title"].as_str().unwrap_or_default().to_string(),
+            ))
+        })
         .collect())
 }
 
@@ -515,7 +673,10 @@ fn task_from(t: &Value, list_id: &str, list: &str) -> Option<Task> {
         due: t["due"].as_str().map(|d| d.chars().take(10).collect()),
         due_at: t["due"]
             .as_str()
-            .filter(|d| d.get(10..).is_some_and(|t| !t.is_empty() && !is_midnight(t)))
+            .filter(|d| {
+                d.get(10..)
+                    .is_some_and(|t| !t.is_empty() && !is_midnight(t))
+            })
             .map(str::to_string),
         notes: t["notes"].as_str().map(str::to_string),
     })
@@ -524,8 +685,13 @@ fn task_from(t: &Value, list_id: &str, list: &str) -> Option<Task> {
 /// "T00:00:00.000Z", "T00:00:00Z" and the like: no time of day.
 fn is_midnight(rest: &str) -> bool {
     let time = rest.trim_start_matches('T');
-    let Some(rest) = time.strip_prefix("00:00:00") else { return false };
-    matches!(rest.trim_start_matches(|c: char| c == '.' || c.is_ascii_digit()), "Z" | "+00:00" | "")
+    let Some(rest) = time.strip_prefix("00:00:00") else {
+        return false;
+    };
+    matches!(
+        rest.trim_start_matches(|c: char| c == '.' || c.is_ascii_digit()),
+        "Z" | "+00:00" | ""
+    )
 }
 
 #[derive(Serialize)]
@@ -536,7 +702,11 @@ pub struct TaskList {
 
 #[tauri::command]
 pub async fn gcal_task_lists() -> Result<Vec<TaskList>, String> {
-    Ok(task_lists().await?.into_iter().map(|(id, title)| TaskList { id, title }).collect())
+    Ok(task_lists()
+        .await?
+        .into_iter()
+        .map(|(id, title)| TaskList { id, title })
+        .collect())
 }
 
 /// Adds a task due on `due` (YYYY-MM-DD). `due_at` (RFC 3339) also offers
@@ -550,7 +720,12 @@ pub async fn gcal_task_create(
     due: Option<String>,
     due_at: Option<String>,
 ) -> Result<Task, String> {
-    let list = task_lists().await?.into_iter().find(|(id, _)| *id == list_id).map(|(_, t)| t).unwrap_or_default();
+    let list = task_lists()
+        .await?
+        .into_iter()
+        .find(|(id, _)| *id == list_id)
+        .map(|(_, t)| t)
+        .unwrap_or_default();
     let mut body = json!({ "title": title.trim() });
     if let Some(n) = notes.filter(|n| !n.trim().is_empty()) {
         body["notes"] = json!(n);
@@ -559,13 +734,31 @@ pub async fn gcal_task_create(
     if let Some(d) = &due {
         body["due"] = json!(due_at.clone().unwrap_or_else(|| date_only_due(d)));
     }
-    let v = api(Method::POST, &format!("{TASKS_API}/lists/{}/tasks", enc(&list_id)), Some(body)).await?;
+    let v = api(
+        Method::POST,
+        &format!("{TASKS_API}/lists/{}/tasks", enc(&list_id)),
+        Some(body),
+    )
+    .await?;
     let task = task_from(&v, &list_id, &list).ok_or("Google вернул непонятную задачу")?;
     refresh_due_today();
     match &due {
-        Some(d) if due_at.is_some() && task.due_at.is_none() && task.due.as_deref() != Some(d.as_str()) => {
-            let url = format!("{TASKS_API}/lists/{}/tasks/{}", enc(&list_id), enc(&task.id));
-            let v = api(Method::PATCH, &url, Some(json!({ "due": date_only_due(d) }))).await?;
+        Some(d)
+            if due_at.is_some()
+                && task.due_at.is_none()
+                && task.due.as_deref() != Some(d.as_str()) =>
+        {
+            let url = format!(
+                "{TASKS_API}/lists/{}/tasks/{}",
+                enc(&list_id),
+                enc(&task.id)
+            );
+            let v = api(
+                Method::PATCH,
+                &url,
+                Some(json!({ "due": date_only_due(d) })),
+            )
+            .await?;
             task_from(&v, &list_id, &list).ok_or_else(|| "Google вернул непонятную задачу".into())
         }
         _ => Ok(task),
@@ -578,12 +771,24 @@ pub async fn gcal_tasks() -> Result<Vec<Task>, String> {
     let lists = task_lists().await?;
     let urls: Vec<String> = lists
         .iter()
-        .map(|(id, _)| format!("{TASKS_API}/lists/{}/tasks?showCompleted=false&showHidden=false&maxResults=100", enc(id)))
+        .map(|(id, _)| {
+            format!(
+                "{TASKS_API}/lists/{}/tasks?showCompleted=false&showHidden=false&maxResults=100",
+                enc(id)
+            )
+        })
         .collect();
-    let results = futures_util::future::join_all(urls.iter().map(|u| api(Method::GET, u, None))).await;
+    let results =
+        futures_util::future::join_all(urls.iter().map(|u| api(Method::GET, u, None))).await;
     let mut tasks = Vec::new();
     for ((list_id, list), r) in lists.iter().zip(results) {
-        tasks.extend(r?["items"].as_array().into_iter().flatten().filter_map(|t| task_from(t, list_id, list)));
+        tasks.extend(
+            r?["items"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|t| task_from(t, list_id, list)),
+        );
     }
     tasks.sort_by(|a, b| a.due.cmp(&b.due));
     remember_due_today(&tasks);
@@ -592,8 +797,16 @@ pub async fn gcal_tasks() -> Result<Vec<Task>, String> {
 
 #[tauri::command]
 pub async fn gcal_task_done(list_id: String, task_id: String, done: bool) -> Result<(), String> {
-    let url = format!("{TASKS_API}/lists/{}/tasks/{}", enc(&list_id), enc(&task_id));
-    let body = if done { json!({ "status": "completed" }) } else { json!({ "status": "needsAction", "completed": null }) };
+    let url = format!(
+        "{TASKS_API}/lists/{}/tasks/{}",
+        enc(&list_id),
+        enc(&task_id)
+    );
+    let body = if done {
+        json!({ "status": "completed" })
+    } else {
+        json!({ "status": "needsAction", "completed": null })
+    };
     api(Method::PATCH, &url, Some(body)).await.map(drop)?;
     refresh_due_today();
     Ok(())
@@ -621,7 +834,11 @@ fn today() -> String {
     }
     #[cfg(not(windows))]
     {
-        let days = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() / 86_400;
+        let days = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            / 86_400;
         civil_from_days(days as i64)
     }
 }
@@ -637,12 +854,20 @@ fn civil_from_days(z: i64) -> String {
     let mp = (5 * doy + 2) / 153;
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    format!("{:04}-{:02}-{:02}", yoe + era * 400 + i64::from(m <= 2), m, d)
+    format!(
+        "{:04}-{:02}-{:02}",
+        yoe + era * 400 + i64::from(m <= 2),
+        m,
+        d
+    )
 }
 
 /// Overdue tasks count too: Google Calendar also shows them on today.
 fn count_due(tasks: &[Task], today: &str) -> usize {
-    tasks.iter().filter(|t| t.due.as_deref().is_some_and(|d| d <= today)).count()
+    tasks
+        .iter()
+        .filter(|t| t.due.as_deref().is_some_and(|d| d <= today))
+        .count()
 }
 
 fn remember_due_today(tasks: &[Task]) {
@@ -688,7 +913,12 @@ mod tests {
 
     #[test]
     fn counts_tasks_due_today_and_overdue() {
-        let tasks = [task(Some("2026-09-25")), task(Some("2026-09-26")), task(Some("2026-09-27")), task(None)];
+        let tasks = [
+            task(Some("2026-09-25")),
+            task(Some("2026-09-26")),
+            task(Some("2026-09-27")),
+            task(None),
+        ];
         assert_eq!(count_due(&tasks, "2026-09-26"), 2);
         assert_eq!(count_due(&tasks, "2026-09-24"), 0);
     }
