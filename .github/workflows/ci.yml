@@ -4,10 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "17 5 * * 1"
 
 # The app is Windows-only (Win32 APIs, Credential Manager), so build where it runs.
 jobs:
   check:
+    if: github.event_name != 'schedule'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,11 +34,40 @@ jobs:
         run: pnpm build
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
 
+      # Warnings are reported, not fatal: the code base predates the check.
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --locked --all-targets
+
+      # The code base was never run through rustfmt, so this only reports for
+      # now. Run `cargo fmt` once in its own commit, then drop continue-on-error.
+      - name: Rustfmt
+        working-directory: src-tauri
+        continue-on-error: true
+        run: cargo fmt --check
+
       - name: Rust tests
         working-directory: src-tauri
         run: cargo test --locked
+
+  # Known vulnerabilities in Cargo.lock. Unmaintained or yanked crates only warn;
+  # a vulnerability fails the job. Also weekly, since advisories appear without commits.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: cargo audit
+        working-directory: src-tauri
+        run: cargo audit
