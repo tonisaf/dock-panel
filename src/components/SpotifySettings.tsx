@@ -71,9 +71,9 @@ export function SpotifySettings() {
           <div className={clsx("text-[12px] leading-relaxed", status.error ? "text-warn" : "text-ok")}>
             {status.error ?? "Подключено"}
           </div>
-          {!status.error && (!status.canLike || !status.canEditPlaylists) && (
+          {!status.error && (!status.canLike || !status.canEditPlaylists || !status.canHistory) && (
             <div className="text-[12px] leading-relaxed text-warn">
-              Чтобы ставить лайки и добавлять треки в плейлисты, выйдите и войдите снова
+              Чтобы ставить лайки, добавлять треки в плейлисты и видеть недавнее и топ, выйдите и войдите снова
             </div>
           )}
         </div>

@@ -83,6 +83,9 @@ struct CodexFile {
     activity: Option<String>,
 }
 
+/// Sessions finishing in a burst refresh the AI limits once, not once each.
+const LIMITS_REFRESH_GAP: Duration = Duration::from_secs(20);
+
 static TRACKER: Mutex<Option<Tracker>> = Mutex::new(None);
 static NOTIFY: AtomicBool = AtomicBool::new(true);
 static APP: OnceLock<AppHandle> = OnceLock::new();
@@ -504,6 +507,10 @@ fn poll(app: &AppHandle) {
     drop(guard);
     if changed {
         let _ = app.emit(CHANGED_EVENT, ());
+    }
+    // A finished session has just used up some of the limits: don't wait for the next scheduled read.
+    if !finished.is_empty() {
+        crate::claude_web::refresh_now(app, LIMITS_REFRESH_GAP);
     }
 
     if NOTIFY.load(Ordering::SeqCst) {

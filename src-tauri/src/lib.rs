@@ -9,6 +9,7 @@ mod discord;
 mod files;
 mod gcal;
 mod home;
+mod listening;
 mod claude_web;
 mod mail;
 mod media;
@@ -79,6 +80,7 @@ pub fn run() {
             youtube::init(handle);
             discord::init(handle);
             pomodoro::init(handle);
+            listening::init(handle);
             notes::init(handle);
             files::init();
             updater::init(handle);
@@ -156,6 +158,7 @@ pub fn run() {
             ai_limits::claude_disconnect,
             claude_web::claude_web_login,
             claude_web::claude_web_refresh,
+            ai_limits::ai_limits_refresh,
             claude_web::claude_web_logout,
             alerts::ai_alerts_set,
             notion::notion_status,
@@ -206,6 +209,9 @@ pub fn run() {
             spotify::spotify_skip,
             spotify::spotify_add_to_playlist,
             spotify::spotify_image,
+            spotify::spotify_recent,
+            spotify::spotify_top,
+            listening::listening_summary,
             weather::weather_forecast,
             weather::weather_geocode,
             home::home_state,

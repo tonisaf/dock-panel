@@ -73,6 +73,13 @@ pub async fn ai_limits(app: AppHandle) -> Result<AiLimits, String> {
     .map_err(|e| e.to_string())
 }
 
+/// The "refresh now" button: claude.ai is fetched at once, the local sources are reread.
+#[tauri::command]
+pub fn ai_limits_refresh(app: AppHandle) {
+    // A short gap keeps a double click from fetching twice.
+    crate::claude_web::refresh_now(&app, std::time::Duration::from_secs(3));
+}
+
 /// Current `(claude, codex)` snapshots from every local source.
 pub fn snapshots(app: &AppHandle) -> (Option<Snapshot>, Option<Snapshot>) {
     // Signed-in claude.ai data wins over the Claude Code status line snapshot.

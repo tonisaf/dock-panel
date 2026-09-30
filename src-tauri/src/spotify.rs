@@ -21,10 +21,13 @@ const TOKEN_URL: &str = "https://accounts.spotify.com/api/token";
 const API: &str = "https://api.spotify.com/v1";
 const SCOPES: &str = "playlist-read-private playlist-read-collaborative user-library-read \
                       user-library-modify user-read-playback-state user-modify-playback-state \
-                      playlist-modify-public playlist-modify-private";
+                      playlist-modify-public playlist-modify-private \
+                      user-read-recently-played user-top-read";
 /// Added after the first release; older sign-ins lack them until the user signs in again.
 const LIKE_SCOPE: &str = "user-library-modify";
 const PLAYLIST_SCOPE: &str = "playlist-modify-private";
+const RECENT_SCOPE: &str = "user-read-recently-played";
+const TOP_SCOPE: &str = "user-top-read";
 const SECRET: &str = "DockPanel/spotify";
 /// Must match the Redirect URI registered in the Spotify dashboard.
 const REDIRECT_PORT: u16 = 43821;
@@ -207,6 +210,8 @@ pub struct SpotifyStatus {
     can_like: bool,
     /// Likewise for adding tracks to playlists.
     can_edit_playlists: bool,
+    /// Likewise for recently played and top tracks.
+    can_history: bool,
 }
 
 fn granted(scope: &str) -> bool {
@@ -217,23 +222,26 @@ fn granted(scope: &str) -> bool {
 #[tauri::command]
 pub async fn spotify_status() -> SpotifyStatus {
     if stored().is_none() {
-        return SpotifyStatus { connected: false, user: None, error: None, can_like: false, can_edit_playlists: false };
-    }
-    match api_get("/me").await {
-        Ok(me) => SpotifyStatus {
-            connected: true,
-            user: me["display_name"].as_str().or(me["id"].as_str()).map(str::to_string),
-            error: None,
-            can_like: granted(LIKE_SCOPE),
-            can_edit_playlists: granted(PLAYLIST_SCOPE),
-        },
-        Err(e) => SpotifyStatus {
-            connected: true,
+        return SpotifyStatus {
+            connected: false,
             user: None,
-            error: Some(e),
-            can_like: granted(LIKE_SCOPE),
-            can_edit_playlists: granted(PLAYLIST_SCOPE),
-        },
+            error: None,
+            can_like: false,
+            can_edit_playlists: false,
+            can_history: false,
+        };
+    }
+    let (user, error) = match api_get("/me").await {
+        Ok(me) => (me["display_name"].as_str().or(me["id"].as_str()).map(str::to_string), None),
+        Err(e) => (None, Some(e)),
+    };
+    SpotifyStatus {
+        connected: true,
+        user,
+        error,
+        can_like: granted(LIKE_SCOPE),
+        can_edit_playlists: granted(PLAYLIST_SCOPE),
+        can_history: granted(RECENT_SCOPE) && granted(TOP_SCOPE),
     }
 }
 
@@ -538,6 +546,18 @@ fn artist_names(v: &Value) -> String {
         .join(", ")
 }
 
+/// A track object as a result row; `None` for a null or uri-less one.
+fn track_item(t: &Value) -> Option<SearchItem> {
+    Some(SearchItem {
+        kind: "track",
+        uri: t["uri"].as_str()?.to_string(),
+        name: t["name"].as_str().unwrap_or_default().into(),
+        subtitle: artist_names(&t["artists"]),
+        image: smallest_image(&t["album"]["images"]),
+        context: t["album"]["uri"].as_str().map(str::to_string),
+    })
+}
+
 /// Tracks first, then a few artists, albums and playlists.
 #[tauri::command]
 pub async fn spotify_search(query: String) -> Result<Vec<SearchItem>, String> {
@@ -546,16 +566,7 @@ pub async fn spotify_search(query: String) -> Result<Vec<SearchItem>, String> {
     let items = |kind: &str| v[format!("{kind}s")]["items"].as_array().cloned().unwrap_or_default();
     let mut out = Vec::new();
 
-    for t in items("track").iter().filter(|t| !t.is_null()) {
-        out.push(SearchItem {
-            kind: "track",
-            uri: t["uri"].as_str().unwrap_or_default().into(),
-            name: t["name"].as_str().unwrap_or_default().into(),
-            subtitle: artist_names(&t["artists"]),
-            image: smallest_image(&t["album"]["images"]),
-            context: t["album"]["uri"].as_str().map(str::to_string),
-        });
-    }
+    out.extend(items("track").iter().filter_map(track_item));
     for a in items("artist").iter().filter(|a| !a.is_null()).take(2) {
         out.push(SearchItem {
             kind: "artist",
@@ -758,6 +769,69 @@ pub async fn spotify_add_to_playlist(playlist_id: String, uri: String) -> Result
         }
         s => Err(format!("Spotify {}: {}", s.as_u16(), v["error"]["message"].as_str().unwrap_or(""))),
     }
+}
+
+// ---- recently played & top ---------------------------------------------------------
+
+/// Rows the history lists show.
+const HISTORY_MAX: usize = 20;
+
+/// GET for the history endpoints: a refusal there means a sign-in from before
+/// their scopes were asked for, not the developer-mode quota `api_get` blames.
+async fn history_get(path: &str) -> Result<Value, String> {
+    let (status, v) = api(Method::GET, path, None).await?;
+    match status {
+        s if s.is_success() => Ok(v),
+        StatusCode::FORBIDDEN | StatusCode::UNAUTHORIZED => {
+            Err("Нет разрешения на историю: выйдите из Spotify в настройках и войдите снова.".into())
+        }
+        s => Err(format!("Spotify {}: {}", s.as_u16(), v["error"]["message"].as_str().unwrap_or(""))),
+    }
+}
+
+/// The last tracks played on any device, newest first, each track once.
+#[tauri::command]
+pub async fn spotify_recent() -> Result<Vec<SearchItem>, String> {
+    let v = history_get("/me/player/recently-played?limit=50").await?;
+    let mut out: Vec<SearchItem> = Vec::new();
+    for item in v["items"].as_array().into_iter().flatten().filter_map(|i| track_item(&i["track"])) {
+        if !out.iter().any(|o| o.uri == item.uri) {
+            out.push(item);
+        }
+    }
+    out.truncate(HISTORY_MAX);
+    Ok(out)
+}
+
+/// The user's most played `kind` ("tracks" or "artists") over `range`:
+/// "short_term" (4 weeks), "medium_term" (6 months) or "long_term" (a year or more).
+#[tauri::command]
+pub async fn spotify_top(kind: String, range: String) -> Result<Vec<SearchItem>, String> {
+    if !matches!(kind.as_str(), "tracks" | "artists") || !matches!(range.as_str(), "short_term" | "medium_term" | "long_term") {
+        return Err("Неизвестный тип или период".into());
+    }
+    let v = history_get(&format!("/me/top/{kind}?time_range={range}&limit={HISTORY_MAX}")).await?;
+    let items = v["items"].as_array().into_iter().flatten().filter(|i| !i.is_null());
+    Ok(if kind == "tracks" {
+        items.filter_map(track_item).collect()
+    } else {
+        items
+            .filter_map(|a| {
+                Some(SearchItem {
+                    kind: "artist",
+                    uri: a["uri"].as_str()?.to_string(),
+                    name: a["name"].as_str().unwrap_or_default().into(),
+                    subtitle: a["genres"]
+                        .as_array()
+                        .map(|g| g.iter().filter_map(|x| x.as_str()).take(2).collect::<Vec<_>>().join(", "))
+                        .filter(|g| !g.is_empty())
+                        .unwrap_or_else(|| "Исполнитель".into()),
+                    image: smallest_image(&a["images"]),
+                    context: None,
+                })
+            })
+            .collect()
+    })
 }
 
 // ---- covers ------------------------------------------------------------------------

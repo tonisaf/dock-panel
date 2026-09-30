@@ -6,6 +6,7 @@ import { AiLimitsWidget } from "./ai/AiLimitsWidget";
 import { TasksWidget } from "./tasks/TasksWidget";
 import { CalendarWidget } from "./calendar/CalendarWidget";
 import { PlaylistsWidget } from "./spotify/PlaylistsWidget";
+import { HistoryWidget } from "./spotify/HistoryWidget";
 import { VpnWidget } from "./vpn/VpnWidget";
 import { PinnedWidget } from "./pinned/PinnedWidget";
 import { MailWidget } from "./mail/MailWidget";
@@ -34,6 +35,7 @@ export const WIDGETS: WidgetDef[] = [
   { id: "calendar", title: "Календарь", component: CalendarWidget },
   { id: "media", title: "Сейчас играет", component: MediaWidget },
   { id: "playlists", title: "Плейлисты", component: PlaylistsWidget },
+  { id: "history", title: "Моя музыка", component: HistoryWidget },
   { id: "mail", title: "Почта", component: MailWidget },
   { id: "youtube", title: "YouTube", component: YoutubeWidget },
   { id: "discord", title: "Discord", component: DiscordWidget },

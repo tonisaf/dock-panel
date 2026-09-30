@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Heart, ListMusic, Loader2, Play } from "lucide-react";
 import { Card } from "../../components/Card";
@@ -7,7 +7,26 @@ import { playUri, useLibrary, useSpotifyStatus } from "./api";
 import { DevicePicker } from "./DevicePicker";
 import { Cover } from "./Cover";
 
-const COLLAPSED = 7;
+/** Full rows of tiles shown before "all playlists". */
+const COLLAPSED_ROWS = 3;
+
+/** How many columns the grid has at its current width; `ref` goes on the grid, whenever it appears. */
+function useColumns() {
+  const [el, ref] = useState<HTMLDivElement | null>(null);
+  const [columns, setColumns] = useState(4);
+  useEffect(() => {
+    if (!el) return;
+    const measure = () => {
+      const n = getComputedStyle(el).gridTemplateColumns.split(" ").filter(Boolean).length;
+      if (n > 0) setColumns(n);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [el]);
+  return [ref, columns] as const;
+}
 
 function Tile({
   name,
@@ -48,6 +67,7 @@ export function PlaylistsWidget() {
   const { data, isPending, isError, error } = useLibrary(connected);
   const [expanded, setExpanded] = useState(false);
   const [busyUri, setBusyUri] = useState<string | null>(null);
+  const [grid, columns] = useColumns();
 
   if (!connected) {
     return (
@@ -74,7 +94,9 @@ export function PlaylistsWidget() {
   };
 
   const playlists = data?.playlists ?? [];
-  const shown = expanded ? playlists : playlists.slice(0, COLLAPSED);
+  // The Liked Songs tile takes the first slot, so the rows fill up exactly.
+  const collapsed = columns * COLLAPSED_ROWS - 1;
+  const shown = expanded ? playlists : playlists.slice(0, collapsed);
   const tracks = (n: number | null) => (n == null ? undefined : `${n} треков`);
 
   return (
@@ -85,7 +107,7 @@ export function PlaylistsWidget() {
         <p className="text-[12px] text-fg-subtle">Загрузка…</p>
       ) : (
         <>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(80px,1fr))] gap-2.5">
+          <div ref={grid} className="grid grid-cols-[repeat(auto-fill,minmax(80px,1fr))] gap-2.5">
             {data && (
               <Tile
                 name="Любимые треки"
@@ -110,7 +132,7 @@ export function PlaylistsWidget() {
               />
             ))}
           </div>
-          {playlists.length > COLLAPSED && (
+          {playlists.length > collapsed && (
             <button
               onClick={() => setExpanded(!expanded)}
               className="mt-2.5 w-full rounded-lg py-1 text-[12px] text-fg-subtle hover:bg-ink/6 hover:text-fg"

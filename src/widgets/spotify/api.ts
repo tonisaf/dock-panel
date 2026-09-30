@@ -9,6 +9,8 @@ export interface SpotifyStatus {
   canLike: boolean;
   /** Likewise for adding tracks to playlists. */
   canEditPlaylists: boolean;
+  /** Likewise for recently played and top tracks. */
+  canHistory: boolean;
 }
 
 export interface Playlist {
@@ -195,3 +197,53 @@ export const skipAhead = (count: number) => invoke("spotify_skip", { count });
 
 export const addToPlaylist = (playlistId: string, uri: string) =>
   invoke("spotify_add_to_playlist", { playlistId, uri });
+
+// ---- recently played & top ------------------------------------------------------
+
+export type TopKind = "tracks" | "artists";
+/** Spotify's windows: about 4 weeks, 6 months, and a year or more. */
+export type TopRange = "short_term" | "medium_term" | "long_term";
+
+export function useRecent(enabled: boolean) {
+  return useQuery({
+    queryKey: ["spotify-recent"],
+    queryFn: () => invoke<SearchItem[]>("spotify_recent"),
+    enabled,
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
+export function useTop(kind: TopKind, range: TopRange, enabled: boolean) {
+  return useQuery({
+    queryKey: ["spotify-top", kind, range],
+    queryFn: () => invoke<SearchItem[]>("spotify_top", { kind, range }),
+    enabled,
+    // Spotify recomputes these about daily.
+    staleTime: 30 * 60_000,
+    retry: false,
+  });
+}
+
+// ---- local listening statistics -------------------------------------------------
+
+export interface ListeningSummary {
+  totalMs: number;
+  plays: number;
+  activeDays: number;
+  artists: { name: string; ms: number }[];
+  tracks: { title: string; artist: string; plays: number; ms: number }[];
+  /** Milliseconds listened in each hour of the day. */
+  hours: number[];
+  /** The last days of the range, oldest first. */
+  daily: { day: string; ms: number }[];
+}
+
+/** What the panel itself logged while Spotify played, over the last `days` days. */
+export function useListening(days: number) {
+  return useQuery({
+    queryKey: ["listening", days],
+    queryFn: () => invoke<ListeningSummary>("listening_summary", { days }),
+    staleTime: 30_000,
+  });
+}

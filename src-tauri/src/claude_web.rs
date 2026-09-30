@@ -97,16 +97,32 @@ pub fn init(app: &AppHandle) {
     with_state(|s| s.persisted = persisted);
 }
 
-/// Refresh in the background if enabled and the data is older than `REFRESH_EVERY`.
-pub fn refresh_if_stale(app: &AppHandle) {
-    let stale = with_state(|s| {
+/// Enabled, signed in, nothing in flight, and the last fetch was `min_gap` or more ago.
+fn fetch_due(min_gap: Duration) -> bool {
+    with_state(|s| {
         s.persisted.enabled
             && !s.needs_login
             && s.in_flight.is_none()
-            && s.last_attempt.is_none_or(|t| t.elapsed() >= REFRESH_EVERY)
-    });
-    if stale {
+            && s.last_attempt.is_none_or(|t| t.elapsed() >= min_gap)
+    })
+}
+
+/// Refresh in the background if enabled and the data is older than `REFRESH_EVERY`.
+pub fn refresh_if_stale(app: &AppHandle) {
+    if fetch_due(REFRESH_EVERY) {
         spawn_refresh(app);
+    }
+}
+
+/// Fetches claude.ai now instead of waiting out `REFRESH_EVERY`, unless that was
+/// tried within `min_gap`. Either way the UI is told to reread, which also picks
+/// up the local sources (Claude Code's status line, Codex) that need no fetch.
+pub fn refresh_now(app: &AppHandle, min_gap: Duration) {
+    if fetch_due(min_gap) {
+        // Announces itself when it starts and when it ends.
+        spawn_refresh(app);
+    } else {
+        let _ = app.emit(CHANGED_EVENT, ());
     }
 }
 
