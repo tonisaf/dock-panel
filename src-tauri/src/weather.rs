@@ -147,7 +147,7 @@ pub async fn weather_geocode(query: String) -> Result<Sourced, String> {
         *last = Some(next);
         next - now
     };
-    net::sleep(wait).await;
+    tokio::time::sleep(wait).await;
 
     let nominatim = [
         ("q", query),
