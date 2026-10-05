@@ -45,10 +45,36 @@ Spotify (нужен Premium): плей на плейлисте запускае�
 
 Сборка установщика: `pnpm tauri build` → `src-tauri/target/release/bundle/nsis/Dock Panel_<версия>_x64-setup.exe` (ставится для текущего пользователя, без прав администратора). Иконки генерируются из `app-icon.svg`: `pnpm tauri icon app-icon.svg`.
 
+## Проверки
+
+CI (`.github/workflows/ci.yml`) на каждый PR и пуш в `main` собирает приложение на Windows и запускает:
+
+- `pnpm test` и `pnpm build` (тесты и проверка типов фронтенда);
+- `cargo clippy --locked --all-targets` — предупреждения показываются, но сборку не роняют;
+- `cargo fmt --check` — форматирование Rust, падает при расхождениях;
+- `cargo test --locked`.
+
+Отдельная задача `audit` ищет известные уязвимости в `src-tauri/Cargo.lock` (`cargo audit`); запускается и по понедельникам, потому что новые advisory появляются без коммитов. Упавшей её делают только уязвимости, а предупреждения о неподдерживаемых или снятых крейтах — нет.
+
+Те же проверки локально (Rust-часть собирается только на Windows):
+
+```bash
+pnpm test
+cd src-tauri
+cargo fmt          # перед коммитом; CI проверяет `cargo fmt --check`
+cargo clippy --all-targets
+cargo test
+cargo install cargo-audit --locked   # один раз
+cargo audit
+```
+
+Коммит с массовым форматированием скрыт из `git blame`: `git config blame.ignoreRevsFile .git-blame-ignore-revs`.
+
 ## Устройство
 
 - `src-tauri/src/panel.rs` — окно панели: позиция на мониторе с курсором, Acrylic, скругления, двухфазное скрытие (анимация во фронтенде, затем `hide_panel`).
 - `src-tauri/src/tray.rs` — иконка в трее.
+- `src-tauri/src/trust.rs` — белый список запуска: `launch_app`, `launch_app_admin` и `open_recent` принимают только то, что выдал сам Rust (список приложений, диалог выбора, поиск файлов, недавние файлы, перетаскивание) или что закреплено в `prefs.json` на момент старта. Политика CSP задаётся в `src-tauri/tauri.conf.json`: новые источники картинок и сетевые запросы из интерфейса нужно разрешать там.
 - `src-tauri/src/desktop.rs` и `src/desktop/` — виджеты на рабочем столе: окно на виджет (метка `desk-<id>`), всегда внизу по z-order и во владении рабочего стола.
 - `src-tauri/src/weather.rs` — погода и поиск города: Open-Meteo, а если он недоступен (в России без VPN), — MET Norway и OpenStreetMap Nominatim; ответы запасных сервисов переводятся в формат Open-Meteo в `src/widgets/weather/fallback.ts`.
 - `src-tauri/src/home/` — «Дом»: протокол Yeelight (поиск по multicast, команды по TCP 55443) и Google Cast (mDNS, TLS 8009, protobuf).

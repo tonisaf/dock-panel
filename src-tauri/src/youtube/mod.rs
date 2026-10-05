@@ -119,7 +119,7 @@ mod refresh_lock {
         }
         pub async fn acquire(&self) -> Guard<'_> {
             while self.0.swap(true, Ordering::Acquire) {
-                crate::net::sleep(Duration::from_millis(100)).await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
             Guard(&self.0)
         }
@@ -486,7 +486,7 @@ pub fn init(app: &AppHandle) {
                 let fresh = refresh(&app).await;
                 notify_new(&app, fresh);
             }
-            net::sleep(REFRESH_EVERY).await;
+            tokio::time::sleep(REFRESH_EVERY).await;
         }
     });
 }

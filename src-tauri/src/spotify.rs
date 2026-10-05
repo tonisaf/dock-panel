@@ -475,7 +475,7 @@ pub async fn spotify_play(
     open_in_app(&app, &uri)?;
     let deadline = Instant::now() + DEVICE_WAIT;
     while Instant::now() < deadline {
-        net::sleep(DEVICE_POLL).await;
+        tokio::time::sleep(DEVICE_POLL).await;
         if let Some(device) = pick_device().await {
             if let Start::Played = start(&context, Some(&device)).await {
                 return Ok(PlayOutcome::Launched);

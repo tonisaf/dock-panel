@@ -12,10 +12,3 @@ pub fn client() -> &'static reqwest::Client {
             .expect("reqwest client")
     })
 }
-
-/// Async sleep without a direct tokio dependency: parks a blocking-pool thread.
-pub async fn sleep(d: Duration) {
-    if !d.is_zero() {
-        let _ = tauri::async_runtime::spawn_blocking(move || std::thread::sleep(d)).await;
-    }
-}
