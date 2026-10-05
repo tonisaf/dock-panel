@@ -31,7 +31,8 @@ function TokenForm() {
   };
 
   return (
-    <div className="flex flex-col gap-2.5 p-3.5 text-[12.5px] leading-relaxed text-fg-muted">
+    <div className="flex flex-col gap-2.5 pt-1 text-[12.5px] leading-relaxed text-fg-muted">
+      <p>Токен нужен только пока репозиторий приватный: из публичного обновления приходят без него.</p>
       <ol className="list-decimal space-y-1 pl-4">
         <li>
           Создайте токен на{" "}
@@ -70,9 +71,9 @@ export function UpdateSettings() {
   const { data: status } = useUpdateStatus();
   const { check, install, installing, progress, error } = useUpdateActions();
   const [checking, setChecking] = useState(false);
+  const [showToken, setShowToken] = useState(false);
 
   if (!status) return null;
-  if (!status.hasToken) return <TokenForm />;
 
   const runCheck = async () => {
     setChecking(true);
@@ -80,6 +81,8 @@ export function UpdateSettings() {
   };
 
   const message = error ?? status.error;
+  // The repo is private and no token is saved: the only way forward is a token.
+  const needsToken = !status.hasToken && !!message?.includes("приватный");
 
   return (
     <div className="flex flex-col gap-2 px-3.5 py-3">
@@ -105,15 +108,23 @@ export function UpdateSettings() {
         <p className="text-[12px] leading-relaxed whitespace-pre-line text-fg-muted">{status.available.notes}</p>
       )}
       {message && <p className="text-[12px] leading-relaxed text-warn">{message}</p>}
-      <button
-        onClick={async () => {
-          await invoke("update_clear_token");
-          queryClient.invalidateQueries({ queryKey: ["update-status"] });
-        }}
-        className="self-start text-[12px] text-fg-subtle hover:text-fg"
-      >
-        Удалить токен GitHub
-      </button>
+      {status.hasToken ? (
+        <button
+          onClick={async () => {
+            await invoke("update_clear_token");
+            queryClient.invalidateQueries({ queryKey: ["update-status"] });
+          }}
+          className="self-start text-[12px] text-fg-subtle hover:text-fg"
+        >
+          Удалить токен GitHub
+        </button>
+      ) : showToken || needsToken ? (
+        <TokenForm />
+      ) : (
+        <button onClick={() => setShowToken(true)} className="self-start text-[12px] text-fg-subtle hover:text-fg">
+          Указать токен GitHub (для приватного репозитория)
+        </button>
+      )}
     </div>
   );
 }
