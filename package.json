@@ -2,7 +2,7 @@
   "name": "dock-panel",
   "private": true,
   "license": "MIT",
-  "version": "0.2.24",
+  "version": "0.2.25",
   "type": "module",
   "scripts": {
     "dev": "vite",
