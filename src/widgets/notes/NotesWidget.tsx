@@ -1,4 +1,5 @@
 import { CloudOff, Pin, Plus, StickyNote } from "lucide-react";
+import { WidgetState } from "../../components/WidgetState";
 import { Card } from "../../components/Card";
 import { usePanelStore } from "../../store";
 import { ago, showPin, useNotes } from "../../notes/api";
@@ -9,8 +10,8 @@ const SHOWN = 5;
 export function NotesWidget() {
   const setTab = usePanelStore((s) => s.setTab);
   const openNote = usePanelStore((s) => s.openNote);
-  const { data: s } = useNotes();
-  if (!s) return null;
+  const { data: s, error: queryError, isFetching, refetch } = useNotes();
+  if (!s) return <Card title="Заметки" icon={StickyNote}><WidgetState kind={queryError ? "error" : "loading"} text={queryError ? String(queryError) : undefined} onRetry={() => void refetch()} retrying={isFetching} /></Card>;
 
   if (!s.configured) {
     return (
@@ -31,7 +32,7 @@ export function NotesWidget() {
         <button
           onClick={() => openNote("new")}
           title="Новая заметка"
-          className="grid size-6 place-items-center rounded-md text-fg-subtle hover:bg-ink/10 hover:text-fg"
+          className="widget-icon-button"
         >
           <Plus className="size-3.5" />
         </button>

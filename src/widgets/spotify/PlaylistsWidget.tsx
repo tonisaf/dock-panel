@@ -100,7 +100,7 @@ export function PlaylistsWidget() {
   const tracks = (n: number | null) => (n == null ? undefined : `${n} треков`);
 
   return (
-    <Card title="Плейлисты" icon={ListMusic} action={<DevicePicker className="size-6" />}>
+    <Card title="Плейлисты" icon={ListMusic} action={<DevicePicker />}>
       {isError ? (
         <p className="text-[12px] leading-relaxed text-warn">{String(error)}</p>
       ) : isPending ? (

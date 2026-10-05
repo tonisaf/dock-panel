@@ -73,7 +73,7 @@ export function BriefingWidget() {
       onClick={make}
       disabled={busy}
       title="Составить заново"
-      className="grid size-7 place-items-center rounded-lg border border-stroke text-fg-subtle hover:bg-ink/8 hover:text-fg disabled:opacity-50"
+      className="grid size-8 place-items-center rounded-lg border border-stroke text-fg-subtle hover:bg-ink/8 hover:text-fg disabled:opacity-50"
     >
       {busy ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
     </button>

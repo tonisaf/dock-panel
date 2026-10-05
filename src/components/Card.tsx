@@ -39,26 +39,26 @@ export function Card({
           aria-expanded={collapsible ? !collapsed : undefined}
           onClick={onToggle}
           className={clsx(
-            "flex items-center gap-1.5 text-[12px] font-medium text-fg-muted",
+            "flex items-center gap-2 text-[14px] font-semibold text-fg",
             // A collapsible header gets a padded hit area without moving its text.
             !collapsible && "mb-2",
             collapsible && "-mx-1 -mt-1 cursor-default rounded-lg p-1 hover:text-fg",
             collapsible && (collapsed ? "-mb-1" : "mb-1"),
           )}
         >
-          {Icon && <Icon className="size-3.5" strokeWidth={2.2} />}
+          {Icon && <Icon className="size-4 text-fg-muted" strokeWidth={2.2} />}
           {title}
           {collapsible && collapsed && summary && (
             <span className="truncate font-normal text-fg-subtle">· {summary}</span>
           )}
           {(action || collapsible) && (
-            <div className="-my-1 ml-auto flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+            <div className="-my-1 ml-auto flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
               {action}
               {collapsible && (
                 <button
                   onClick={onToggle}
                   title={collapsed ? "Развернуть" : "Свернуть"}
-                  className="grid size-6 place-items-center rounded-md text-fg-subtle hover:bg-ink/10 hover:text-fg"
+                  className="widget-icon-button"
                 >
                   <ChevronDown className={clsx("size-3.5 transition-transform", !collapsed && "rotate-180")} />
                 </button>

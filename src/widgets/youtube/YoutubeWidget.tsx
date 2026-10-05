@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Check, ExternalLink, RefreshCw, SquarePlay, Undo2 } from "lucide-react";
 import clsx from "clsx";
+import { WidgetState } from "../../components/WidgetState";
 import { Card } from "../../components/Card";
 import { usePanelStore } from "../../store";
 import {
@@ -81,14 +82,14 @@ function Row({ video }: { video: Video }) {
         <button
           onClick={() => openInBrowser(video)}
           title="Открыть в браузере"
-          className="grid size-6 place-items-center rounded-md bg-popover text-fg-muted shadow hover:text-fg"
+          className="grid size-8 place-items-center rounded-lg bg-popover text-fg-muted shadow hover:text-fg"
         >
           <ExternalLink className="size-3.5" />
         </button>
         <button
           onClick={() => setWatched(video, !video.watched)}
           title={video.watched ? "Отметить непросмотренным" : "Отметить просмотренным"}
-          className="grid size-6 place-items-center rounded-md bg-popover text-fg-muted shadow hover:text-fg"
+          className="grid size-8 place-items-center rounded-lg bg-popover text-fg-muted shadow hover:text-fg"
         >
           {video.watched ? <Undo2 className="size-3.5" /> : <Check className="size-3.5" />}
         </button>
@@ -101,7 +102,7 @@ export function YoutubeWidget() {
   const setTab = usePanelStore((s) => s.setTab);
   const { data: settings } = useYoutubeSettings();
   const hasChannels = (settings?.channels.length ?? 0) > 0;
-  const { data: feed, isPending, isError, error } = useYoutubeFeed(hasChannels);
+  const { data: feed, isPending, isError, error, isFetching, refetch } = useYoutubeFeed(hasChannels);
   const { refresh } = useYoutubeActions();
   const [refreshing, setRefreshing] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -118,7 +119,7 @@ export function YoutubeWidget() {
       onClick={reload}
       disabled={refreshing}
       title="Обновить"
-      className="grid size-6 place-items-center rounded-md text-fg-subtle hover:bg-ink/10 hover:text-fg"
+      className="widget-icon-button"
     >
       <RefreshCw className={clsx("size-3.5", refreshing && "animate-spin")} />
     </button>
@@ -141,9 +142,9 @@ export function YoutubeWidget() {
   return (
     <Card title="YouTube" icon={SquarePlay} action={action} className="hover:bg-surface">
       {isPending ? (
-        <p className="text-[12px] text-fg-subtle">Загружаю ленты каналов…</p>
+        <WidgetState kind="loading" text="Загружаю ленты каналов…" />
       ) : isError ? (
-        <p className="text-[12px] text-warn">{String(error)}</p>
+        <WidgetState kind="error" text={String(error)} onRetry={() => void refetch()} retrying={isFetching} />
       ) : (
         <div className="-mx-1 flex flex-col gap-0.5">
           {feed && feed.failed > 0 && (
@@ -154,7 +155,7 @@ export function YoutubeWidget() {
             </p>
           )}
           {shown.length === 0 ? (
-            <p className="px-1 text-[12px] text-fg-subtle">Пока нет видео</p>
+            <WidgetState kind="empty" text="Пока нет видео" />
           ) : (
             shown.map((v) => <Row key={v.id} video={v} />)
           )}

@@ -93,7 +93,7 @@ function Row({ item, active, onHover }: { item: SearchItem; active: boolean; onH
             activateSpotifyItem(item, true);
           }}
           title="В очередь (Shift+Enter)"
-          className="grid size-7 place-items-center rounded-lg text-fg-subtle hover:bg-ink/10 hover:text-fg"
+          className="grid size-8 place-items-center rounded-lg text-fg-subtle hover:bg-ink/10 hover:text-fg"
         >
           <ListPlus className="size-4" />
         </button>

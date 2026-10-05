@@ -298,8 +298,6 @@ pub fn run() {
             updater::update_status,
             updater::update_check,
             updater::update_install,
-            updater::update_set_token,
-            updater::update_clear_token,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

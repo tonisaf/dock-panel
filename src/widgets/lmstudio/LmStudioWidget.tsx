@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Cpu, Loader2, Power, Upload } from "lucide-react";
 import clsx from "clsx";
+import { WidgetState } from "../../components/WidgetState";
 import { Card } from "../../components/Card";
 import { formatContext, formatSize, unloadsIn } from "./format";
 
@@ -69,7 +70,7 @@ function details(m: Model) {
 /** What LM Studio has loaded, what is on disk, and the server switch; load and unload from here. */
 export function LmStudioWidget() {
   const queryClient = useQueryClient();
-  const { data } = useOverview();
+  const { data, error: queryError, isFetching, refetch } = useOverview();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ttl, setTtl] = useState(savedTtl);
@@ -97,7 +98,7 @@ export function LmStudioWidget() {
     }
   };
 
-  if (!data) return null;
+  if (!data) return <Card title="LM Studio" icon={Cpu}><WidgetState kind={queryError ? "error" : "loading"} text={queryError ? String(queryError) : undefined} onRetry={() => void refetch()} retrying={isFetching} /></Card>;
   const now = Date.now();
   const chat = data.available.filter((m) => m.kind !== "embedding");
   const power = (
@@ -107,7 +108,7 @@ export function LmStudioWidget() {
       aria-pressed={data.running}
       title={data.running ? "Остановить сервер" : "Запустить сервер"}
       className={clsx(
-        "grid size-7 place-items-center rounded-lg border transition-colors disabled:opacity-50",
+        "grid size-8 place-items-center rounded-lg border transition-colors disabled:opacity-50",
         data.running ? "border-accent/40 bg-accent/15 text-accent" : "border-stroke text-fg-subtle hover:bg-ink/8 hover:text-fg",
       )}
     >
@@ -122,7 +123,7 @@ export function LmStudioWidget() {
       </p>
 
       {data.error ? (
-        <p className="mt-2 text-[12px] leading-relaxed text-warn">{data.error}</p>
+        <WidgetState kind="error" text={data.error} onRetry={() => void refetch()} retrying={isFetching} />
       ) : (
         <>
           <div className="mt-2 flex flex-col gap-1">

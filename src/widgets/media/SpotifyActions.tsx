@@ -33,7 +33,7 @@ import { AnchoredMenu, menuItem } from "../spotify/Menu";
 import { Cover } from "../spotify/Cover";
 
 const GREEN = "text-[#1ed760]";
-const icon = "grid size-7 place-items-center rounded-full transition-colors hover:bg-ink/10";
+const icon = "grid size-8 place-items-center rounded-full transition-colors hover:bg-ink/10";
 const idle = "text-fg-muted hover:text-fg";
 const NEXT_REPEAT: Record<RepeatMode, RepeatMode> = { off: "context", context: "track", track: "off" };
 const REPEAT_TITLE: Record<RepeatMode, string> = {

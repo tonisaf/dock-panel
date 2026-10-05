@@ -1,4 +1,5 @@
 import { CloudSun, Droplets, MapPin, Wind } from "lucide-react";
+import { WidgetState } from "../../components/WidgetState";
 import { Card } from "../../components/Card";
 import { usePrefs } from "../../lib/prefs";
 import { usePanelStore } from "../../store";
@@ -7,7 +8,7 @@ import { describe, formatTemp, upcomingHours, useWeather } from "./api";
 export function WeatherWidget() {
   const location = usePrefs((s) => s.location);
   const setTab = usePanelStore((s) => s.setTab);
-  const { data, isPending, isError } = useWeather();
+  const { data, isPending, isError, isFetching, refetch } = useWeather();
 
   if (!location) {
     return (
@@ -25,7 +26,7 @@ export function WeatherWidget() {
   if (isPending || isError || !data) {
     return (
       <Card title={`Погода · ${location.name}`} icon={CloudSun}>
-        <p className="text-[12px] text-fg-subtle">{isError ? "Не удалось загрузить прогноз" : "Загрузка…"}</p>
+        <WidgetState kind={isError ? "error" : "loading"} text={isError ? "Не удалось загрузить прогноз" : undefined} onRetry={() => void refetch()} retrying={isFetching} />
       </Card>
     );
   }

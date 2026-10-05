@@ -30,7 +30,7 @@ function RefreshButton({ fetching }: { fetching: boolean }) {
       onClick={refresh}
       disabled={spinning}
       title="Обновить сейчас"
-      className="grid size-6 place-items-center rounded-md text-fg-subtle hover:bg-ink/10 hover:text-fg disabled:hover:bg-transparent"
+      className="widget-icon-button disabled:hover:bg-transparent"
     >
       <RefreshCw className={clsx("size-3.5", spinning && "animate-spin")} />
     </button>

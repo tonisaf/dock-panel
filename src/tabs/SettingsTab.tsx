@@ -34,7 +34,6 @@ import {
   CalendarDays,
   ChevronDown,
   CloudSun,
-  Download,
   Headphones,
   House,
   Link2,
@@ -53,7 +52,6 @@ import { useSpotifyStatus } from "../widgets/spotify/api";
 import { useYoutubeSettings } from "../widgets/youtube/api";
 import { useYandexStatus } from "../widgets/home/api";
 import { useDiscord } from "../discord/api";
-import { useUpdateStatus } from "../lib/updates";
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
@@ -356,38 +354,49 @@ function Integrations() {
   const yandex = useYandexStatus().data;
   const discord = useDiscord().data;
   const location = usePrefs((s) => s.location);
-  const update = useUpdateStatus().data;
 
   const connected = (s: { connected: boolean; error: string | null } | undefined, who: string | null | undefined) =>
     !s ? {} : s.error ? { status: "ошибка входа", tone: "warn" as Tone } : s.connected ? { status: who || "подключено", tone: "ok" as Tone } : { status: "не подключено" };
   const mailCount = mail?.accounts.length ?? 0;
   const channels = youtube?.channels.length ?? 0;
 
-  return (
-    <div className="flex flex-col gap-2">
-      <Group
+  const configured: Record<string, boolean> = {
+    mail: mailCount > 0,
+    gcal: !!gcal?.connected,
+    ical: ical.length > 0,
+    notion: !!notion?.connected,
+    openclaw: !!openclaw?.connected,
+    lmstudio: !!lmstudio?.reachable,
+    spotify: !!spotify?.connected,
+    yandex: !!yandex?.connected,
+    discord: !!discord?.configured,
+    youtube: channels > 0,
+    weather: !!location,
+  };
+  const groups = [
+    <Group key="mail"
         id="mail"
         icon={Mail}
         title="Почта"
         {...(mail && (mailCount ? { status: plural(mailCount, ["ящик", "ящика", "ящиков"]), tone: "ok" as Tone } : { status: "не подключена" }))}
       >
         <MailSettings />
-      </Group>
-      <Group id="gcal" icon={CalendarDays} title="Google Календарь" {...connected(gcal, gcal?.email)}>
+      </Group>,
+    <Group key="gcal" id="gcal" icon={CalendarDays} title="Google Календарь" {...connected(gcal, gcal?.email)}>
         <GcalSettings />
-      </Group>
-      <Group
+      </Group>,
+    <Group key="ical"
         id="ical"
         icon={Link2}
         title="Календари по ссылке (iCal)"
         {...(ical.length ? { status: plural(ical.length, ["календарь", "календаря", "календарей"]), tone: "ok" as Tone } : { status: "нет" })}
       >
         <CalendarSettings />
-      </Group>
-      <Group id="notion" icon={NotebookPen} title="Notion" {...connected(notion, notion?.workspace)}>
+      </Group>,
+    <Group key="notion" id="notion" icon={NotebookPen} title="Notion" {...connected(notion, notion?.workspace)}>
         <NotionSettings />
-      </Group>
-      <Group
+      </Group>,
+    <Group key="openclaw"
         id="openclaw"
         icon={Bot}
         title="OpenClaw"
@@ -399,8 +408,8 @@ function Integrations() {
               : { status: "не отвечает", tone: "warn" as Tone }))}
       >
         <OpenClawSettings />
-      </Group>
-      <Group
+      </Group>,
+    <Group key="lmstudio"
         id="lmstudio"
         icon={Bot}
         title="LM Studio"
@@ -410,11 +419,11 @@ function Integrations() {
             : { status: "не запущен", tone: "warn" as Tone }))}
       >
         <LmStudioSettings />
-      </Group>
-      <Group id="spotify" icon={Music} title="Spotify" {...connected(spotify, spotify?.user)}>
+      </Group>,
+    <Group key="spotify" id="spotify" icon={Music} title="Spotify" {...connected(spotify, spotify?.user)}>
         <SpotifySettings />
-      </Group>
-      <Group
+      </Group>,
+    <Group key="yandex"
         id="yandex"
         icon={House}
         title="Дом с Алисой"
@@ -426,8 +435,8 @@ function Integrations() {
               : { status: "не подключено" }))}
       >
         <YandexSettings />
-      </Group>
-      <Group
+      </Group>,
+    <Group key="discord"
         id="discord"
         icon={Headphones}
         title="Discord"
@@ -439,8 +448,8 @@ function Integrations() {
               : { status: "не подключено" }))}
       >
         <DiscordSettings />
-      </Group>
-      <Group
+      </Group>,
+    <Group key="youtube"
         id="youtube"
         icon={TvMinimalPlay}
         title="YouTube"
@@ -451,27 +460,19 @@ function Integrations() {
             : { status: "нет каналов" })}
       >
         <YoutubeSettings />
-      </Group>
-      <Group
+      </Group>,
+    <Group key="weather"
         id="weather"
         icon={CloudSun}
         title="Погода"
         {...(location ? { status: location.name, tone: "ok" as Tone } : { status: "город не выбран" })}
       >
         <CityPicker />
-      </Group>
-      <Group
-        id="updates"
-        icon={Download}
-        title="Обновления"
-        {...(update?.available
-          ? { status: `доступна ${update.available.version}`, tone: "accent" as Tone }
-          : update && { status: `версия ${update.current}` })}
-      >
-        <UpdateSettings />
-      </Group>
-    </div>
-  );
+      </Group>,
+  ];
+  // Stable within each group: keep the familiar service order.
+  groups.sort((a, b) => Number(configured[b.props.id]) - Number(configured[a.props.id]));
+  return <div className="flex flex-col gap-2">{groups}</div>;
 }
 
 /** Widget width, in the panel and on the desktop. The panel keeps its number of columns. */
@@ -548,7 +549,15 @@ function DesktopSection() {
   );
 }
 
+const SETTINGS_SECTIONS = [
+  { id: "panel", label: "Панель" },
+  { id: "appearance", label: "Оформление" },
+  { id: "integrations", label: "Интеграции" },
+  { id: "updates", label: "Обновления" },
+] as const;
+
 export function SettingsTab() {
+  const [section, setSection] = useState<(typeof SETTINGS_SECTIONS)[number]["id"]>("panel");
   const [autostart, setAutostart] = useState(false);
 
   useEffect(() => {
@@ -562,26 +571,52 @@ export function SettingsTab() {
 
   return (
     <div className="flex flex-col gap-3 pb-2">
-      <h3 className="px-1 text-[12px] font-medium text-fg-subtle">Панель</h3>
-      <div className="divide-y divide-stroke rounded-2xl border border-stroke bg-surface">
-        <Row label="Запускать вместе с Windows">
-          <Toggle on={autostart} onChange={toggleAutostart} />
-        </Row>
-        <ShortcutRow />
-        <EdgeRow />
-        <SearchEngineRow />
-        <WidthRow />
-      </div>
-      <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Кнопка на панели задач</h3>
-      <div className="divide-y divide-stroke rounded-2xl border border-stroke bg-surface">
-        <TaskbarButtonRow />
-      </div>
-      <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Оформление</h3>
-      <AppearanceSection />
-      <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Виджеты на рабочем столе</h3>
-      <DesktopSection />
-      <h3 className="px-1 pt-1 text-[12px] font-medium text-fg-subtle">Интеграции</h3>
-      <Integrations />
+      <nav aria-label="Разделы настроек" className="grid grid-cols-2 gap-1 rounded-xl border border-stroke bg-surface p-1 min-[700px]:grid-cols-4">
+        {SETTINGS_SECTIONS.map(({ id, label }) => (
+          <button
+            key={id}
+            type="button"
+            aria-pressed={section === id}
+            onClick={() => setSection(id)}
+            className={clsx(
+              "rounded-lg px-2 py-2 text-[13px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-accent",
+              section === id ? "bg-ink/10 text-fg" : "text-fg-muted hover:bg-ink/5 hover:text-fg",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+      {section === "panel" && (
+        <>
+          <div className="divide-y divide-stroke rounded-2xl border border-stroke bg-surface">
+            <Row label="Запускать вместе с Windows">
+              <Toggle on={autostart} onChange={toggleAutostart} />
+            </Row>
+            <ShortcutRow />
+            <EdgeRow />
+            <SearchEngineRow />
+            <WidthRow />
+          </div>
+          <h3 className="px-1 text-[12px] font-medium text-fg-subtle">Кнопка на панели задач</h3>
+          <div className="divide-y divide-stroke rounded-2xl border border-stroke bg-surface">
+            <TaskbarButtonRow />
+          </div>
+        </>
+      )}
+      {section === "appearance" && (
+        <>
+          <AppearanceSection />
+          <h3 className="px-1 text-[12px] font-medium text-fg-subtle">Виджеты на рабочем столе</h3>
+          <DesktopSection />
+        </>
+      )}
+      {section === "integrations" && <Integrations />}
+      {section === "updates" && (
+        <div className="rounded-2xl border border-stroke bg-surface">
+          <UpdateSettings />
+        </div>
+      )}
     </div>
   );
 }

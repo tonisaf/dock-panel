@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Container as ContainerIcon, Loader2, Play, RotateCw, Square } from "lucide-react";
 import clsx from "clsx";
+import { WidgetState } from "../../components/WidgetState";
 import { Card } from "../../components/Card";
 import { health, shortStatus, stateTone, summary } from "./format";
 
@@ -34,14 +35,14 @@ function useOverview() {
 }
 
 const iconButton =
-  "grid size-7 shrink-0 place-items-center rounded-lg border border-stroke text-fg-muted hover:bg-ink/8 hover:text-fg disabled:opacity-50";
+  "grid size-8 shrink-0 place-items-center rounded-lg border border-stroke text-fg-muted hover:bg-ink/8 hover:text-fg disabled:opacity-50";
 
 const dot = { ok: "bg-ok", warn: "bg-warn", off: "bg-fg-subtle/40" } as const;
 
 /** Containers with their state; start, stop and restart from here. */
 export function DockerWidget() {
   const queryClient = useQueryClient();
-  const { data } = useOverview();
+  const { data, error: queryError, isFetching, refetch } = useOverview();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showStopped, setShowStopped] = useState(false);
@@ -59,7 +60,11 @@ export function DockerWidget() {
     }
   };
 
-  if (!data) return null;
+  if (!data) return (
+    <Card title="Docker" icon={ContainerIcon}>
+      <WidgetState kind={queryError ? "error" : "loading"} text={queryError ? String(queryError) : undefined} onRetry={() => void refetch()} retrying={isFetching} />
+    </Card>
+  );
   const up = data.containers.filter((c) => c.state === "running");
   const rest = data.containers.filter((c) => c.state !== "running");
 
@@ -125,9 +130,9 @@ export function DockerWidget() {
       }
     >
       {data.error ? (
-        <p className="text-[12px] leading-relaxed text-warn">{data.error}</p>
+        <WidgetState kind="error" text={data.error} onRetry={() => void refetch()} retrying={isFetching} />
       ) : data.containers.length === 0 ? (
-        <p className="text-[12px] leading-relaxed text-fg-subtle">Контейнеров нет.</p>
+        <WidgetState kind="empty" text="Контейнеров нет" />
       ) : (
         <>
           <div className="flex flex-col gap-1">

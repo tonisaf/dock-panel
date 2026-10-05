@@ -147,3 +147,8 @@ input {
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--color-ink) 18%, transparent) transparent;
 }
+
+/* Shared secondary controls in widget headers. */
+@utility widget-icon-button {
+  @apply grid size-8 shrink-0 place-items-center rounded-lg text-fg-muted transition-colors hover:bg-ink/10 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50 disabled:hover:bg-transparent;
+}

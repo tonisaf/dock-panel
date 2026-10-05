@@ -5,7 +5,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export interface UpdateStatus {
   current: string;
-  hasToken: boolean;
   available: { version: string; notes: string | null } | null;
   error: string | null;
 }

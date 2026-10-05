@@ -56,7 +56,7 @@ export function DevicePicker({ className }: { className?: string }) {
         }}
         title="Устройство Spotify"
         className={clsx(
-          "grid size-7 place-items-center rounded-full text-fg-muted transition-colors hover:bg-ink/10 hover:text-fg",
+          "grid size-8 place-items-center rounded-full text-fg-muted transition-colors hover:bg-ink/10 hover:text-fg",
           open && "bg-ink/10 text-fg",
           className,
         )}

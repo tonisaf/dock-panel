@@ -5,7 +5,6 @@ import {
   ChevronDown,
   Contrast,
   Focus,
-  Loader2,
   Monitor as MonitorIcon,
   MonitorCog,
   MoonStar,
@@ -14,6 +13,7 @@ import {
   Volume2,
 } from "lucide-react";
 import clsx from "clsx";
+import { WidgetState } from "../../components/WidgetState";
 import { Card } from "../../components/Card";
 import { usePrefs } from "../../lib/prefs";
 import { Slider } from "../../components/Slider";
@@ -167,7 +167,7 @@ function useBlackout() {
 }
 
 export function MonitorsWidget() {
-  const { data, isPending, isError, error } = useMonitors();
+  const { data, isPending, isError, error, isFetching, refetch } = useMonitors();
   // Folded by default: it's reached for rarely and takes a lot of room.
   const collapsed = usePrefs((s) => s.collapsedWidgets.monitors ?? true);
   const setCollapsed = usePrefs((s) => s.setWidgetCollapsed);
@@ -177,7 +177,7 @@ export function MonitorsWidget() {
     : undefined;
 
   const dark = useBlackout();
-  const headerButton = "grid size-6 place-items-center rounded-md text-fg-subtle hover:bg-ink/10 hover:text-fg";
+  const headerButton = "widget-icon-button";
   const blackout = dark ? (
     <button
       onClick={() => invoke("monitors_blackout_end").catch(console.error)}
@@ -216,11 +216,9 @@ export function MonitorsWidget() {
       onToggle={() => setCollapsed("monitors", !collapsed)}
     >
       {isPending ? (
-        <p className="flex items-center gap-2 text-[12px] text-fg-subtle">
-          <Loader2 className="size-3.5 animate-spin" /> Спрашиваю мониторы…
-        </p>
+        <WidgetState kind="loading" text="Спрашиваю мониторы…" />
       ) : isError ? (
-        <p className="text-[12px] text-warn">{String(error)}</p>
+        <WidgetState kind="error" text={String(error)} onRetry={() => void refetch()} retrying={isFetching} />
       ) : data.length === 0 ? (
         <p className="text-[12px] leading-relaxed text-fg-subtle">
           Ни один монитор не ответил. Включите DDC/CI в меню монитора; встроенные экраны ноутбуков тут не управляются.

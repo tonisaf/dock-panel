@@ -1,5 +1,6 @@
 import { AnimatePresence } from "motion/react";
 import { CheckSquare, ChevronRight } from "lucide-react";
+import { WidgetState } from "../../components/WidgetState";
 import { Card } from "../../components/Card";
 import { usePrefs } from "../../lib/prefs";
 import { usePanelStore } from "../../store";
@@ -14,7 +15,7 @@ export function TasksWidget() {
   const setTab = usePanelStore((s) => s.setTab);
   const source = usePrefs((s) => s.notionSource);
   const status = useNotionStatus();
-  const { data, isError } = useTasks();
+  const { data, isError, isPending, isFetching, refetch } = useTasks();
   const { onComplete, last, undo } = useUndoableComplete();
 
   if (!status.data?.connected || !source) {
@@ -42,9 +43,11 @@ export function TasksWidget() {
       </button>
 
       {isError ? (
-        <p className="text-[12px] text-warn">Не удалось загрузить задачи</p>
+        <WidgetState kind="error" text="Не удалось загрузить задачи" onRetry={() => void refetch()} retrying={isFetching} />
+      ) : isPending ? (
+        <WidgetState kind="loading" />
       ) : data && tasks.length === 0 ? (
-        <p className="text-[12px] text-fg-subtle">Все задачи выполнены 🎉</p>
+        <WidgetState kind="empty" text="Все задачи выполнены 🎉" />
       ) : (
         <div className="-mx-2 flex flex-col">
           <AnimatePresence initial={false}>

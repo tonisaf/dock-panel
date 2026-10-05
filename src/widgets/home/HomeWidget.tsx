@@ -4,7 +4,6 @@ import {
   House,
   Lightbulb,
   LightbulbOff,
-  Loader2,
   Pause,
   Pencil,
   Play,
@@ -18,6 +17,7 @@ import {
   VolumeX,
 } from "lucide-react";
 import clsx from "clsx";
+import { WidgetState } from "../../components/WidgetState";
 import { Card } from "../../components/Card";
 import { Slider } from "../../components/Slider";
 import {
@@ -260,7 +260,7 @@ function SpeakerRow({ speaker }: { speaker: Speaker }) {
   };
   const playing = s?.playerState === "PLAYING" || s?.playerState === "BUFFERING";
   const nowPlaying = s?.title ? [s.title, s.artist].filter(Boolean).join(" — ") : null;
-  const btn = "grid size-7 place-items-center rounded-full text-fg-muted hover:bg-ink/10 hover:text-fg disabled:opacity-30";
+  const btn = "grid size-8 place-items-center rounded-full text-fg-muted hover:bg-ink/10 hover:text-fg disabled:opacity-30";
 
   return (
     <div className="flex flex-col gap-1.5 rounded-xl px-2 py-1.5">
@@ -339,7 +339,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 export function HomeWidget() {
-  const { data, isPending, isError, error } = useHome();
+  const { data, isPending, isError, error, isFetching, refetch } = useHome();
   const { rescan } = useHomeActions();
   const [scanning, setScanning] = useState(false);
   const search = () => {
@@ -354,7 +354,7 @@ export function HomeWidget() {
       onClick={search}
       disabled={scanning}
       title="Искать устройства в сети"
-      className="grid size-6 place-items-center rounded-md text-fg-subtle hover:bg-ink/10 hover:text-fg"
+      className="widget-icon-button"
     >
       <RefreshCw className={clsx("size-3.5", scanning && "animate-spin")} />
     </button>
@@ -364,14 +364,12 @@ export function HomeWidget() {
   return (
     <Card title="Дом" icon={House} action={action} className="hover:bg-surface">
       {isPending ? (
-        <p className="flex items-center gap-2 text-[12px] text-fg-subtle">
-          <Loader2 className="size-3.5 animate-spin" /> Ищу лампы и колонки в сети…
-        </p>
+        <WidgetState kind="loading" text="Ищу лампы и колонки в сети…" />
       ) : isError ? (
-        <p className="text-[12px] text-warn">{String(error)}</p>
+        <WidgetState kind="error" text={String(error)} onRetry={() => void refetch()} retrying={isFetching} />
       ) : empty ? (
         <div className="flex flex-col gap-1.5 text-[12px] leading-relaxed text-fg-subtle">
-          <p>Ничего не найдено в домашней сети.</p>
+          <WidgetState kind="empty" text="Ничего не найдено в домашней сети" />
           <p>
             Лампы Yeelight: в приложении Yeelight откройте лампу → ⚙ → «Управление по локальной сети» (LAN Control) и
             включите. Колонки с Google Cast находятся сами.

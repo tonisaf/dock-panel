@@ -17,7 +17,7 @@ const CIRCUMFERENCE = 2 * Math.PI * RING;
 
 function Stepper({ label, value, min, max, unit, onChange }: { label: string; value: number; min: number; max: number; unit?: string; onChange: (v: number) => void }) {
   const set = (v: number) => onChange(Math.min(max, Math.max(min, v)));
-  const button = "grid size-6 place-items-center rounded-md text-fg-muted hover:bg-ink/10 hover:text-fg disabled:opacity-30";
+  const button = "grid size-8 place-items-center rounded-lg text-fg-muted hover:bg-ink/10 hover:text-fg disabled:opacity-30";
   return (
     <div className="flex items-center justify-between gap-3 px-2.5 py-1.5 text-[13px]">
       {label}
@@ -48,7 +48,7 @@ function SettingsMenu({ settings, onChange }: { settings: PomodoroSettings; onCh
         ref={anchor}
         onClick={() => setOpen(!open)}
         title="Настройки помодоро"
-        className={clsx("grid size-6 place-items-center rounded-md text-fg-subtle hover:bg-ink/10 hover:text-fg", open && "bg-ink/10 text-fg")}
+        className={clsx("widget-icon-button", open && "bg-ink/10 text-fg")}
       >
         <Settings2 className="size-3.5" />
       </button>
