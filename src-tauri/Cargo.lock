@@ -930,7 +930,7 @@ dependencies = [
 
 [[package]]
 name = "dock-panel"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "base64 0.23.1",
  "futures-util",

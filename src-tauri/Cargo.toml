@@ -1,6 +1,6 @@
 [package]
 name = "dock-panel"
-version = "0.2.25"
+version = "0.2.26"
 description = "Slide-out launcher panel with widgets"
 authors = ["tonis"]
 license = "MIT"
