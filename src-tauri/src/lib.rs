@@ -8,6 +8,7 @@ mod calendar;
 mod claude_web;
 mod desktop;
 mod discord;
+mod docker;
 mod files;
 mod gcal;
 mod home;
@@ -250,6 +251,8 @@ pub fn run() {
             lmstudio::lmstudio_status,
             lmstudio::lmstudio_set_model,
             lmstudio::llm_run,
+            docker::docker_overview,
+            docker::docker_action,
             lmctl::lmstudio_overview,
             lmctl::lmstudio_load,
             lmctl::lmstudio_unload,

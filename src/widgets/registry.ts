@@ -20,6 +20,7 @@ import { PomodoroWidget } from "./pomodoro/PomodoroWidget";
 import { NotesWidget } from "./notes/NotesWidget";
 import { BriefingWidget } from "./briefing/BriefingWidget";
 import { LmStudioWidget } from "./lmstudio/LmStudioWidget";
+import { DockerWidget } from "./docker/DockerWidget";
 
 export interface WidgetDef {
   id: string;
@@ -47,6 +48,7 @@ export const WIDGETS: WidgetDef[] = [
   { id: "ai", title: "Лимиты AI", component: AiLimitsWidget },
   { id: "agents", title: "Агенты", component: AgentsWidget },
   { id: "lmstudio", title: "LM Studio", component: LmStudioWidget },
+  { id: "docker", title: "Docker", component: DockerWidget },
   { id: "ask", title: "Спросить Claude", component: AskWidget },
   { id: "pomodoro", title: "Помодоро", component: PomodoroWidget },
   { id: "vpn", title: "VPN", component: VpnWidget },
