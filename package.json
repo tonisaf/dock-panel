@@ -1,6 +1,7 @@
 {
   "name": "dock-panel",
   "private": true,
+  "license": "MIT",
   "version": "0.2.23",
   "type": "module",
   "scripts": {
