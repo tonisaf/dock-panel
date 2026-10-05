@@ -1,10 +1,11 @@
 //! Mail over IMAP with app passwords (Yandex, Gmail, Mail.ru, iCloud...).
 //! Accounts live in `mail.json`, passwords in Credential Manager. One IMAP
-//! connection per account is kept open and shared by the UI and a
-//! background poller, which counts unread mail and raises a notification
-//! for new messages.
+//! connection per account is kept open for UI commands. A separate IDLE
+//! connection watches for changes; servers without IDLE use a minute poll.
+//! Both routes share unread tracking and notification deduplication.
 
 mod client;
+mod idle;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -142,6 +143,8 @@ pub async fn mail_add(
     saved.accounts.push(account.clone());
     save(&app, &saved)?;
     client::drop_session(&account.id);
+    idle::restart(&account.id);
+    idle::reconcile(&app);
     let _ = app.emit("mail:changed", ());
     Ok(account)
 }
@@ -153,6 +156,7 @@ pub fn mail_remove(app: AppHandle, id: String) -> Result<(), String> {
     save(&app, &saved)?;
     secrets::delete(&secret_key(&id));
     client::drop_session(&id);
+    idle::restart(&id);
     if let Some(map) = UNSEEN.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
         map.remove(&id);
     }
@@ -260,6 +264,10 @@ pub fn mail_unread() -> Unread {
 }
 
 fn poll(app: &AppHandle) {
+    poll_selected(app, None);
+}
+
+fn poll_selected(app: &AppHandle, selected: Option<&str>) {
     // The timer and a manual refresh can overlap; both would see the same
     // "previous" unread set and announce the same letters twice.
     static POLLING: Mutex<()> = Mutex::new(());
@@ -269,6 +277,9 @@ fn poll(app: &AppHandle) {
     let mut fresh: Vec<Summary> = Vec::new();
 
     for account in &saved.accounts {
+        if selected.is_some_and(|id| id != account.id) {
+            continue;
+        }
         let Ok((validity, unseen)) = client::poll_account(account) else {
             continue;
         };
@@ -351,7 +362,12 @@ pub fn init(app: &AppHandle) {
     client::set_password_source(|id| secrets::read(&secret_key(id)));
     let app = app.clone();
     std::thread::spawn(move || loop {
-        poll(&app);
+        idle::reconcile(&app);
+        for account in load(&app).accounts {
+            if !idle::healthy(&account.id) {
+                poll_selected(&app, Some(&account.id));
+            }
+        }
         std::thread::sleep(POLL_EVERY);
     });
 }

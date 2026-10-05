@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ChevronDown, ExternalLink, FileUp, Loader2, X } from "lucide-react";
 import clsx from "clsx";
@@ -13,7 +13,21 @@ const LIST_COLLAPSED = 6;
 
 export function YoutubeSettings() {
   const { data } = useYoutubeSettings();
-  const { add, importTakeout, remove, setOptions } = useYoutubeActions();
+  const { add, importTakeout, remove, setOptions, setPush } = useYoutubeActions();
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushUrl, setPushUrl] = useState("");
+  const [pushToken, setPushToken] = useState("");
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushNote, setPushNote] = useState("");
+  useEffect(() => {
+    if (data) { setPushEnabled(data.pushEnabled); setPushUrl(data.pushUrl); }
+  }, [data?.pushEnabled, data?.pushUrl]);
+  const savePush = async () => {
+    setPushBusy(true); setPushNote("");
+    try { await setPush(pushEnabled, pushUrl.trim(), pushToken); setPushToken(""); setPushNote("Настройки сохранены"); }
+    catch (e) { setPushNote(String(e)); }
+    finally { setPushBusy(false); }
+  };
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState<"add" | "import" | null>(null);
   const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
@@ -126,6 +140,31 @@ export function YoutubeSettings() {
         </div>
       )}
 
+      {data && <div className="flex flex-col gap-2.5 p-3.5 text-[12.5px]">
+        <label className="flex flex-col gap-1.5"><span className="text-[14px]">Обновление видео</span>
+          <select value={pushEnabled ? "server" : "poll"} onChange={(e) => setPushEnabled(e.target.value === "server")}
+            className="h-9 rounded-lg border border-stroke bg-field px-2 text-fg">
+            <option value="poll">Опрос раз в 15 минут</option>
+            <option value="server">Собственный сервер уведомлений</option>
+          </select>
+        </label>
+        {pushEnabled && <>
+          <p className="text-fg-subtle">Сервер получает список выбранных каналов. При потере связи обычный опрос продолжит работать.</p>
+          <label className="flex flex-col gap-1">Адрес сервера
+            <input value={pushUrl} onChange={(e) => setPushUrl(e.target.value)} placeholder="https://push.example.com"
+              spellCheck={false} className="h-9 rounded-lg border border-stroke bg-field px-2.5 text-fg" />
+          </label>
+          <label className="flex flex-col gap-1">Токен сервера
+            <input type="password" autoComplete="new-password" value={pushToken} onChange={(e) => setPushToken(e.target.value)}
+              placeholder={data.pushTokenSaved ? "Сохранён; оставьте пустым, чтобы не менять" : "PUSH_TOKEN из настроек сервера"}
+              className="h-9 rounded-lg border border-stroke bg-field px-2.5 text-fg" />
+          </label>
+        </>}
+        <div className="flex items-center gap-2"><button className={button} disabled={pushBusy} onClick={savePush}>
+          {pushBusy && <Loader2 className="size-3.5 animate-spin" />} Сохранить</button>
+          <span className="text-fg-subtle" role="status">{pushNote || data.pushStatus}</span>
+        </div>
+      </div>}
       {channels.length > 0 && (
         <div className="flex flex-col px-2 py-1.5">
           <div className="px-1.5 pt-1 pb-0.5 text-[11.5px] text-fg-subtle">Каналы · {channels.length}</div>
@@ -164,7 +203,7 @@ export function YoutubeSettings() {
           <div className="flex items-center justify-between gap-3 px-3.5 py-3">
             <div>
               <div className="text-[14px]">Уведомления о новых видео</div>
-              <div className="text-[12px] text-fg-subtle">Ленты обновляются раз в 15 минут</div>
+              <div className="text-[12px] text-fg-subtle">{data.pushEnabled ? "По событиям сервера с резервным опросом" : "Ленты обновляются раз в 15 минут"}</div>
             </div>
             <Toggle on={data.notify} onChange={(notify) => setOptions({ notify }).catch(console.error)} />
           </div>

@@ -75,6 +75,11 @@ pub async fn panel_set_fullscreen(app: AppHandle, on: bool) -> bool {
     };
     let height = area.size.height.saturating_sub(2 * margin as u32);
     let right = RIGHT.load(Ordering::SeqCst);
+    #[cfg(windows)]
+    let native_window = win.hwnd().ok().map(|hwnd| {
+        let raw = hwnd.0 as usize;
+        (raw, native::resize_frame(raw as _))
+    });
     let _ = tauri::async_runtime::spawn_blocking(move || {
         let start = std::time::Instant::now();
         loop {
@@ -92,23 +97,30 @@ pub async fn panel_set_fullscreen(app: AppHandle, on: bool) -> bool {
                 } else {
                     area.position.x + margin
                 };
-                let _ = win.set_size(PhysicalSize::new(width, height));
-                let _ = win.set_position(PhysicalPosition::new(x, area.position.y + margin));
                 #[cfg(windows)]
-                if let Ok(hwnd) = win.hwnd() {
-                    native::place_visible(
-                        hwnd.0 as _,
+                if let Some((raw, frame)) = native_window {
+                    native::resize_visible(
+                        raw as _,
+                        frame,
                         x,
                         area.position.y + margin,
                         width as i32,
                         height as i32,
                     );
+                } else {
+                    let _ = win.set_size(PhysicalSize::new(width, height));
+                    let _ = win.set_position(PhysicalPosition::new(x, area.position.y + margin));
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = win.set_size(PhysicalSize::new(width, height));
+                    let _ = win.set_position(PhysicalPosition::new(x, area.position.y + margin));
                 }
             }
             if t >= 1.0 {
                 break;
             }
-            std::thread::sleep(RESIZE_FRAME);
+            std::thread::sleep(Duration::from_millis(16));
         }
     })
     .await;
@@ -712,6 +724,32 @@ pub(crate) mod native {
     /// (physical pixels): Windows 10/11 windows carry invisible resize borders
     /// around it, which otherwise shift it inwards on one side and past the
     /// screen edge on the other.
+    pub fn resize_frame(raw: *mut core::ffi::c_void) -> (i32, i32, i32, i32) {
+        frame(HWND(raw))
+    }
+
+    pub fn resize_visible(
+        raw: *mut core::ffi::c_void,
+        offsets: (i32, i32, i32, i32),
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+    ) {
+        let (l, t, r, b) = offsets;
+        unsafe {
+            let _ = SetWindowPos(
+                HWND(raw),
+                None,
+                x - l,
+                y - t,
+                w + l + r,
+                h + t + b,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+    }
+
     pub fn place_visible(raw: *mut core::ffi::c_void, x: i32, y: i32, w: i32, h: i32) {
         let hwnd = HWND(raw);
         let (l, t, r, b) = frame(hwnd);

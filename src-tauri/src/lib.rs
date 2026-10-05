@@ -278,6 +278,7 @@ pub fn run() {
             mail::mail_unread,
             mail::mail_refresh,
             youtube::youtube_settings,
+            youtube::push::youtube_set_push,
             youtube::youtube_add,
             youtube::youtube_import,
             youtube::youtube_remove,

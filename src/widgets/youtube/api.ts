@@ -14,6 +14,10 @@ export interface YoutubeSettings {
   notify: boolean;
   hideShorts: boolean;
   syncGoogle: boolean;
+  pushUrl: string;
+  pushEnabled: boolean;
+  pushTokenSaved: boolean;
+  pushStatus: string;
   /** Why the last subscriptions sync failed. */
   googleError: string | null;
 }
@@ -64,9 +68,9 @@ export function useYoutubeFeed(enabled: boolean) {
   });
 }
 
-export function invalidateYoutube(queryClient: ReturnType<typeof useQueryClient>) {
-  queryClient.invalidateQueries({ queryKey: FEED });
-  queryClient.invalidateQueries({ queryKey: SETTINGS });
+export function invalidateYoutube(queryClient: ReturnType<typeof useQueryClient>, refetchType: "active" | "none" = "active") {
+  queryClient.invalidateQueries({ queryKey: FEED, refetchType });
+  queryClient.invalidateQueries({ queryKey: SETTINGS, refetchType });
 }
 
 export function useYoutubeActions() {
@@ -119,6 +123,11 @@ export function useYoutubeActions() {
 
     remove: async (id: string) => {
       await invoke("youtube_remove", { id });
+      reload();
+    },
+
+    setPush: async (enabled: boolean, url: string, token: string) => {
+      await invoke("youtube_set_push", { enabled, url, token: token || null });
       reload();
     },
 

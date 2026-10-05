@@ -78,6 +78,10 @@ fn friendly(e: imap::Error) -> String {
 }
 
 pub fn connect(account: &Account, password: &str) -> Result<Session, String> {
+    connect_watcher(account, password).map(|(session, _)| session)
+}
+
+pub fn connect_watcher(account: &Account, password: &str) -> Result<(Session, TcpStream), String> {
     let addr = (account.host.as_str(), account.port)
         .to_socket_addrs()
         .map_err(|e| format!("Сервер {} не найден: {e}", account.host))?
@@ -89,6 +93,7 @@ pub fn connect(account: &Account, password: &str) -> Result<Session, String> {
         .map_err(|e| e.to_string())?;
     tcp.set_write_timeout(Some(IO_TIMEOUT))
         .map_err(|e| e.to_string())?;
+    let interrupt = tcp.try_clone().map_err(|e| e.to_string())?;
     let tls = TlsConnector::new()
         .map_err(|e| e.to_string())?
         .connect(&account.host, tcp)
@@ -97,6 +102,7 @@ pub fn connect(account: &Account, password: &str) -> Result<Session, String> {
     client.read_greeting().map_err(friendly)?;
     client
         .login(&account.email, password)
+        .map(|session| (session, interrupt))
         .map_err(|(e, _)| friendly(e))
 }
 

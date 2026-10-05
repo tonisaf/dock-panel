@@ -22,6 +22,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::{gcal, net};
 
 mod parse;
+pub mod push;
 use parse::{
     channel_id_in_page, is_channel_id, parse_duration, parse_feed, parse_takeout, parse_time, Video,
 };
@@ -66,6 +67,8 @@ struct Saved {
     sync_google: bool,
     /// Subscriptions the user removed from the panel; sync leaves them out.
     ignored: HashSet<String>,
+    push_url: String,
+    push_enabled: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -256,10 +259,21 @@ async fn resolve(input: &str) -> Result<Channel, String> {
 /// Fetches every channel's feed, keeps the old copy for those that fail,
 /// and reports new videos (not in the previous copy) for notifications.
 async fn refresh(app: &AppHandle) -> Vec<Video> {
+    refresh_selected(app, None).await.0
+}
+
+async fn refresh_selected(
+    app: &AppHandle,
+    selected: Option<&HashSet<String>>,
+) -> (Vec<Video>, bool) {
     let _guard = REFRESHING.acquire().await;
     sync_subscriptions(app).await;
     let channels = load(app).channels;
-    let ids: Vec<String> = channels.iter().map(|c| c.id.clone()).collect();
+    let ids: Vec<String> = channels
+        .iter()
+        .filter(|c| selected.is_none_or(|ids| ids.contains(&c.id)))
+        .map(|c| c.id.clone())
+        .collect();
     let results: Vec<(String, Result<Feed, String>)> = stream::iter(ids)
         .map(fetch_tagged)
         .buffer_unordered(PARALLEL)
@@ -267,6 +281,7 @@ async fn refresh(app: &AppHandle) -> Vec<Video> {
         .await;
 
     let mut fresh = Vec::new();
+    let mut success = true;
     with_cache(app, |cache| {
         let mut failed = 0;
         for (id, result) in results {
@@ -293,13 +308,16 @@ async fn refresh(app: &AppHandle) -> Vec<Video> {
         // Channels removed since stay out of the cache.
         let ids: HashSet<&str> = channels.iter().map(|c| c.id.as_str()).collect();
         cache.feeds.retain(|id, _| ids.contains(id.as_str()));
-        cache.refreshed = now_ms();
-        cache.failed = failed;
+        success = failed == 0;
+        if selected.is_none() {
+            cache.refreshed = now_ms();
+            cache.failed = failed;
+        }
         let _ = write_json(app, CACHE_FILE, cache);
     });
     fetch_details(app).await;
     let _ = app.emit("youtube:changed", ());
-    fresh
+    (fresh, success)
 }
 
 // ---- Google account ----------------------------------------------------------------
@@ -479,14 +497,19 @@ fn notify(_app: &AppHandle, _title: &str, _body: &str) {}
 
 /// Refreshes in the background every 15 minutes.
 pub fn init(app: &AppHandle) {
+    push::init(app);
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         loop {
-            if !load(&app).channels.is_empty() {
+            if !load(&app).channels.is_empty()
+                && with_cache(&app, |c| {
+                    now_ms() - c.refreshed > push::refresh_interval().as_millis() as i64
+                })
+            {
                 let fresh = refresh(&app).await;
                 notify_new(&app, fresh);
             }
-            tokio::time::sleep(REFRESH_EVERY).await;
+            tokio::time::sleep(Duration::from_secs(30)).await;
         }
     });
 }
@@ -502,6 +525,10 @@ pub struct Settings {
     sync_google: bool,
     /// Why the last subscriptions sync failed.
     google_error: Option<String>,
+    push_url: String,
+    push_enabled: bool,
+    push_token_saved: bool,
+    push_status: String,
 }
 
 #[tauri::command]
@@ -518,6 +545,10 @@ pub fn youtube_settings(app: AppHandle) -> Settings {
         hide_shorts: s.hide_shorts,
         sync_google: s.sync_google,
         google_error,
+        push_url: s.push_url,
+        push_enabled: s.push_enabled,
+        push_token_saved: crate::secrets::read(push::CREDENTIAL).is_some(),
+        push_status: push::status(),
     }
 }
 
@@ -663,7 +694,7 @@ pub struct FeedView {
 pub async fn youtube_feed(app: AppHandle, force: bool) -> Result<FeedView, String> {
     let saved = load(&app);
     let stale = with_cache(&app, |c| {
-        now_ms() - c.refreshed > REFRESH_EVERY.as_millis() as i64
+        now_ms() - c.refreshed > push::refresh_interval().as_millis() as i64
     });
     if !saved.channels.is_empty() && (force || stale) {
         // New videos found here would otherwise never be announced.

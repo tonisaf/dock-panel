@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { LockKeyhole, Power, RotateCw, Settings, ChevronDown } from "lucide-react";
+import { LockKeyhole, Power, RotateCw, Settings, ChevronDown, Moon } from "lucide-react";
 import { usePanelStore } from "../store";
 
 export function QuickAccess() {
@@ -47,6 +47,7 @@ export function QuickAccess() {
             </>
           ) : (
             <div className="flex flex-col gap-1">
+              <button className={`${button} justify-start`} disabled={busy} onClick={() => void run("sleep")}><Moon className="size-4" />Спящий режим</button>
               <button className={`${button} justify-start`} onClick={() => setConfirm("restart")}><RotateCw className="size-4" />Перезагрузка</button>
               <button className={`${button} justify-start`} onClick={() => setConfirm("shutdown")}><Power className="size-4" />Завершение работы</button>
             </div>

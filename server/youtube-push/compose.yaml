@@ -1,0 +1,53 @@
+services:
+  relay:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - relay-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m
+    mem_limit: 96m
+    cpus: 0.35
+    pids_limit: 64
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8791/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'
+  https:
+    environment:
+      PUSH_DOMAIN: ${PUSH_DOMAIN:?Set your own domain in .env}
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    mem_limit: 96m
+    cpus: 0.35
+    pids_limit: 64
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'
+volumes:
+  relay-data:
+  caddy-data:
+  caddy-config:

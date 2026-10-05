@@ -26,3 +26,10 @@ dist-ssr
 # Local secrets
 .env
 .env.*
+!.env.example
+
+# Python cache and local relay data
+__pycache__/
+*.pyc
+server/youtube-push/backups/
+server/youtube-push/*.sqlite*

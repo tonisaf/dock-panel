@@ -64,7 +64,7 @@ export function useMailList(account: string | null, unread: boolean, enabled: bo
     initialPageParam: null as Cursors | null,
     getNextPageParam: (last) => (last.more ? last.cursors : undefined),
     enabled,
-    // New mail arrives as mail:changed (checked every minute and on panel open).
+    // New mail arrives as mail:changed (IMAP IDLE, fallback minute poll, and panel open).
     staleTime: 5 * 60_000,
   });
   const pages = query.data?.pages ?? [];
@@ -161,9 +161,9 @@ export function useMailActions() {
 }
 
 /** Re-reads the list and counts; call on `mail:changed`. */
-export function invalidateMail(queryClient: ReturnType<typeof useQueryClient>) {
-  queryClient.invalidateQueries({ queryKey: LIST });
-  queryClient.invalidateQueries({ queryKey: UNREAD });
+export function invalidateMail(queryClient: ReturnType<typeof useQueryClient>, refetchType: "active" | "none" = "active") {
+  queryClient.invalidateQueries({ queryKey: LIST, refetchType });
+  queryClient.invalidateQueries({ queryKey: UNREAD, refetchType });
 }
 
 /** "14:05" today, "вчера", "25 сент." this year, "25.09.2025" before. */

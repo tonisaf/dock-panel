@@ -1,0 +1,7 @@
+{$PUSH_DOMAIN} {
+    reverse_proxy relay:8791
+    header {
+        X-Content-Type-Options nosniff
+        -Server
+    }
+}
