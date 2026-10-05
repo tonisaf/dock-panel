@@ -12,6 +12,7 @@ import { TabBar } from "./TabBar";
 import { ResizeHandle } from "./ResizeHandle";
 import { UpdateBanner } from "./UpdateBanner";
 import { DropToPin } from "./DropToPin";
+import { QuickAccess } from "./QuickAccess";
 import { AppContextMenu } from "../components/AppContextMenu";
 import { HomeTab } from "../tabs/HomeTab";
 import { AppsTab } from "../tabs/AppsTab";
@@ -151,6 +152,7 @@ export function Panel() {
               </AnimatePresence>
             </>
           )}
+          <QuickAccess />
           <AppContextMenu />
           <DropToPin />
           {!full && <ResizeHandle />}

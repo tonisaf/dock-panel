@@ -1,3 +1,4 @@
+import { WidgetMenu } from "../../components/WidgetMenu";
 import { useState } from "react";
 import { Check, ExternalLink, RefreshCw, SquarePlay, Undo2 } from "lucide-react";
 import clsx from "clsx";
@@ -114,16 +115,7 @@ export function YoutubeWidget() {
       .finally(() => setRefreshing(false));
   };
 
-  const action = hasChannels && (
-    <button
-      onClick={reload}
-      disabled={refreshing}
-      title="Обновить"
-      className="widget-icon-button"
-    >
-      <RefreshCw className={clsx("size-3.5", refreshing && "animate-spin")} />
-    </button>
-  );
+  const action = hasChannels && <WidgetMenu items={[{ label: refreshing ? "Обновление…" : "Обновить ленты", icon: RefreshCw, disabled: refreshing, onClick: reload }]} />;
 
   if (!hasChannels) {
     return (

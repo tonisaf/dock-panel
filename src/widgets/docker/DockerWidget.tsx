@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Container as ContainerIcon, Loader2, Play, RotateCw, Square } from "lucide-react";
 import clsx from "clsx";
+import { WidgetMenu } from "../../components/WidgetMenu";
 import { WidgetState } from "../../components/WidgetState";
 import { Card } from "../../components/Card";
 import { health, shortStatus, stateTone, summary } from "./format";
@@ -124,9 +125,12 @@ export function DockerWidget() {
       title="Docker"
       icon={ContainerIcon}
       action={
-        data.running && (
+        <>
+        {data.running && (
           <span className="text-[11.5px] text-fg-subtle">{summary(up.length, data.containers.length)}</span>
-        )
+        )}
+        <WidgetMenu items={[{ label: isFetching ? "Обновление…" : "Обновить контейнеры", icon: RotateCw, disabled: isFetching, onClick: () => { void refetch(); } }]} />
+        </>
       }
     >
       {data.error ? (

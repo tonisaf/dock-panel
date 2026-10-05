@@ -51,19 +51,68 @@ fn window_width() -> u32 {
 /// the left, the other tabs on the right). Kept while the app runs.
 static FULL: AtomicBool = AtomicBool::new(false);
 
-/// Switches full-screen mode and re-places the window; returns the new state.
+/// Animate the native window width while keeping its docked edge fixed.
 #[tauri::command]
-pub fn panel_set_fullscreen(app: AppHandle, on: bool) -> bool {
-    FULL.store(on, Ordering::SeqCst);
-    if on {
-        // The letter pane's extra width means nothing on a full-width window.
-        RESIZE_GENERATION.fetch_add(1, Ordering::SeqCst);
+pub async fn panel_set_fullscreen(app: AppHandle, on: bool) -> bool {
+    let generation = {
+        let _frame = RESIZE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        FULL.store(on, Ordering::SeqCst);
         EXTRA.store(0, Ordering::SeqCst);
-    }
-    if let Some(win) = window(&app) {
+        RESIZE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1
+    };
+    let Some(win) = window(&app) else { return on };
+    let (Ok(Some(monitor)), Ok(from)) = (win.current_monitor(), win.inner_size()) else {
         place_on_cursor_monitor(&app, &win);
-    }
-    on
+        return on;
+    };
+    let area = monitor.work_area().clone();
+    let margin = (MARGIN * monitor.scale_factor()).round() as i32;
+    let max_width = area.size.width.saturating_sub(2 * margin as u32);
+    let target = if on {
+        max_width
+    } else {
+        ((window_width() as f64 * monitor.scale_factor()).round() as u32).min(max_width)
+    };
+    let height = area.size.height.saturating_sub(2 * margin as u32);
+    let right = RIGHT.load(Ordering::SeqCst);
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        let start = std::time::Instant::now();
+        loop {
+            let t = (start.elapsed().as_secs_f64() / 0.28).min(1.0);
+            let eased = t * t * (3.0 - 2.0 * t);
+            let width =
+                (from.width as f64 + (target as f64 - from.width as f64) * eased).round() as u32;
+            {
+                let _frame = RESIZE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+                if RESIZE_GENERATION.load(Ordering::SeqCst) != generation {
+                    return;
+                }
+                let x = if right {
+                    area.position.x + area.size.width as i32 - width as i32 - margin
+                } else {
+                    area.position.x + margin
+                };
+                let _ = win.set_size(PhysicalSize::new(width, height));
+                let _ = win.set_position(PhysicalPosition::new(x, area.position.y + margin));
+                #[cfg(windows)]
+                if let Ok(hwnd) = win.hwnd() {
+                    native::place_visible(
+                        hwnd.0 as _,
+                        x,
+                        area.position.y + margin,
+                        width as i32,
+                        height as i32,
+                    );
+                }
+            }
+            if t >= 1.0 {
+                break;
+            }
+            std::thread::sleep(RESIZE_FRAME);
+        }
+    })
+    .await;
+    FULL.load(Ordering::SeqCst)
 }
 
 #[tauri::command]

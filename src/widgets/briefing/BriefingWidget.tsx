@@ -1,3 +1,4 @@
+import { WidgetMenu } from "../../components/WidgetMenu";
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Loader2, RefreshCw, Sunrise } from "lucide-react";
@@ -68,16 +69,7 @@ export function BriefingWidget() {
     }
   };
 
-  const button = (
-    <button
-      onClick={make}
-      disabled={busy}
-      title="Составить заново"
-      className="grid size-8 place-items-center rounded-lg border border-stroke text-fg-subtle hover:bg-ink/8 hover:text-fg disabled:opacity-50"
-    >
-      {busy ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
-    </button>
-  );
+  const button = <WidgetMenu items={[{ label: busy ? "Составляю…" : "Составить заново", icon: RefreshCw, disabled: busy, onClick: () => void make() }]} />;
 
   return (
     <Card title="Брифинг" icon={Sunrise} action={saved ? button : undefined}>

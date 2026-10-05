@@ -26,6 +26,7 @@ mod openclaw;
 mod panel;
 mod player;
 mod pomodoro;
+mod power;
 mod rates;
 mod secrets;
 mod spotify;
@@ -112,6 +113,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            power::power_action,
             panel::hide_panel,
             panel::panel_settings,
             panel::panel_set_edge,

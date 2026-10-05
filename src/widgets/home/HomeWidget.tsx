@@ -1,3 +1,4 @@
+import { WidgetMenu } from "../../components/WidgetMenu";
 import { useState, type ReactNode } from "react";
 import {
   ChevronDown,
@@ -349,16 +350,7 @@ export function HomeWidget() {
       .finally(() => setScanning(false));
   };
 
-  const action = (
-    <button
-      onClick={search}
-      disabled={scanning}
-      title="Искать устройства в сети"
-      className="widget-icon-button"
-    >
-      <RefreshCw className={clsx("size-3.5", scanning && "animate-spin")} />
-    </button>
-  );
+  const action = <WidgetMenu items={[{ label: scanning ? "Поиск устройств…" : "Искать устройства в сети", icon: RefreshCw, disabled: scanning, onClick: search }]} />;
 
   const empty = data && data.lamps.length === 0 && data.speakers.length === 0;
   return (

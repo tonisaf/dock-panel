@@ -1,3 +1,4 @@
+import { WidgetMenu } from "../../components/WidgetMenu";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -177,7 +178,6 @@ export function MonitorsWidget() {
     : undefined;
 
   const dark = useBlackout();
-  const headerButton = "widget-icon-button";
   const blackout = dark ? (
     <button
       onClick={() => invoke("monitors_blackout_end").catch(console.error)}
@@ -187,22 +187,10 @@ export function MonitorsWidget() {
       <Sun className="size-3.5" /> Вернуть
     </button>
   ) : (
-    <>
-      <button
-        onClick={() => invoke("monitors_blackout", { aroundPanel: true }).catch(console.error)}
-        title="Затемнить вокруг панели: всё, кроме панели, чёрное, остальные мониторы на минимальной яркости. Клик по чёрному или «Вернуть» — отменить"
-        className={headerButton}
-      >
-        <Focus className="size-3.5" />
-      </button>
-      <button
-        onClick={() => invoke("monitors_blackout").catch(console.error)}
-        title="Затемнить всё: чёрный экран и минимальная яркость на всех мониторах. Клик или любая клавиша — вернуть"
-        className={headerButton}
-      >
-        <MoonStar className="size-3.5" />
-      </button>
-    </>
+    <WidgetMenu items={[
+      { label: "Затемнить вокруг панели", icon: Focus, onClick: () => { void invoke("monitors_blackout", { aroundPanel: true }).catch(console.error); } },
+      { label: "Затемнить все экраны", icon: MoonStar, onClick: () => { void invoke("monitors_blackout").catch(console.error); } },
+    ]} />
   );
 
   return (
