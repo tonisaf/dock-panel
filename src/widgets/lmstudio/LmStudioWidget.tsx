@@ -49,7 +49,7 @@ function savedTtl(): number {
   }
 }
 
-function useOverview() {
+export function useLmStudioOverview() {
   return useQuery({
     queryKey: ["lmstudio-overview"],
     queryFn: () => invoke<Overview>("lmstudio_overview"),
@@ -70,7 +70,7 @@ function details(m: Model) {
 /** What LM Studio has loaded, what is on disk, and the server switch; load and unload from here. */
 export function LmStudioWidget() {
   const queryClient = useQueryClient();
-  const { data, error: queryError, isFetching, refetch } = useOverview();
+  const { data, error: queryError, isFetching, refetch } = useLmStudioOverview();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ttl, setTtl] = useState(savedTtl);

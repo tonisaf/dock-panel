@@ -5,14 +5,16 @@ import { usePanelStore } from "../store";
 import { activateSpotifyItem, useSpotifySearch } from "../widgets/spotify/SpotifySearch";
 
 export const SearchBar = forwardRef<HTMLInputElement>(function SearchBar(_, ref) {
-  const { query, setQuery, tab, setTab, selected, setSelected } = usePanelStore();
+  const { query, setQuery, tab, setTab, selected, setSelected, full, sideTab, mailQuery, setMailQuery } = usePanelStore();
+  const mailSearch = (full ? sideTab : tab) === "mail";
+  const placeholder = mailSearch ? "Поиск писем: тема, отправитель или текст" : "Поиск приложений, файлов и заметок";
   const items = useSearchItems();
   const spotify = useSpotifySearch();
   // "sp <query>" searches Spotify instead.
   const count = spotify.term ? spotify.results.length : items.length;
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (!count) return;
+    if (mailSearch || !count) return;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       const step = e.key === "ArrowDown" ? 1 : -1;
@@ -34,20 +36,22 @@ export const SearchBar = forwardRef<HTMLInputElement>(function SearchBar(_, ref)
       <input
         ref={ref}
         data-panel-search
-        value={query}
+        value={mailSearch ? mailQuery : query}
+        maxLength={mailSearch ? 500 : undefined}
         onChange={(e) => {
+          if (mailSearch) { setMailQuery(e.target.value); return; }
           setQuery(e.target.value);
           // Typing is almost always an app search.
           if (e.target.value && tab !== "apps") setTab("apps");
         }}
         onKeyDown={onKeyDown}
-        placeholder="Поиск приложений, файлов и заметок"
-        aria-label="Поиск приложений, файлов и заметок"
+        placeholder={placeholder}
+        aria-label={placeholder}
         spellCheck={false}
         className="h-full min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-fg-subtle"
       />
       <kbd className="rounded-md border border-stroke px-1.5 py-0.5 text-[11px] text-fg-subtle">Esc</kbd>
-      <div className="group/help relative shrink-0">
+      {!mailSearch && <div className="group/help relative shrink-0">
         <button
           type="button"
           aria-label="Подсказка по командам поиска"
@@ -70,7 +74,7 @@ export const SearchBar = forwardRef<HTMLInputElement>(function SearchBar(_, ref)
             </div>
           </div>
         </div>
-      </div>
+      </div>}
     </div>
     </div>
   );

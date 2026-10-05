@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* Native dropdowns need an opaque menu background in Windows WebView. */
+select option {
+  background-color: var(--color-popover);
+  color: var(--color-fg);
+}
+
 @theme static {
   --font-sans: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   --font-display: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;

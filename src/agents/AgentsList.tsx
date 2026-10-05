@@ -89,11 +89,12 @@ export function AgentsNotifyToggle() {
  * Claude Code and Codex sessions: working ones first, then those waiting for
  * the user. A click brings the session's window to the front.
  */
-export function AgentsList({ compact = false }: { compact?: boolean }) {
+export function AgentsList({ compact = false, limit = 0 }: { compact?: boolean; limit?: number }) {
   const { data, isPending } = useAgents();
   const { dismiss } = useAgentActions();
   if (isPending || !data) return null;
-  const agents = data.agents;
+  const recent = new Set([...data.agents].sort((a, b) => b.since - a.since).slice(0, limit || data.agents.length).map((a) => a.id));
+  const agents = data.agents.filter((a) => recent.has(a.id));
   const waiting = agents.filter((a) => a.waiting).length;
   if (agents.length === 0) {
     return (
@@ -107,12 +108,13 @@ export function AgentsList({ compact = false }: { compact?: boolean }) {
       {agents.map((a) => (
         <AgentRow key={a.id} agent={a} compact={compact} />
       ))}
+      {data.agents.length > agents.length && <p className="px-2 py-1 text-[11.5px] text-fg-subtle">Показано {agents.length} из {data.agents.length}</p>}
       {waiting > 1 && (
         <button
           onClick={() => dismiss(null).catch(console.error)}
           className="mt-1 self-start rounded-md px-2 py-0.5 text-[11.5px] text-fg-subtle hover:bg-ink/10 hover:text-fg"
         >
-          Отметить все просмотренными
+          Отметить все сессии просмотренными
         </button>
       )}
     </div>

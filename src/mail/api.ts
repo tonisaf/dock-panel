@@ -57,10 +57,10 @@ export function useMailSettings() {
  * The inbox page by page (40 letters per account each), newest first.
  * `account` narrows it to one mailbox, `unread` to unread letters.
  */
-export function useMailList(account: string | null, unread: boolean, enabled: boolean) {
+export function useMailList(account: string | null, unread: boolean, enabled: boolean, search = "", sender = "") {
   const query = useInfiniteQuery({
-    queryKey: [...LIST, account, unread],
-    queryFn: ({ pageParam }) => invoke<MailList>("mail_list", { account, cursors: pageParam, unread }),
+    queryKey: [...LIST, account, unread, search, sender],
+    queryFn: ({ pageParam }) => invoke<MailList>("mail_list", { account, cursors: pageParam, unread, query: search || null, sender: sender || null }),
     initialPageParam: null as Cursors | null,
     getNextPageParam: (last) => (last.more ? last.cursors : undefined),
     enabled,

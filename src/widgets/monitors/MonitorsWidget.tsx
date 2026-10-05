@@ -149,7 +149,9 @@ function AllBrightness({ monitors }: { monitors: Monitor[] }) {
   return (
     <div className="px-2 pb-1">
       <div className="pb-1.5 text-[11px] font-medium text-fg-subtle">Все мониторы</div>
-      <LevelRow icon={Sun} label="Яркость всех мониторов" level={{ value: average, max: 100 }} onCommit={commit} />
+      <div className="pl-[26px]">
+        <LevelRow icon={Sun} label="Яркость всех мониторов" level={{ value: average, max: 100 }} onCommit={commit} />
+      </div>
     </div>
   );
 }

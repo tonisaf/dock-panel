@@ -162,8 +162,9 @@ export function YoutubeSettings() {
         </>}
         <div className="flex items-center gap-2"><button className={button} disabled={pushBusy} onClick={savePush}>
           {pushBusy && <Loader2 className="size-3.5 animate-spin" />} Сохранить</button>
-          <span className="text-fg-subtle" role="status">{pushNote || data.pushStatus}</span>
+          {pushNote && <span className="text-fg-subtle">{pushNote}</span>}
         </div>
+        <p className="text-fg-muted" role="status">{data.pushStatus || (data.pushEnabled ? "Подключение…" : "Опрос раз в 15 минут")}</p>
       </div>}
       {channels.length > 0 && (
         <div className="flex flex-col px-2 py-1.5">

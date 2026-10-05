@@ -73,7 +73,20 @@ export function Panel() {
       // Rust decided (hotkey, tray, click elsewhere when not pinned): hide even if pinned.
       listen("panel:hide", () => usePanelStore.getState().hide()),
     ];
-    return () => unlisten.forEach((p) => p.then((fn) => fn()));
+    let disposed = false;
+    if (import.meta.env.DEV) {
+      Promise.all(unlisten).then(() => {
+        if (!disposed) {
+          invoke("panel_set_pinned", { on: true }).then(() =>
+            invoke("panel_open", { tab: "apps", note: null }),
+          ).catch(console.error);
+        }
+      });
+    }
+    return () => {
+      disposed = true;
+      unlisten.forEach((p) => p.then((fn) => fn()));
+    };
   }, [setOpen, setQuery, setTab]);
 
   useEffect(() => {
@@ -82,7 +95,8 @@ export function Panel() {
       if (e.key === "Escape") {
         // Peel back one layer at a time: menu, then query, then the panel.
         if (state.menu) state.setMenu(null);
-        else if (state.query) state.setQuery("");
+        else if ((state.full ? state.sideTab : state.tab) === "mail" && state.mailQuery) state.setMailQuery("");
+        else if ((state.full ? state.sideTab : state.tab) !== "mail" && state.query) state.setQuery("");
         else setOpen(false);
       } else if (e.ctrlKey && e.key >= "1" && e.key <= String(TABS.length)) {
         e.preventDefault();

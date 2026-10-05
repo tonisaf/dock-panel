@@ -160,6 +160,10 @@ function HiddenApps() {
 }
 
 export function AppsTab() {
+  return <div className="px-[72px]"><AppsContent /></div>;
+}
+
+function AppsContent() {
   const query = usePanelStore((s) => s.query);
   const { isPending, isError } = useApps();
   const apps = useVisibleApps();
@@ -183,12 +187,12 @@ export function AppsTab() {
     <div className="flex flex-col gap-4 pb-2">
       <Section title="Закреплённые" action={<PinFromDisk />}>
         {pinned.length > 0 ? (
-          <>
+          <div className="group/pinned relative">
             <PinnedGrid entries={pinned} />
-            <p className="flex items-center gap-1 px-1 text-[11px] text-fg-subtle">
+            <p className="pointer-events-none absolute left-0 top-full z-10 hidden max-w-full items-center gap-1 rounded-md border border-stroke bg-popover px-2 py-1 text-[11px] text-fg-muted shadow-md group-hover/pinned:flex group-focus-within/pinned:flex">
               <Folder className="size-3" /> Перетаскивайте, чтобы переставить; на другую иконку — чтобы собрать папку
             </p>
-          </>
+          </div>
         ) : (
           <p className="px-1 text-[12px] text-fg-subtle">
             Правый клик по приложению → «Закрепить». Файлы и папки — кнопками справа или перетаскиванием на панель.

@@ -39,6 +39,7 @@ interface PanelState {
   open: boolean;
   tab: TabId;
   query: string;
+  mailQuery: string;
   /** Highlighted search result, driven by the arrow keys. */
   selected: number;
   menu: ContextMenuState | null;
@@ -59,6 +60,7 @@ interface PanelState {
   setOpen: (open: boolean) => void;
   setTab: (tab: TabId) => void;
   setQuery: (query: string) => void;
+  setMailQuery: (query: string) => void;
   setSelected: (selected: number) => void;
   setMenu: (menu: ContextMenuState | null) => void;
   setMailToOpen: (letter: MailToOpen | null) => void;
@@ -71,9 +73,10 @@ interface PanelState {
 }
 
 export const usePanelStore = create<PanelState>((set, get) => ({
-  open: false,
-  tab: "home",
+  open: import.meta.env.DEV,
+  tab: import.meta.env.DEV ? "apps" : "home",
   query: "",
+  mailQuery: "",
   selected: 0,
   menu: null,
   mailToOpen: null,
@@ -102,6 +105,7 @@ export const usePanelStore = create<PanelState>((set, get) => ({
     invoke("panel_set_fullscreen", { on: full }).catch(console.error);
   },
   setQuery: (query) => set({ query, selected: 0 }),
+  setMailQuery: (mailQuery) => set({ mailQuery }),
   setSelected: (selected) => set({ selected }),
   setMenu: (menu) => set({ menu }),
   setMailToOpen: (mailToOpen) => set({ mailToOpen }),

@@ -88,12 +88,14 @@ function Reader({
   multiAccount,
   split,
   onBack,
+  onSender,
 }: {
   summary: Summary;
   multiAccount: boolean;
   /** Shown next to the list rather than instead of it. */
   split: boolean;
   onBack: () => void;
+  onSender: (sender: string) => void;
 }) {
   const { open, act } = useMailActions();
   const [letter, setLetter] = useState<Letter | null>(null);
@@ -115,7 +117,7 @@ function Reader({
   // Esc goes back to the list instead of closing the panel.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || usePanelStore.getState().query) return;
+      if (e.key !== "Escape" || usePanelStore.getState().mailQuery) return;
       e.stopImmediatePropagation();
       onBack();
     };
@@ -168,12 +170,14 @@ function Reader({
         <h2 className="text-[15px] leading-snug font-semibold select-text">{shown.subject}</h2>
         <div className="mt-2 flex items-baseline justify-between gap-3 text-[12px]">
           <div className="min-w-0">
-            <div className="truncate text-fg select-text">
+            <button type="button" onClick={() => shown.fromEmail && onSender(shown.fromEmail)}
+              disabled={!shown.fromEmail} title="Показать письма этого отправителя"
+              className="block max-w-full truncate text-left text-fg hover:text-accent hover:underline disabled:no-underline">
               {shown.fromName}
               {shown.fromEmail && shown.fromEmail !== shown.fromName && (
                 <span className="text-fg-subtle"> &lt;{shown.fromEmail}&gt;</span>
               )}
-            </div>
+            </button>
             {multiAccount && <div className="truncate text-fg-subtle">для {summary.account}</div>}
           </div>
           <span className="shrink-0 text-fg-subtle">
@@ -331,6 +335,14 @@ export function MailTab() {
   const accounts = settings?.accounts ?? [];
   const [account, setAccount] = useState<string | null>(null);
   const [unreadOnly, setUnreadOnly] = useState(false);
+  const search = usePanelStore((s) => s.mailQuery);
+  const setSearch = usePanelStore((s) => s.setMailQuery);
+  const [sender, setSender] = useState("");
+  const [filters, setFilters] = useState({ search: "", sender: "" });
+  useEffect(() => {
+    const timer = window.setTimeout(() => setFilters({ search: search.trim(), sender: sender.trim() }), 450);
+    return () => window.clearTimeout(timer);
+  }, [search, sender]);
   const pane = useSidePane<Summary>(baseWidth);
   const reading = pane.item;
   const setReading = (m: Summary) => void pane.open(m);
@@ -338,10 +350,10 @@ export function MailTab() {
   const setMailListWidth = usePrefs((s) => s.setMailListWidth);
   const [actionError, setActionError] = useState<string | null>(null);
   const { messages, errors, isPending, isFetching, isError, error, hasNextPage, fetchNextPage, isFetchingNextPage } =
-    useMailList(account, unreadOnly, accounts.length > 0);
+    useMailList(account, unreadOnly, accounts.length > 0, filters.search, filters.sender);
   const [cursor, setCursor] = useState(0);
   // A new filter starts at the top.
-  useEffect(() => setCursor(0), [account, unreadOnly]);
+  useEffect(() => setCursor(0), [account, unreadOnly, filters.search, filters.sender]);
   // Clicking a letter (or a notification) moves the arrow-key cursor to it.
   useEffect(() => {
     if (!reading) return;
@@ -353,8 +365,8 @@ export function MailTab() {
   // ↑/↓ walk the list (and switch the open letter), Enter opens one.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (usePanelStore.getState().query || e.ctrlKey || e.altKey || e.metaKey) return;
-      if (e.target instanceof HTMLElement && e.target.closest("input:not([data-panel-search]), textarea")) return;
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+      if (e.target instanceof HTMLElement && e.target.closest("input, textarea")) return;
       if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && !(e.key === "Enter" && !reading)) return;
       if (messages.length === 0) return;
       e.preventDefault();
@@ -399,6 +411,12 @@ export function MailTab() {
       multiAccount={multi}
       split={pane.mode === "split"}
       onBack={close}
+      onSender={(value) => {
+        setAccount(reading.account);
+        setSearch("");
+        setSender(value);
+        close();
+      }}
     />
   );
   if (reading && pane.mode === "full") return reader;
@@ -433,6 +451,17 @@ export function MailTab() {
         </button>
       </div>
 
+      <div className="flex flex-col gap-2">
+        {(filters.search || filters.sender) && <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-fg-muted">
+          {filters.search && <button onClick={() => setSearch("")} className="flex max-w-full items-center gap-1 rounded-lg bg-ink/8 px-2 py-1" title="Сбросить поиск">
+            <span className="truncate">Поиск: {filters.search}</span><X className="size-3 shrink-0" />
+          </button>}
+          {filters.sender && <button onClick={() => setSender("")} className="flex max-w-full items-center gap-1 rounded-lg bg-ink/8 px-2 py-1" title="Сбросить отправителя">
+            <span className="truncate">От: {filters.sender}</span><X className="size-3 shrink-0" />
+          </button>}
+        </div>}
+      </div>
+
       {actionError && (
         <p
           onClick={() => setActionError(null)}
@@ -458,8 +487,8 @@ export function MailTab() {
       ) : messages.length === 0 ? (
         <EmptyState
           icon={MailOpen}
-          title={unreadOnly ? "Всё прочитано" : "Писем нет"}
-          text={unreadOnly ? "Новых писем во входящих нет." : "Во входящих пусто."}
+          title={filters.search || filters.sender ? "Ничего не найдено" : unreadOnly ? "Всё прочитано" : "Писем нет"}
+          text={filters.search || filters.sender ? "Измените запрос или снимите активные фильтры." : unreadOnly ? "Новых писем во входящих нет." : "Во входящих пусто."}
         />
       ) : (
         <div className="flex flex-col">

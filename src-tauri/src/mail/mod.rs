@@ -193,7 +193,11 @@ pub async fn mail_list(
     account: Option<String>,
     cursors: Option<HashMap<String, Option<u32>>>,
     unread: bool,
+    query: Option<String>,
+    sender: Option<String>,
 ) -> Result<MailList, String> {
+    let query = query.unwrap_or_default();
+    let sender = sender.unwrap_or_default();
     // Accounts to read, each with where to start; exhausted ones are skipped.
     let jobs: Vec<(Account, Option<u32>)> = load(&app)
         .accounts
@@ -208,7 +212,14 @@ pub async fn mail_list(
         let results: Vec<_> = std::thread::scope(|s| {
             let handles: Vec<_> = jobs
                 .iter()
-                .map(|(a, before)| (a, s.spawn(move || client::list_page(a, *before, unread))))
+                .map(|(a, before)| {
+                    let query = &query;
+                    let sender = &sender;
+                    (
+                        a,
+                        s.spawn(move || client::list_page(a, *before, unread, query, sender)),
+                    )
+                })
                 .collect();
             handles
                 .into_iter()

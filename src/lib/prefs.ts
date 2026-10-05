@@ -51,6 +51,8 @@ interface PrefsState {
   widgetColumns: Record<string, string[][]>;
   /** Width of the mail list while a letter is open next to it; null for the default. */
   mailListWidth: number | null;
+  agentsChatLimit: number;
+  quickLlmModel: string;
   /** The same for the notes list next to an open note. */
   notesListWidth: number | null;
   /** "Search the web" row's engine. */
@@ -92,6 +94,8 @@ interface PrefsState {
   /** `columns` saves an arrangement for that many columns; null drops all of them (back to auto). */
   setWidgetLayout: (order: string[], hidden: string[], columns: string[][] | null) => void;
   setMailListWidth: (width: number) => void;
+  setAgentsChatLimit: (limit: number) => void;
+  setQuickLlmModel: (model: string) => void;
   setNotesListWidth: (width: number) => void;
   setWidgetCollapsed: (id: string, collapsed: boolean) => void;
   setDeskOpacity: (opacity: number) => void;
@@ -141,6 +145,8 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   hiddenWidgets: [],
   widgetColumns: {},
   mailListWidth: null,
+  agentsChatLimit: 0,
+  quickLlmModel: "",
   notesListWidth: null,
   collapsedWidgets: {},
   deskOpacity: 78,
@@ -260,6 +266,15 @@ export const usePrefs = create<PrefsState>((set, get) => ({
     set({ systemAccent });
     persist("systemAccent", systemAccent);
   },
+  setQuickLlmModel: (quickLlmModel) => {
+    set({ quickLlmModel });
+    persist("quickLlmModel", quickLlmModel);
+  },
+  setAgentsChatLimit: (limit) => {
+    const agentsChatLimit = [0, 3, 5, 10, 20].includes(limit) ? limit : 0;
+    set({ agentsChatLimit });
+    persist("agentsChatLimit", agentsChatLimit);
+  },
   setMailListWidth: (mailListWidth) => {
     set({ mailListWidth });
     persist("mailListWidth", mailListWidth);
@@ -307,6 +322,8 @@ load("prefs.json", { defaults: {}, autoSave: 300 })
       widgetOrder: (await s.get<string[]>("widgetOrder")) ?? [],
       hiddenWidgets: (await s.get<string[]>("hiddenWidgets")) ?? [],
       widgetColumns: (await s.get<Record<string, string[][]>>("widgetColumns")) ?? {},
+      quickLlmModel: (await s.get<string>("quickLlmModel")) ?? "",
+      agentsChatLimit: (await s.get<number>("agentsChatLimit")) ?? 0,
       mailListWidth: (await s.get<number>("mailListWidth")) ?? null,
       notesListWidth: (await s.get<number>("notesListWidth")) ?? null,
       collapsedWidgets: (await s.get<Record<string, boolean>>("collapsedWidgets")) ?? {},

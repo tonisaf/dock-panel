@@ -206,18 +206,103 @@ pub struct Page {
     pub next: Option<u32>,
 }
 
+static SEARCH_SENDERS: std::sync::LazyLock<Mutex<HashMap<String, Vec<(String, String)>>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+fn remember_senders(account: &str, messages: &[Summary]) {
+    let mut cache = SEARCH_SENDERS.lock().unwrap_or_else(|e| e.into_inner());
+    let entries = cache.entry(account.into()).or_default();
+    for m in messages {
+        if !m.from_email.is_empty() && !entries.iter().any(|(_, email)| email == &m.from_email) {
+            entries.push((m.from_name.clone(), m.from_email.clone()));
+        }
+    }
+    if entries.len() > 2000 {
+        entries.drain(..entries.len() - 2000);
+    }
+}
+
 const FETCH_HEADERS: &str = "(UID FLAGS INTERNALDATE BODY.PEEK[HEADER])";
+
+fn search_criteria(unread: bool, query: &str, sender: &str) -> Result<String, String> {
+    fn quoted(value: &str) -> Result<String, String> {
+        if value.chars().count() > 500 || value.chars().any(char::is_control) {
+            return Err("Поисковая строка слишком длинная или содержит управляющие символы".into());
+        }
+        if !value.is_ascii() {
+            return Ok(format!("{{{}+}}\r\n{}", value.len(), value));
+        }
+        Ok(format!(
+            "\"{}\"",
+            value.replace('\\', "\\\\").replace('"', "\\\"")
+        ))
+    }
+    let mut parts = Vec::new();
+    if unread {
+        parts.push("UNSEEN".to_string());
+    }
+    if !query.trim().is_empty() {
+        parts.push(format!("TEXT {}", quoted(query.trim())?));
+    }
+    if !sender.trim().is_empty() {
+        parts.push(format!("FROM {}", quoted(sender.trim())?));
+    }
+    let criteria = parts.join(" ");
+    Ok(if criteria.is_ascii() {
+        criteria
+    } else {
+        format!("CHARSET UTF-8 {criteria}")
+    })
+}
 
 pub fn list_page(
     account: &Account,
     before: Option<u32>,
     unread_only: bool,
+    query: &str,
+    sender: &str,
 ) -> Result<Page, String> {
+    let mut criteria = search_criteria(unread_only, query, sender)?;
+    if !query.trim().is_empty() {
+        let term = query.trim().to_lowercase();
+        let senders = SEARCH_SENDERS.lock().unwrap_or_else(|e| e.into_inner());
+        let known = senders.get(&account.id).cloned().unwrap_or_default();
+        drop(senders);
+        // Gmail matches whole tokens. Expand partial names/addresses using known
+        // senders, then ask IMAP for all their matching messages, including old ones.
+        let mut branches = vec![search_criteria(false, query, "")?];
+        for (name, email) in known
+            .iter()
+            .filter(|(name, email)| {
+                name.to_lowercase().contains(&term) || email.to_lowercase().contains(&term)
+            })
+            .take(20)
+        {
+            let _ = name;
+            branches.push(search_criteria(false, "", email)?);
+        }
+        if branches.len() > 1 && branches.iter().all(|b| b.is_ascii()) {
+            let mut combined = branches.pop().unwrap();
+            for branch in branches.into_iter().rev() {
+                combined = format!("OR {branch} {combined}");
+            }
+            let extra = search_criteria(unread_only, "", sender)?;
+            criteria = format!("{extra} ({combined})").trim().to_string();
+        }
+    }
     with_session(account, |s| {
         let exists = s.select(INBOX)?.exists;
-        if unread_only {
+        if !criteria.is_empty() {
+            if !criteria.is_ascii() {
+                let capabilities = s.capabilities()?;
+                if !capabilities.has_str("LITERAL+") && !capabilities.has_str("LITERAL-") {
+                    return Err(imap::Error::Io(std::io::Error::new(
+                        std::io::ErrorKind::Unsupported,
+                        "Сервер не поддерживает Unicode-поиск через несинхронные IMAP-литералы",
+                    )));
+                }
+            }
             let mut uids: Vec<u32> = s
-                .uid_search("UNSEEN")?
+                .uid_search(&criteria)?
                 .into_iter()
                 .filter(|u| before.is_none_or(|b| *u < b))
                 .collect();
@@ -254,10 +339,11 @@ pub fn list_page(
         }
         let from = top.saturating_sub(LIST_LIMIT - 1).max(1);
         let fetches = s.fetch(format!("{from}:{top}"), FETCH_HEADERS)?;
-        let messages = fetches
+        let messages: Vec<Summary> = fetches
             .iter()
             .filter_map(|f| summarize(&account.id, f))
             .collect();
+        remember_senders(&account.id, &messages);
         Ok(Page {
             messages,
             next: (from > 1).then_some(from),
@@ -556,5 +642,72 @@ mod tests {
         assert_eq!(known_server("me@yandex.ru"), Some(("imap.yandex.ru", 993)));
         assert_eq!(known_server("Me@Gmail.com"), Some(("imap.gmail.com", 993)));
         assert_eq!(known_server("me@example.org"), None);
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::search_criteria;
+    #[test]
+    #[ignore = "uses this machine's configured mailbox and Credential Manager"]
+    fn live_search_configured_mailbox() {
+        let path = std::path::PathBuf::from(std::env::var("APPDATA").unwrap())
+            .join("com.tonis.dockpanel/mail.json");
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let account: super::Account = serde_json::from_value(saved["accounts"][0].clone()).unwrap();
+        super::set_password_source(|id| crate::secrets::read(&format!("DockPanel/mail/{id}")));
+        let baseline = super::list_page(&account, None, false, "", "").expect("baseline list");
+        let sender = baseline
+            .messages
+            .iter()
+            .find(|m| !m.from_email.is_empty())
+            .expect("sender")
+            .from_email
+            .clone();
+        let matches = super::list_page(&account, None, false, "", &sender).expect("sender search");
+        assert!(!matches.messages.is_empty());
+        assert!(matches
+            .messages
+            .iter()
+            .all(|m| m.from_email.eq_ignore_ascii_case(&sender)));
+        let partial =
+            super::list_page(&account, None, false, "git", "").expect("partial sender search");
+        assert!(
+            !partial.messages.is_empty(),
+            "known GitHub sender should match git"
+        );
+        let unicode = super::list_page(&account, None, false, "письмо", "").expect("UTF-8 search");
+        println!(
+            "Live IMAP: sender results {}; UTF-8 results {}",
+            matches.messages.len(),
+            unicode.messages.len()
+        );
+        if let Some(cursor) = matches.next {
+            let older = super::list_page(&account, Some(cursor), false, "", &sender)
+                .expect("search pagination");
+            assert!(older.messages.iter().all(|m| m.uid < cursor));
+        }
+    }
+    #[test]
+    fn combines_filters_and_supports_unicode() {
+        assert_eq!(
+            search_criteria(true, "invoice", "test@example.com").unwrap(),
+            "UNSEEN TEXT \"invoice\" FROM \"test@example.com\""
+        );
+        assert_eq!(search_criteria(false, "", "").unwrap(), "");
+        assert_eq!(
+            search_criteria(false, "письмо", "").unwrap(),
+            "CHARSET UTF-8 TEXT {12+}\r\nписьмо"
+        );
+    }
+    #[test]
+    fn escapes_imap_strings_and_rejects_control_characters() {
+        assert_eq!(
+            search_criteria(false, "a\"b\\c", "").unwrap(),
+            "TEXT \"a\\\"b\\\\c\""
+        );
+        assert!(search_criteria(false, "x\r\nALL", "").is_err());
+        assert!(search_criteria(false, &"a".repeat(501), "").is_err());
     }
 }

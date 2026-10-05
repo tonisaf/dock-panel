@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { LockKeyhole, Power, RotateCw, Settings, ChevronDown, Moon } from "lucide-react";
+import { LlmQuickButton } from "./LlmQuickButton";
 import { usePanelStore } from "../store";
 
 export function QuickAccess() {
@@ -32,7 +33,7 @@ export function QuickAccess() {
   return (
     <div ref={root} className="relative flex shrink-0 items-center gap-1 border-t border-stroke pt-2" aria-label="Быстрый доступ">
       <button className={button} onClick={() => setTab("settings")} title="Настройки"><Settings className="size-4" /><span>Настройки</span></button>
-      <button className={button} disabled={busy} onClick={() => void run("lock")} title="Заблокировать компьютер" aria-label="Заблокировать компьютер"><LockKeyhole className="size-4" /></button>
+      <LlmQuickButton onMenuOpen={close} />
       <button ref={trigger} className={`${button} ml-auto`} aria-expanded={open} onClick={() => { if (open) close(); else setOpen(true); }}><Power className="size-4" />Питание<ChevronDown className="size-3.5" /></button>
       {open && (
         <div className="absolute right-0 bottom-full z-40 mb-2 w-72 max-w-full rounded-xl border border-stroke bg-popover p-3 shadow-lg">
@@ -47,6 +48,7 @@ export function QuickAccess() {
             </>
           ) : (
             <div className="flex flex-col gap-1">
+              <button className={`${button} justify-start`} disabled={busy} onClick={() => void run("lock")}><LockKeyhole className="size-4" />Заблокировать компьютер</button>
               <button className={`${button} justify-start`} disabled={busy} onClick={() => void run("sleep")}><Moon className="size-4" />Спящий режим</button>
               <button className={`${button} justify-start`} onClick={() => setConfirm("restart")}><RotateCw className="size-4" />Перезагрузка</button>
               <button className={`${button} justify-start`} onClick={() => setConfirm("shutdown")}><Power className="size-4" />Завершение работы</button>
