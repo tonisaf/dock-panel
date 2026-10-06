@@ -11,6 +11,7 @@ mod discord;
 mod docker;
 mod files;
 mod gcal;
+mod google_search;
 mod home;
 mod listening;
 mod lmctl;
@@ -114,6 +115,15 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             power::power_action,
+            google_search::google_ai_open,
+            google_search::google_ai_embed,
+            google_search::google_ai_action,
+            google_search::google_ai_visible,
+            google_search::google_ai_history,
+            google_search::google_ai_chat,
+            google_search::google_ai_zoom,
+            google_search::google_ai_theme,
+            google_search::google_ai_selection,
             panel::hide_panel,
             panel::panel_settings,
             panel::panel_set_edge,

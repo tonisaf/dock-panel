@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Window};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
 pub const LABEL: &str = "main";
@@ -134,7 +134,7 @@ pub fn panel_fullscreen() -> bool {
 
 /// Resizes the window to `window_width()`; docked right, it grows leftwards
 /// so the right edge stays put.
-fn apply_width(win: &WebviewWindow) {
+fn apply_width(win: &Window) {
     if FULL.load(Ordering::SeqCst) {
         return;
     }
@@ -208,8 +208,8 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-fn window(app: &AppHandle) -> Option<WebviewWindow> {
-    app.get_webview_window(LABEL)
+fn window(app: &AppHandle) -> Option<Window> {
+    app.get_window(LABEL)
 }
 
 /// Loads saved settings, then the one-time native setup: acrylic backdrop,
@@ -433,7 +433,7 @@ pub fn finish_hide(app: &AppHandle) {
 }
 
 /// Dock the panel to the left edge of whichever monitor holds the cursor.
-fn place_on_cursor_monitor(app: &AppHandle, win: &WebviewWindow) {
+fn place_on_cursor_monitor(app: &AppHandle, win: &Window) {
     let monitor = app
         .cursor_position()
         .ok()

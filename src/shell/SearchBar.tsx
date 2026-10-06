@@ -7,13 +7,22 @@ import { activateSpotifyItem, useSpotifySearch } from "../widgets/spotify/Spotif
 export const SearchBar = forwardRef<HTMLInputElement>(function SearchBar(_, ref) {
   const { query, setQuery, tab, setTab, selected, setSelected, full, sideTab, mailQuery, setMailQuery } = usePanelStore();
   const mailSearch = (full ? sideTab : tab) === "mail";
-  const placeholder = mailSearch ? "Поиск писем: тема, отправитель или текст" : "Поиск приложений, файлов и заметок";
+  const googleActive = usePanelStore((s) => s.googleActive);
+  const placeholder = googleActive ? "Спросить Google AI" : mailSearch ? "Поиск писем: тема, отправитель или текст" : "Поиск приложений, файлов и заметок";
   const items = useSearchItems();
   const spotify = useSpotifySearch();
   // "sp <query>" searches Spotify instead.
   const count = spotify.term ? spotify.results.length : items.length;
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (googleActive) {
+      if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+        e.preventDefault();
+        const term = query.trim();
+        if (term) usePanelStore.setState((s) => ({ googleQuery: term, googleRequest: s.googleRequest + 1 }));
+      }
+      return;
+    }
     if (mailSearch || !count) return;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
@@ -42,7 +51,7 @@ export const SearchBar = forwardRef<HTMLInputElement>(function SearchBar(_, ref)
           if (mailSearch) { setMailQuery(e.target.value); return; }
           setQuery(e.target.value);
           // Typing is almost always an app search.
-          if (e.target.value && tab !== "apps") setTab("apps");
+          if (!googleActive && e.target.value && tab !== "apps") setTab("apps");
         }}
         onKeyDown={onKeyDown}
         placeholder={placeholder}
@@ -51,7 +60,7 @@ export const SearchBar = forwardRef<HTMLInputElement>(function SearchBar(_, ref)
         className="h-full min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-fg-subtle"
       />
       <kbd className="rounded-md border border-stroke px-1.5 py-0.5 text-[11px] text-fg-subtle">Esc</kbd>
-      {!mailSearch && <div className="group/help relative shrink-0">
+      {!mailSearch && !googleActive && <div className="group/help relative shrink-0">
         <button
           type="button"
           aria-label="Подсказка по командам поиска"

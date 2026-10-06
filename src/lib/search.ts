@@ -22,7 +22,7 @@ export type SearchItem =
   | { kind: "app"; app: AppEntry }
   | { kind: "note"; note: NoteHit }
   | { kind: "file"; file: FileHit; app: AppEntry }
-  | { kind: "web"; query: string; engine: SearchEngine };
+  | { kind: "web"; query: string; engine: SearchEngine; ai?: boolean };
 
 export const ENGINES: Record<SearchEngine, { label: string; url: (q: string) => string }> = {
   google: { label: "Google", url: (q) => `https://www.google.com/search?q=${encodeURIComponent(q)}` },
@@ -76,6 +76,7 @@ export function useSearchItems(): SearchItem[] {
         .map((file) => ({ kind: "file" as const, file, app: { id: FILE_PREFIX + file.path, name: file.name } }))
         .filter((f) => !shownFiles.has(f.app.id)),
       { kind: "web" as const, query: q, engine },
+      { kind: "web" as const, query: q, engine: "google" as const, ai: true },
     ];
   }, [query, apps, notes, files, currency, rates, engine]);
 }
@@ -102,6 +103,10 @@ export async function activateItem(item: SearchItem, { admin = false } = {}) {
       panel.openNote(item.note.id);
       return;
     case "web":
+      if (item.ai) {
+        usePanelStore.setState((s) => ({ googleQuery: item.query, googleActive: true, googleRequest: s.googleRequest + 1 }));
+        return;
+      }
       await openUrl(ENGINES[item.engine].url(item.query)).catch(console.error);
       panel.setOpen(false);
   }

@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the panel window and the widgets on the desktop",
-  "windows": ["main", "desk-*", "deskgrid"],
+  "webviews": ["main", "desk-*", "deskgrid"],
   "permissions": [
     "core:default",
     "opener:default",

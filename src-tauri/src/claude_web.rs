@@ -345,7 +345,7 @@ pub async fn claude_web_logout(app: AppHandle) -> Result<(), String> {
             let _ = win.destroy();
         }
     }
-    if let Some(main) = app.get_webview_window(crate::panel::LABEL) {
+    if let Some(main) = app.get_webview(crate::panel::LABEL) {
         let _ = main.clear_all_browsing_data();
     }
     let _ = app.emit(CHANGED_EVENT, ());

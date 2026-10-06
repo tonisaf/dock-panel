@@ -40,6 +40,10 @@ interface PanelState {
   tab: TabId;
   query: string;
   mailQuery: string;
+  googleQuery: string | null;
+  googleActive: boolean;
+  googleRequest: number;
+  googleLoadedRequest: number;
   /** Highlighted search result, driven by the arrow keys. */
   selected: number;
   menu: ContextMenuState | null;
@@ -77,6 +81,10 @@ export const usePanelStore = create<PanelState>((set, get) => ({
   tab: import.meta.env.DEV ? "apps" : "home",
   query: "",
   mailQuery: "",
+  googleQuery: null,
+  googleActive: false,
+  googleRequest: 0,
+  googleLoadedRequest: -1,
   selected: 0,
   menu: null,
   mailToOpen: null,
@@ -98,7 +106,7 @@ export const usePanelStore = create<PanelState>((set, get) => ({
   setTab: (tab) => {
     // From a widget on the desktop: open the panel there.
     if (deskWidget) invoke("panel_open", { tab }).catch(console.error);
-    else set(tab === "home" ? { tab } : { tab, sideTab: tab });
+    else set(tab === "home" ? { tab, googleActive: false } : { tab, sideTab: tab, googleActive: false });
   },
   setFull: (full) => {
     set({ full });

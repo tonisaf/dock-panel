@@ -13,6 +13,7 @@ select option {
   /* Dark theme values; the light theme overrides them below. "ink" is the
      contrast color for translucent overlays (white on dark, black on light). */
   --color-ink: #fff;
+  --color-browser: #202028;
   --color-fg: rgb(255 255 255 / 0.94);
   --color-fg-muted: rgb(255 255 255 / 0.68);
   --color-fg-subtle: rgb(255 255 255 / 0.46);
@@ -31,6 +32,7 @@ select option {
 
 [data-theme="light"] {
   --color-ink: #000;
+  --color-browser: #eeedf2;
   --color-fg: rgb(18 18 26 / 0.92);
   --color-fg-muted: rgb(18 18 26 / 0.64);
   --color-fg-subtle: rgb(18 18 26 / 0.46);

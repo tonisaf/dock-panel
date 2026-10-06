@@ -66,7 +66,7 @@ function Row({ item, active, onHover, rowRef }: { item: SearchItem; active: bool
         <button ref={rowRef} onClick={activate} onMouseMove={onHover} className={base}>
           {badge(<Globe className="size-4 text-fg-subtle" />)}
           <span className="min-w-0 flex-1 truncate text-[13.5px]">
-            Искать «{item.query}» в {ENGINES[item.engine].label}
+            {item.ai ? `Спросить Google AI: «${item.query}»` : `Искать «${item.query}» в ${ENGINES[item.engine].label}`}
           </span>
           {enter}
         </button>

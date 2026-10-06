@@ -21,6 +21,7 @@ import { AiTab } from "../tabs/AiTab";
 import { NotesTab } from "../tabs/NotesTab";
 import { SettingsTab } from "../tabs/SettingsTab";
 import { MailTab } from "../tabs/MailTab";
+import { GoogleBrowser } from "./GoogleBrowser";
 import { CalendarTab } from "../gcal/CalendarTab";
 import { useDataEvents } from "../lib/dataEvents";
 
@@ -43,6 +44,12 @@ const TAB_VIEWS = {
 export function Panel() {
   const searchRef = useRef<HTMLInputElement>(null);
   const { open, setOpen, tab, setTab, setQuery, full, sideTab } = usePanelStore();
+  const googleQuery = usePanelStore((s) => s.googleQuery);
+  const googleActive = usePanelStore((s) => s.googleActive);
+  useEffect(() => {
+    void invoke("google_ai_visible", { visible: googleActive && open }).catch(console.error);
+    return () => { void invoke("google_ai_visible", { visible: false }).catch(console.error); };
+  }, [googleActive, open]);
   // Keep the app list warm so the Apps tab and search are instant.
   useApps();
   useAppearance();
@@ -94,7 +101,8 @@ export function Panel() {
       const state = usePanelStore.getState();
       if (e.key === "Escape") {
         // Peel back one layer at a time: menu, then query, then the panel.
-        if (state.menu) state.setMenu(null);
+        if (state.googleActive) usePanelStore.getState().setTab("apps");
+        else if (state.menu) state.setMenu(null);
         else if ((state.full ? state.sideTab : state.tab) === "mail" && state.mailQuery) state.setMailQuery("");
         else if ((state.full ? state.sideTab : state.tab) !== "mail" && state.query) state.setQuery("");
         else setOpen(false);
@@ -127,7 +135,14 @@ export function Panel() {
             <SearchBar ref={searchRef} />
             <WindowButtons />
           </div>
-          {full ? (
+          {!googleActive && googleQuery && (full ? sideTab : tab) === "apps" && <button
+            className="self-start rounded-lg bg-surface px-3 py-2 text-[13px]"
+            onClick={() => usePanelStore.setState({ googleActive: true })}
+          >Вернуться в Google AI</button>}
+          {googleActive && googleQuery ? (<>
+            <TabBar />
+            <GoogleBrowser query={googleQuery} />
+          </>) : full ? (
             // Full screen: home stays on the left, the other tabs switch on the right.
             <div className="flex min-h-0 flex-1 gap-4">
               <main className="scroll-area -mx-1 min-h-0 w-[52%] min-w-[360px] shrink-0 px-1">
