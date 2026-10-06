@@ -1,3 +1,5 @@
+import { LocalNotesBoard } from "../notes/LocalNotesBoard";
+import { useIntegrations } from "../lib/integrations";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, CloudOff, Loader2, Pencil, Pin, Plus, RefreshCw, StickyNote, X } from "lucide-react";
 import clsx from "clsx";
@@ -25,7 +27,7 @@ function Status({ s, onRefresh }: { s: NotesState; onRefresh: () => void }) {
         {text}
         {s.pending > 0 && ` · ждут отправки: ${s.pending}`}
       </span>
-      <button onClick={onRefresh} title="Обновить из Notion" className="ml-auto grid size-6 shrink-0 place-items-center rounded-md hover:bg-ink/10 hover:text-fg">
+      <button onClick={onRefresh} title="Обновить заметки" className="ml-auto grid size-6 shrink-0 place-items-center rounded-md hover:bg-ink/10 hover:text-fg">
         <RefreshCw className={clsx("size-3.5", s.syncing && "animate-spin")} />
       </button>
     </div>
@@ -67,7 +69,7 @@ function Composer({ onDone }: { onDone: (note: Note | null) => void }) {
       />
       {error && <p className="text-[12px] text-warn">{error}</p>}
       <div className="flex items-center gap-2">
-        <span className="text-[11px] text-fg-subtle">Ctrl+Enter — сохранить. Без интернета уйдёт в Notion позже</span>
+        <span className="text-[11px] text-fg-subtle">Ctrl+Enter — сохранить</span>
         <button onClick={() => onDone(null)} className="ml-auto rounded-lg px-2.5 py-1 text-[12px] text-fg-muted hover:bg-ink/8 hover:text-fg">
           Отмена
         </button>
@@ -120,7 +122,7 @@ function Reader({ note, state, split, onBack }: { note: Note; state: NotesState;
     return (
       <article className="flex flex-col gap-2 pt-0.5">
         <div className="flex items-center gap-1.5 text-[12px] text-fg-subtle">
-          <Pencil className="size-3.5" /> Редактирование{note.local ? "" : " · в Notion уйдут только изменения"}
+          <Pencil className="size-3.5" /> Редактирование{note.url.startsWith("obsidian:") ? " · Markdown" : note.local ? "" : " · в Notion уйдут только изменения"}
         </div>
         <NoteEditor note={note} onDone={() => setEditing(false)} />
       </article>
@@ -182,13 +184,18 @@ function Reader({ note, state, split, onBack }: { note: Note; state: NotesState;
 }
 
 export function NotesTab() {
+  const provider = useIntegrations((s) => s.notes);
+  return provider === "local" ? <LocalNotesBoard /> : <ExternalNotesTab />;
+}
+
+function ExternalNotesTab() {
   const setTab = usePanelStore((s) => s.setTab);
   const noteToOpen = usePanelStore((s) => s.noteToOpen);
   const panelWidth = usePanelSettings().width;
   const baseWidth = usePanelStore((s) => s.full) ? Number.POSITIVE_INFINITY : panelWidth;
   const savedListWidth = usePrefs((s) => s.notesListWidth);
   const setNotesListWidth = usePrefs((s) => s.setNotesListWidth);
-  const { data: s } = useNotes();
+  const { data: s, error: loadError, refetch } = useNotes();
   const { sync } = useNotesActions();
   const pane = useSidePane<string>(baseWidth);
   const [composing, setComposing] = useState(false);
@@ -225,8 +232,8 @@ export function NotesTab() {
       <div className="flex h-full flex-col">
         <EmptyState
           icon={StickyNote}
-          title="Заметки из Notion"
-          text="Подключите Notion и выберите базу заметок в настройках. Заметки сохранятся на компьютере и будут открываться без интернета."
+          title="Заметки"
+          text="Выберите Notion или папку хранилища Obsidian в настройках заметок и задач."
         />
         <button onClick={() => setTab("settings")} className="mx-auto -mt-12 text-[12.5px] text-accent hover:underline">
           Открыть настройки
@@ -234,6 +241,7 @@ export function NotesTab() {
       </div>
     );
   }
+  if (loadError) return <div className="p-4 text-warn" role="alert">{String(loadError)}<button className="ml-3 text-accent" onClick={() => void refetch()}>Повторить</button></div>;
   if (!s) return null;
 
   const close = () => void pane.close();
@@ -282,7 +290,7 @@ export function NotesTab() {
       {shown.length === 0 ? (
         s.syncing ? (
           <p className="flex items-center gap-2 px-2.5 py-3 text-[12.5px] text-fg-subtle">
-            <Loader2 className="size-4 animate-spin" /> Загружаю заметки из Notion…
+            <Loader2 className="size-4 animate-spin" /> Загружаю заметки…
           </p>
         ) : (
           <EmptyState icon={StickyNote} title="Заметок нет" text={tag ? "С этим тегом заметок нет." : "В базе пока пусто — создайте первую."} />

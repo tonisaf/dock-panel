@@ -4,7 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { CheckSquare, ExternalLink, Loader2, Plus, RefreshCw } from "lucide-react";
 import clsx from "clsx";
 import { EmptyState } from "../components/Card";
-import { usePrefs } from "../lib/prefs";
+import { useTasksSource } from "../lib/integrations";
 import { usePanelStore } from "../store";
 import { useCreateTask, useNotionStatus, useTasks } from "../widgets/tasks/api";
 import { TaskRow } from "../widgets/tasks/TaskRow";
@@ -49,7 +49,7 @@ function QuickAdd() {
 }
 
 export function TasksTab() {
-  const source = usePrefs((s) => s.notionSource);
+  const source = useTasksSource();
   const setTab = usePanelStore((s) => s.setTab);
   const status = useNotionStatus();
   const { data, isPending, isError, error, refetch, isFetching } = useTasks();
@@ -60,11 +60,11 @@ export function TasksTab() {
       <div className="flex h-full flex-col items-center justify-center">
         <EmptyState
           icon={CheckSquare}
-          title="Задачи из Notion"
+          title="Задачи"
           text={
             status.data?.connected
               ? "Выберите базу задач в настройках."
-              : "Подключите Notion в настройках: понадобится токен внутренней интеграции."
+              : "Выберите источник заметок и задач в настройках: понадобится токен внутренней интеграции."
           }
         />
         <button
@@ -98,10 +98,10 @@ export function TasksTab() {
           </button>
           <button
             onClick={() => {
-              openUrl(`https://www.notion.so/${(source.databaseId ?? source.id).replace(/-/g, "")}`).catch(console.error);
+              openUrl(source.id.startsWith("obsidian:") ? "obsidian://open" : `https://www.notion.so/${(source.databaseId ?? source.id).replace(/-/g, "")}`).catch(console.error);
               usePanelStore.getState().setOpen(false);
             }}
-            title="Открыть в Notion"
+            title="Открыть источник"
             className="grid size-8 place-items-center rounded-lg text-fg-subtle hover:bg-ink/8 hover:text-fg"
           >
             <ExternalLink className="size-4" />

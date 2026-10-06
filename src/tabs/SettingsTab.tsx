@@ -1,3 +1,5 @@
+import { IntegrationSettings } from "../components/IntegrationSettings";
+import { useIntegrations, tasksProvider } from "../lib/integrations";
 import { useEffect, useState, type ReactNode } from "react";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import clsx from "clsx";
@@ -343,6 +345,7 @@ function Group({
 }
 
 function Integrations() {
+  const integrations = useIntegrations();
   const mail = useMailSettings().data;
   const gcal = useGcalStatus().data;
   const ical = useIcalCalendars().data ?? [];
@@ -393,8 +396,9 @@ function Integrations() {
       >
         <CalendarSettings />
       </Group>,
-    <Group key="notion" id="notion" icon={NotebookPen} title="Notion" {...connected(notion, notion?.workspace)}>
-        <NotionSettings />
+    <Group key="notion" id="notion" icon={NotebookPen} title="Заметки и задачи" {...connected(notion, notion?.workspace)}>
+        <IntegrationSettings kind="notes" />
+        {(integrations.notes === "notion" || (integrations.notes === "local" && tasksProvider(integrations) === "notion")) && <NotionSettings tasksOnly={integrations.notes === "local"} />}
       </Group>,
     <Group key="openclaw"
         id="openclaw"
@@ -412,12 +416,13 @@ function Integrations() {
     <Group key="lmstudio"
         id="lmstudio"
         icon={Bot}
-        title="LM Studio"
+        title="Локальная LLM"
         {...(lmstudio &&
           (lmstudio.reachable
             ? { status: lmstudio.model ?? "сервер отвечает", tone: "ok" as Tone }
             : { status: "не запущен", tone: "warn" as Tone }))}
       >
+        <IntegrationSettings kind="llm" />
         <LmStudioSettings />
       </Group>,
     <Group key="spotify" id="spotify" icon={Music} title="Spotify" {...connected(spotify, spotify?.user)}>

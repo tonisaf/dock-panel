@@ -165,8 +165,10 @@ export function AppContextMenu() {
         {info?.exePath && !isFile && (
           <Item
             onClick={() => {
-              prefs.recordLaunch(id);
-              run(invoke("launch_app_admin", { id }).then(() => usePanelStore.getState().setOpen(false)));
+              run(invoke("launch_app_admin", { id }).then(() => {
+                prefs.recordLaunch(id);
+                usePanelStore.getState().setOpen(false);
+              }));
             }}
           >
             <ShieldCheck className={icon} /> От имени администратора

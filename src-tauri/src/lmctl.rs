@@ -16,37 +16,37 @@ use serde_json::Value;
 #[serde(rename_all = "camelCase")]
 pub struct Model {
     /// What `lms load` takes.
-    key: String,
+    pub(crate) key: String,
     /// What `lms unload` takes (loaded models only).
-    identifier: Option<String>,
-    name: String,
+    pub(crate) identifier: Option<String>,
+    pub(crate) name: String,
     /// `llm`, `embedding`, ...
-    kind: String,
-    params: Option<String>,
-    quantization: Option<String>,
-    size_bytes: u64,
+    pub(crate) kind: String,
+    pub(crate) params: Option<String>,
+    pub(crate) quantization: Option<String>,
+    pub(crate) size_bytes: u64,
     /// Loaded context window.
-    context_length: Option<u64>,
-    max_context_length: Option<u64>,
+    pub(crate) context_length: Option<u64>,
+    pub(crate) max_context_length: Option<u64>,
     /// Auto-unload after this many idle ms.
-    ttl_ms: Option<u64>,
-    last_used_ms: Option<u64>,
+    pub(crate) ttl_ms: Option<u64>,
+    pub(crate) last_used_ms: Option<u64>,
     /// `idle` or `generating`, loaded models only.
-    status: Option<String>,
-    vision: bool,
-    tool_use: bool,
+    pub(crate) status: Option<String>,
+    pub(crate) vision: bool,
+    pub(crate) tool_use: bool,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Overview {
     /// The local server answers.
-    running: bool,
-    loaded: Vec<Model>,
+    pub(crate) running: bool,
+    pub(crate) loaded: Vec<Model>,
     /// On disk and not loaded.
-    available: Vec<Model>,
+    pub(crate) available: Vec<Model>,
     /// The CLI is missing or failed.
-    error: Option<String>,
+    pub(crate) error: Option<String>,
 }
 
 fn lms_path() -> PathBuf {
@@ -130,6 +130,9 @@ fn valid_key(key: &str) -> bool {
 
 #[tauri::command]
 pub async fn lmstudio_overview() -> Overview {
+    if crate::integrations::ollama() {
+        return crate::ollama::overview().await;
+    }
     let running = crate::lmstudio::is_running().await;
     let (loaded, available, error) = tauri::async_runtime::spawn_blocking(|| {
         let ps = lms(&["ps", "--json"]);
@@ -159,6 +162,9 @@ pub async fn lmstudio_overview() -> Overview {
 /// Loads a model; `ttl_minutes` unloads it after that long without use.
 #[tauri::command]
 pub async fn lmstudio_load(key: String, ttl_minutes: Option<u32>) -> Result<(), String> {
+    if crate::integrations::ollama() {
+        return crate::ollama::load(key, ttl_minutes).await;
+    }
     if !valid_key(&key) {
         return Err("Неверное имя модели".into());
     }
@@ -179,6 +185,9 @@ pub async fn lmstudio_load(key: String, ttl_minutes: Option<u32>) -> Result<(), 
 /// Unloads one model, or all of them when no identifier is given.
 #[tauri::command]
 pub async fn lmstudio_unload(identifier: Option<String>) -> Result<(), String> {
+    if crate::integrations::ollama() {
+        return crate::ollama::unload(identifier).await;
+    }
     if identifier.as_deref().is_some_and(|i| !valid_key(i)) {
         return Err("Неверное имя модели".into());
     }
@@ -192,6 +201,9 @@ pub async fn lmstudio_unload(identifier: Option<String>) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn lmstudio_server(start: bool) -> Result<(), String> {
+    if crate::integrations::ollama() {
+        return crate::ollama::server(start).await;
+    }
     tauri::async_runtime::spawn_blocking(move || {
         lms(&["server", if start { "start" } else { "stop" }]).map(|_| ())
     })

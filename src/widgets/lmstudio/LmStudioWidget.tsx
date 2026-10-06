@@ -1,3 +1,4 @@
+import { useIntegrations, llmName } from "../../lib/integrations";
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -50,8 +51,10 @@ function savedTtl(): number {
 }
 
 export function useLmStudioOverview() {
+  const { llm: provider, loaded } = useIntegrations();
   return useQuery({
-    queryKey: ["lmstudio-overview"],
+    enabled: loaded,
+    queryKey: ["lmstudio-overview", provider],
     queryFn: () => invoke<Overview>("lmstudio_overview"),
     staleTime: 5_000,
     refetchInterval: 10_000,
@@ -69,6 +72,7 @@ function details(m: Model) {
 
 /** What LM Studio has loaded, what is on disk, and the server switch; load and unload from here. */
 export function LmStudioWidget() {
+  const provider = useIntegrations((s) => s.llm);
   const queryClient = useQueryClient();
   const { data, error: queryError, isFetching, refetch } = useLmStudioOverview();
   const [busy, setBusy] = useState<string | null>(null);
@@ -98,7 +102,7 @@ export function LmStudioWidget() {
     }
   };
 
-  if (!data) return <Card title="LM Studio" icon={Cpu}><WidgetState kind={queryError ? "error" : "loading"} text={queryError ? String(queryError) : undefined} onRetry={() => void refetch()} retrying={isFetching} /></Card>;
+  if (!data) return <Card title={llmName()} icon={Cpu}><WidgetState kind={queryError ? "error" : "loading"} text={queryError ? String(queryError) : undefined} onRetry={() => void refetch()} retrying={isFetching} /></Card>;
   const now = Date.now();
   const chat = data.available.filter((m) => m.kind !== "embedding");
   const power = (
@@ -117,9 +121,9 @@ export function LmStudioWidget() {
   );
 
   return (
-    <Card title="LM Studio" icon={Cpu} action={power}>
+    <Card title={llmName()} icon={Cpu} action={power}>
       <p className={clsx("text-[12px]", data.running ? "text-ok" : "text-warn")}>
-        {data.running ? "Сервер запущен · 127.0.0.1:1234" : "Сервер не запущен"}
+        {data.running ? `Сервер запущен · ${provider === "ollama" ? "127.0.0.1:11434" : "127.0.0.1:1234"}` : "Сервер не запущен"}
       </p>
 
       {data.error ? (
@@ -185,7 +189,7 @@ export function LmStudioWidget() {
                     </div>
                   ))}
                   <div className="mt-1 flex items-center gap-1.5 px-1 text-[11.5px] text-fg-subtle">
-                    Выгружать при простое:
+                    {provider === "ollama" ? "Удерживать после загрузки:" : "Выгружать при простое:"}
                     {TTLS.map((t) => (
                       <button
                         key={t.minutes}

@@ -1,3 +1,4 @@
+import { llmName } from "../lib/integrations";
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Loader2, Sparkles } from "lucide-react";
@@ -39,7 +40,7 @@ export function MailSummary({ letter }: { letter: Letter }) {
           className="flex items-center gap-1.5 rounded-lg border border-stroke px-2.5 py-1.5 text-[12px] text-fg-muted hover:bg-ink/8 hover:text-fg disabled:opacity-50"
         >
           {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-          {busy ? "LM Studio читает…" : "Кратко"}
+          {busy ? `${llmName()} читает…` : "Кратко"}
         </button>
         {error && <p className="text-[12px] text-warn">{error}</p>}
       </div>

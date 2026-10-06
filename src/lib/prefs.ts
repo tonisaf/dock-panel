@@ -53,6 +53,7 @@ interface PrefsState {
   mailListWidth: number | null;
   agentsChatLimit: number;
   quickLlmModel: string;
+  quickOllamaModel: string;
   /** The same for the notes list next to an open note. */
   notesListWidth: number | null;
   /** "Search the web" row's engine. */
@@ -96,6 +97,7 @@ interface PrefsState {
   setMailListWidth: (width: number) => void;
   setAgentsChatLimit: (limit: number) => void;
   setQuickLlmModel: (model: string) => void;
+  setQuickOllamaModel: (model: string) => void;
   setNotesListWidth: (width: number) => void;
   setWidgetCollapsed: (id: string, collapsed: boolean) => void;
   setDeskOpacity: (opacity: number) => void;
@@ -147,6 +149,7 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   mailListWidth: null,
   agentsChatLimit: 0,
   quickLlmModel: "",
+  quickOllamaModel: "",
   notesListWidth: null,
   collapsedWidgets: {},
   deskOpacity: 78,
@@ -266,6 +269,10 @@ export const usePrefs = create<PrefsState>((set, get) => ({
     set({ systemAccent });
     persist("systemAccent", systemAccent);
   },
+  setQuickOllamaModel: (quickOllamaModel) => {
+    set({ quickOllamaModel });
+    persist("quickOllamaModel", quickOllamaModel);
+  },
   setQuickLlmModel: (quickLlmModel) => {
     set({ quickLlmModel });
     persist("quickLlmModel", quickLlmModel);
@@ -323,6 +330,7 @@ load("prefs.json", { defaults: {}, autoSave: 300 })
       hiddenWidgets: (await s.get<string[]>("hiddenWidgets")) ?? [],
       widgetColumns: (await s.get<Record<string, string[][]>>("widgetColumns")) ?? {},
       quickLlmModel: (await s.get<string>("quickLlmModel")) ?? "",
+      quickOllamaModel: (await s.get<string>("quickOllamaModel")) ?? "",
       agentsChatLimit: (await s.get<number>("agentsChatLimit")) ?? 0,
       mailListWidth: (await s.get<number>("mailListWidth")) ?? null,
       notesListWidth: (await s.get<number>("notesListWidth")) ?? null,

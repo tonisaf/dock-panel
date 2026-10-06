@@ -1,3 +1,4 @@
+import { useIntegrations, llmName } from "../lib/integrations";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useQueryClient } from "@tanstack/react-query";
@@ -8,9 +9,10 @@ import { useLmStudioOverview } from "../widgets/lmstudio/LmStudioWidget";
 
 export function LlmQuickButton({ onMenuOpen }: { onMenuOpen: () => void }) {
   const { data, error: queryError, refetch } = useLmStudioOverview();
+  const provider = useIntegrations((s) => s.llm);
   const queryClient = useQueryClient();
-  const preferred = usePrefs((s) => s.quickLlmModel);
-  const select = usePrefs((s) => s.setQuickLlmModel);
+  const preferred = usePrefs((s) => provider === "ollama" ? s.quickOllamaModel : s.quickLlmModel);
+  const select = usePrefs((s) => provider === "ollama" ? s.setQuickOllamaModel : s.setQuickLlmModel);
   const [menu, setMenu] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -77,7 +79,7 @@ export function LlmQuickButton({ onMenuOpen }: { onMenuOpen: () => void }) {
         <button className={item} disabled={busy || !data} onClick={() => void run("lmstudio_server", { start: !data?.running })}>
           <Power className="size-4" />{data?.running ? "Остановить сервер" : "Запустить сервер"}
         </button>
-        <p className="border-t border-stroke px-2.5 pt-2 text-[12px] text-fg-subtle">Модель для кнопки LLM</p>
+        <p className="border-t border-stroke px-2.5 pt-2 text-[12px] text-fg-subtle">Модель для кнопки LLM · {llmName()}</p>
         <div className="max-h-[40vh] overflow-y-auto">
           {models.map((m) => <button key={m.key} disabled={busy} className={item} onClick={() => { select(m.key); setMenu(false); }}>
             <span className="grid size-4 shrink-0 place-items-center">{m.key === model?.key && <Check className="size-4" />}</span>
@@ -85,7 +87,7 @@ export function LlmQuickButton({ onMenuOpen }: { onMenuOpen: () => void }) {
             {data?.loaded.some((loadedModel) => loadedModel.key === m.key) && <span className="ml-auto shrink-0 text-[11px] text-accent">загружена</span>}
           </button>)}
         </div>
-        {!models.length && <p className="px-2.5 py-2 text-[12px] text-fg-subtle">Нет доступных моделей. Проверьте LM Studio.</p>}
+        {!models.length && <p className="px-2.5 py-2 text-[12px] text-fg-subtle">Нет доступных моделей. Проверьте выбранный сервер.</p>}
         {preferred && !model && <p className="px-2.5 py-1 text-[12px] text-warn">Выбранная модель недоступна. Выберите другую.</p>}
         {(error || data?.error || queryError) && <p role="alert" className="px-2.5 py-1 text-[12px] text-warn">{error || data?.error || String(queryError)}</p>}
         <button className={item} disabled={busy} onClick={() => void refetch()}><RefreshCw className="size-4" />Обновить список</button>

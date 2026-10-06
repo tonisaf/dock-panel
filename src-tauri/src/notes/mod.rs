@@ -12,7 +12,7 @@
 //! Layout under `<app data>/notes/`: `index.json` (notes and their text),
 //! `pages/<id>.json` (blocks), `images/`, `outbox.json`, `settings.json`.
 
-mod blocks;
+pub(crate) mod blocks;
 mod edit;
 
 use std::collections::{HashMap, HashSet};
@@ -254,7 +254,7 @@ fn now_ms() -> u64 {
 }
 
 /// Unix ms as Notion's ISO form ("2026-09-28T10:04:05.000Z").
-fn iso(ms: u64) -> String {
+pub(crate) fn iso(ms: u64) -> String {
     let secs = ms / 1000;
     let days = (secs / 86_400) as i64;
     // Howard Hinnant's days-to-civil.
@@ -827,6 +827,9 @@ async fn apply_edit(token: &str, op: &Op) -> Result<Value, String> {
 
 /// Refreshes the cache from Notion. Without `force`, a recent sync is enough.
 pub async fn sync(force: bool) -> Result<(), String> {
+    if crate::integrations::integrations_settings().notes != "notion" {
+        return Ok(());
+    }
     let Some(source) = with_store(|s| s.settings.source.clone()).flatten() else {
         return Ok(());
     };

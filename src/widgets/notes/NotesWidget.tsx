@@ -17,7 +17,7 @@ export function NotesWidget() {
     return (
       <Card title="Заметки" icon={StickyNote}>
         <button onClick={() => setTab("settings")} className="text-left text-[12px] text-fg-subtle hover:text-fg">
-          Выберите базу заметок в настройках Notion →
+          Выберите источник заметок в настройках →
         </button>
       </Card>
     );
@@ -39,7 +39,7 @@ export function NotesWidget() {
       }
     >
       {notes.length === 0 ? (
-        <p className="text-[12px] text-fg-subtle">{s.syncing ? "Загружаю из Notion…" : "Заметок пока нет"}</p>
+        <p className="text-[12px] text-fg-subtle">{s.syncing ? "Загружаю заметки…" : "Заметок пока нет"}</p>
       ) : (
         <div className="-mx-1.5 flex flex-col">
           {notes.map((n) => (

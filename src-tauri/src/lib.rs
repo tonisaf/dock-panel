@@ -13,9 +13,12 @@ mod files;
 mod gcal;
 mod google_search;
 mod home;
+mod integrations;
 mod listening;
 mod lmctl;
 mod lmstudio;
+mod local_note_images;
+mod local_notes;
 mod mail;
 mod media;
 mod monitors;
@@ -23,6 +26,8 @@ mod net;
 mod notes;
 mod notion;
 mod oauth;
+mod obsidian;
+mod ollama;
 mod openclaw;
 mod panel;
 mod player;
@@ -73,12 +78,17 @@ pub fn run() {
                 })
                 .build(),
         )
+        .register_uri_scheme_protocol("localnoteimg", |_ctx, request| {
+            local_note_images::response(&request)
+        })
         .register_uri_scheme_protocol("noteimg", |_ctx, request| notes::image_response(&request))
         .register_asynchronous_uri_scheme_protocol("appicon", |_ctx, request, responder| {
             apps::handle_icon_request(request, responder);
         })
         .setup(move |app| {
             let handle = app.handle();
+            integrations::init(handle);
+            local_notes::init(handle);
             if let Ok(dir) = app.path().app_data_dir() {
                 trust::load_pins(&dir.join("prefs.json"));
             }
@@ -114,6 +124,11 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            integrations::integrations_settings,
+            integrations::integrations_save,
+            obsidian::obsidian_command,
+            local_notes::local_notes_command,
+            local_note_images::local_note_import_image,
             power::power_action,
             google_search::google_ai_open,
             google_search::google_ai_embed,

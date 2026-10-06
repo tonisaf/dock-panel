@@ -145,7 +145,7 @@ export function TaskEditor({ task, onClose }: { task: Task; onClose: () => void 
             }}
             className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12px] text-fg-muted hover:bg-ink/8 hover:text-fg"
           >
-            <ExternalLink className="size-3.5" /> Открыть в Notion
+            <ExternalLink className="size-3.5" /> Открыть в {task.url.startsWith("obsidian:") ? "Obsidian" : "Notion"}
           </button>
         )}
         {busy && <Loader2 className="size-3.5 animate-spin text-fg-subtle" />}

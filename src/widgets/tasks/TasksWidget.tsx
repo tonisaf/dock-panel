@@ -2,7 +2,7 @@ import { AnimatePresence } from "motion/react";
 import { CheckSquare, ChevronRight } from "lucide-react";
 import { WidgetState } from "../../components/WidgetState";
 import { Card } from "../../components/Card";
-import { usePrefs } from "../../lib/prefs";
+import { useTasksSource } from "../../lib/integrations";
 import { usePanelStore } from "../../store";
 import { useNotionStatus, useTasks } from "./api";
 import { TaskRow } from "./TaskRow";
@@ -13,7 +13,7 @@ const HOME_TASKS = 5;
 
 export function TasksWidget() {
   const setTab = usePanelStore((s) => s.setTab);
-  const source = usePrefs((s) => s.notionSource);
+  const source = useTasksSource();
   const status = useNotionStatus();
   const { data, isError, isPending, isFetching, refetch } = useTasks();
   const { onComplete, last, undo } = useUndoableComplete();
@@ -22,7 +22,7 @@ export function TasksWidget() {
     return (
       <Card title="Задачи" icon={CheckSquare}>
         <button onClick={() => setTab("settings")} className="text-left text-[12px] text-fg-subtle hover:text-fg">
-          Подключите Notion в настройках →
+          Выберите источник заметок и задач в настройках →
         </button>
       </Card>
     );

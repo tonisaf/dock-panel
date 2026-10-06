@@ -138,6 +138,8 @@ export function NoteEditor({ note, onDone }: { note: Note; onDone: () => void })
     >
       <input
         value={title}
+          readOnly={note.url.startsWith("obsidian:")}
+          title={note.url.startsWith("obsidian:") ? "Переименуйте файл в Obsidian" : undefined}
         onChange={(e) => setTitle(e.target.value)}
         placeholder="Заголовок"
         className="h-10 w-full rounded-lg border border-stroke bg-field px-2.5 text-[16px] font-semibold text-fg outline-none focus:border-accent/50"

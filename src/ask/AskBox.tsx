@@ -1,3 +1,4 @@
+import { useIntegrations, llmName } from "../lib/integrations";
 import { useState } from "react";
 import { ArrowUp, Check, Copy, Loader2, Square, X } from "lucide-react";
 import clsx from "clsx";
@@ -13,7 +14,7 @@ const MODELS: { value: Model; label: string; hint: string }[] = [
 ];
 
 const providerName = (model: Model) =>
-  model === "openclaw" ? "OpenClaw" : model === "lmstudio" ? "LM Studio" : "Claude";
+  model === "openclaw" ? "OpenClaw" : model === "lmstudio" ? llmName() : "Claude";
 
 /**
  * A question box for Claude through Claude Code (`claude -p`): free text or
@@ -21,6 +22,7 @@ const providerName = (model: Model) =>
  * `compact` trims it for the home widget.
  */
 export function AskBox({ compact = false }: { compact?: boolean }) {
+  useIntegrations((s) => s.llm);
   const { draft, setDraft, model, setModel, question, answer, status, durationMs, ask, cancel, clear } = useAsk();
   const [templateError, setTemplateError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -108,7 +110,7 @@ export function AskBox({ compact = false }: { compact?: boolean }) {
                   model === m.value ? "bg-ink/10 text-fg" : "text-fg-subtle hover:text-fg",
                 )}
               >
-                {m.label}
+                {m.value === "lmstudio" ? llmName() : m.label}
               </button>
             ))}
           </div>

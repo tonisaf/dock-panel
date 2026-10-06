@@ -47,7 +47,7 @@ export const WIDGETS: WidgetDef[] = [
   { id: "notes", title: "Заметки", component: NotesWidget },
   { id: "ai", title: "Лимиты AI", component: AiLimitsWidget },
   { id: "agents", title: "Агенты", component: AgentsWidget },
-  { id: "lmstudio", title: "LM Studio", component: LmStudioWidget },
+  { id: "lmstudio", title: "Локальная LLM", component: LmStudioWidget },
   { id: "docker", title: "Docker", component: DockerWidget },
   { id: "ask", title: "Спросить Claude", component: AskWidget },
   { id: "pomodoro", title: "Помодоро", component: PomodoroWidget },

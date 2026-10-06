@@ -1,6 +1,6 @@
+import { dataInvoke, useTasksSource, useIntegrations, tasksProvider } from "../../lib/integrations";
 import { invoke } from "@tauri-apps/api/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { usePrefs } from "../../lib/prefs";
 
 export interface Badge {
   name: string;
@@ -31,18 +31,20 @@ export interface NotionStatus {
 }
 
 export function useNotionStatus() {
-  return useQuery({
+  const settings = useIntegrations();
+  const query = useQuery({
     queryKey: ["notion-status"],
     queryFn: () => invoke<NotionStatus>("notion_status"),
     staleTime: 5 * 60_000,
   });
+  return tasksProvider(settings) === "obsidian" ? { ...query, data: { connected: !!settings.vault, workspace: "Obsidian", error: null } } : query;
 }
 
 export function useTasks() {
-  const source = usePrefs((s) => s.notionSource);
+  const source = useTasksSource();
   return useQuery({
     queryKey: ["notion-tasks", source?.id],
-    queryFn: () => invoke<TaskList>("notion_tasks", { sourceId: source!.id }),
+    queryFn: () => dataInvoke<TaskList>("notion_tasks", { sourceId: source!.id }),
     enabled: !!source,
     // Kept across panel opens; the interval refreshes it while open.
     staleTime: 2 * 60_000,
@@ -53,11 +55,11 @@ export function useTasks() {
 /** Optimistically drops the task; `onDone` gets the previous status for undo. */
 export function useCompleteTask() {
   const queryClient = useQueryClient();
-  const source = usePrefs((s) => s.notionSource);
+  const source = useTasksSource();
   const key = ["notion-tasks", source?.id];
 
   return useMutation({
-    mutationFn: (task: Task) => invoke("notion_complete", { sourceId: source!.id, pageId: task.id }),
+    mutationFn: (task: Task) => dataInvoke("notion_complete", { sourceId: source!.id, pageId: task.id }),
     onMutate: async (task) => {
       await queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueryData<TaskList>(key);
@@ -66,6 +68,7 @@ export function useCompleteTask() {
       }
       return { previous };
     },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["notes"] }); },
     onError: (_e, _task, ctx) => {
       if (ctx?.previous) queryClient.setQueryData(key, ctx.previous);
     },
@@ -73,17 +76,18 @@ export function useCompleteTask() {
 }
 
 export async function restoreTask(sourceId: string, task: Task) {
-  await invoke("notion_restore", { sourceId, pageId: task.id, status: task.status?.name ?? null });
+  await dataInvoke("notion_restore", { sourceId, pageId: task.id, status: task.status?.name ?? null });
 }
 
 export function useCreateTask() {
   const queryClient = useQueryClient();
-  const source = usePrefs((s) => s.notionSource);
+  const source = useTasksSource();
   const key = ["notion-tasks", source?.id];
 
   return useMutation({
-    mutationFn: (title: string) => invoke<Task>("notion_create", { sourceId: source!.id, title }),
+    mutationFn: (title: string) => dataInvoke<Task>("notion_create", { sourceId: source!.id, title }),
     onSuccess: (task) => {
+      queryClient.invalidateQueries({ queryKey: ["notes"] });
       queryClient.setQueryData<TaskList>(key, (prev) => (prev ? { ...prev, tasks: [task, ...prev.tasks] } : prev));
       queryClient.invalidateQueries({ queryKey: key });
     },
@@ -124,10 +128,10 @@ export interface TaskSchema {
 }
 
 export function useTaskSchema(enabled: boolean) {
-  const source = usePrefs((s) => s.notionSource);
+  const source = useTasksSource();
   return useQuery({
     queryKey: ["notion-task-schema", source?.id],
-    queryFn: () => invoke<TaskSchema>("notion_task_schema", { sourceId: source!.id }),
+    queryFn: () => dataInvoke<TaskSchema>("notion_task_schema", { sourceId: source!.id }),
     enabled: enabled && !!source,
     staleTime: 5 * 60_000,
   });
@@ -145,15 +149,16 @@ export interface TaskChange {
 /** Edits and deletion, shown in the list at once and put right by Notion's answer. */
 export function useTaskActions() {
   const queryClient = useQueryClient();
-  const source = usePrefs((s) => s.notionSource);
+  const source = useTasksSource();
   const key = ["notion-tasks", source?.id];
   const patch = (fn: (tasks: Task[]) => Task[]) =>
     queryClient.setQueryData<TaskList>(key, (prev) => (prev ? { ...prev, tasks: fn(prev.tasks) } : prev));
 
   return {
     update: async (task: Task, change: TaskChange) => {
-      const updated = await invoke<Task>("notion_update", { sourceId: source!.id, pageId: task.id, change });
+      const updated = await dataInvoke<Task>("notion_update", { sourceId: source!.id, pageId: task.id, change });
       patch((tasks) => tasks.map((t) => (t.id === task.id ? updated : t)));
+      queryClient.invalidateQueries({ queryKey: ["notes"] });
       // A status in the "Complete" group takes the task off the list.
       if (change.status) queryClient.invalidateQueries({ queryKey: key });
       return updated;
@@ -161,7 +166,9 @@ export function useTaskActions() {
     remove: async (task: Task) => {
       patch((tasks) => tasks.filter((t) => t.id !== task.id));
       try {
-        await invoke("notion_delete", { pageId: task.id });
+        await dataInvoke("notion_delete", { pageId: task.id });
+        queryClient.invalidateQueries({ queryKey: key });
+        queryClient.invalidateQueries({ queryKey: ["notes"] });
       } catch (e) {
         queryClient.invalidateQueries({ queryKey: key });
         throw e;

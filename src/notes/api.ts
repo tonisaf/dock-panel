@@ -1,5 +1,6 @@
+import { dataInvoke as invoke, useIntegrations } from "../lib/integrations";
 import { useEffect } from "react";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -83,10 +84,12 @@ export interface NoteHit {
 }
 
 const KEY = ["notes"];
+const notesKey = () => { const s = useIntegrations.getState(); return [...KEY, s.notes, s.vault]; };
 const pageKey = (id: string) => ["note-page", id];
 
 /** Everything reads the on-disk cache; the backend announces each change. */
 export function useNotes() {
+  const { notes: provider, loaded } = useIntegrations();
   const queryClient = useQueryClient();
   useEffect(() => {
     const un = listen("notes:changed", () => {
@@ -96,7 +99,7 @@ export function useNotes() {
       un.then((f) => f());
     };
   }, [queryClient]);
-  return useQuery({ queryKey: KEY, queryFn: () => invoke<NotesState>("notes_state"), staleTime: Infinity });
+  return useQuery({ queryKey: notesKey(), enabled: loaded, refetchInterval: provider === "obsidian" ? 30_000 : false, queryFn: () => invoke<NotesState>("notes_state"), staleTime: Infinity });
 }
 
 /** A note's blocks; refreshed when a sync lands. */
@@ -121,11 +124,12 @@ export function useNotePage(note: Note | null) {
 }
 
 export function useNoteSearch(query: string) {
+  const settings = useIntegrations();
   const term = query.trim();
   return useQuery({
-    queryKey: ["notes-search", term],
+    queryKey: ["notes-search", settings.notes, settings.vault, term],
     queryFn: () => invoke<NoteHit[]>("notes_search", { query: term, limit: 6 }),
-    enabled: term.length >= 2,
+    enabled: settings.loaded && term.length >= 2,
     staleTime: 10_000,
     placeholderData: keepPreviousData,
   });
@@ -133,17 +137,22 @@ export function useNoteSearch(query: string) {
 
 export function useNotesActions() {
   const queryClient = useQueryClient();
-  const put = (s: NotesState) => queryClient.setQueryData(KEY, s);
+  const put = (s: NotesState, key = notesKey()) => queryClient.setQueryData(key, s);
   return {
-    sync: async (force: boolean) => put(await invoke<NotesState>("notes_sync", { force })),
+    sync: async (force: boolean) => { const key = notesKey(); put(await invoke<NotesState>("notes_sync", { force }), key); },
     setSource: async (source: NotesSource | null) => put(await invoke<NotesState>("notes_set_source", { source })),
-    create: (title: string, body: string) => invoke<Note>("notes_create", { title, body }),
+    create: async (title: string, body: string) => {
+      const note = await invoke<Note>("notes_create", { title, body });
+      await queryClient.invalidateQueries({ queryKey: ["notion-tasks"] });
+      return note;
+    },
     /** The note as editable text: "# ", "- ", "1. ", "[ ] ", "> ", indentation for nesting. */
     text: (id: string) => invoke<string>("notes_text", { id }),
     edit: async (note: Note, text: string) => {
       const blocks = await invoke<Block[]>("notes_edit", { id: note.id, text });
       queryClient.setQueryData([...pageKey(note.id), note.edited], blocks);
       await queryClient.invalidateQueries({ queryKey: KEY });
+      await queryClient.invalidateQueries({ queryKey: ["notion-tasks"] });
     },
     setProps: async (id: string, props: NoteProps) => {
       await invoke<Note>("notes_set_props", { id, ...props });
@@ -152,6 +161,8 @@ export function useNotesActions() {
     toggle: async (note: Note, blockId: string, checked: boolean) => {
       const blocks = await invoke<Block[]>("notes_toggle", { pageId: note.id, blockId, checked });
       queryClient.setQueryData([...pageKey(note.id), note.edited], blocks);
+      await queryClient.invalidateQueries({ queryKey: KEY });
+      await queryClient.invalidateQueries({ queryKey: ["notion-tasks"] });
     },
   };
 }

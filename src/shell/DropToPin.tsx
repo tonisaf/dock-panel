@@ -1,3 +1,4 @@
+import { imageDropTarget } from "../notes/localNoteImages";
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Pin } from "lucide-react";
@@ -11,6 +12,7 @@ export function DropToPin() {
 
   useEffect(() => {
     const unlisten = getCurrentWebview().onDragDropEvent(({ payload }) => {
+      if (payload.type !== "leave" && imageDropTarget(payload.position.x, payload.position.y)) { setOver(false); return; }
       if (payload.type === "enter" || payload.type === "over") setOver(true);
       else if (payload.type === "leave") setOver(false);
       else {

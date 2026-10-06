@@ -163,7 +163,7 @@ function NotesSourcePicker() {
   );
 }
 
-export function NotionSettings() {
+export function NotionSettings({ tasksOnly = false }: { tasksOnly?: boolean }) {
   const queryClient = useQueryClient();
   const setNotionSource = usePrefs((s) => s.setNotionSource);
   const { data: status, isPending } = useNotionStatus();
@@ -193,7 +193,7 @@ export function NotionSettings() {
         </button>
       </div>
       <SourcePicker />
-      <NotesSourcePicker />
+      {!tasksOnly && <NotesSourcePicker />}
     </div>
   );
 }

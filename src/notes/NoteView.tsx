@@ -215,7 +215,7 @@ export function OpenInNotion({ url }: { url: string }) {
   return (
     <button
       onClick={() => openUrl(url).catch(console.error)}
-      title="Открыть в Notion"
+      title={url.startsWith("obsidian:") ? "Открыть в Obsidian" : "Открыть в Notion"}
       className="grid size-7 shrink-0 place-items-center rounded-lg text-fg-subtle hover:bg-ink/10 hover:text-fg"
     >
       <ExternalLink className="size-3.5" />

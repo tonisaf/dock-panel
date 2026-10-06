@@ -1,3 +1,4 @@
+import { useIntegrations, llmName } from "../lib/integrations";
 import { invoke } from "@tauri-apps/api/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -9,8 +10,10 @@ export interface LmStudioStatus {
 }
 
 export function useLmStudioStatus() {
+  const { llm: provider, loaded } = useIntegrations();
   return useQuery({
-    queryKey: ["lmstudio-status"],
+    enabled: loaded,
+    queryKey: ["lmstudio-status", provider],
     queryFn: () => invoke<LmStudioStatus>("lmstudio_status"),
     staleTime: 30_000,
   });
@@ -21,6 +24,7 @@ const button =
 
 /** The local LM Studio server; questions go there from the AI tab with the «LM Studio» switch. */
 export function LmStudioSettings() {
+  const provider = useIntegrations((s) => s.llm);
   const queryClient = useQueryClient();
   const query = useLmStudioStatus();
   const status = query.data;
@@ -33,8 +37,7 @@ export function LmStudioSettings() {
   return (
     <div className="flex flex-col gap-2.5 p-3.5 text-[12.5px] leading-relaxed text-fg-muted">
       <p>
-        Локальный сервер LM Studio (<code>127.0.0.1:1234</code>): вкладка Developer → Start Server. Вопросы — на вкладке
-        AI, переключатель «LM Studio».
+        Локальный сервер {llmName()} (<code>{provider === "ollama" ? "127.0.0.1:11434" : "127.0.0.1:1234"}</code>). Вопросы — на вкладке AI.
       </p>
       <div className="flex items-center gap-2">
         <span className={status?.reachable ? "text-ok" : "text-warn"}>

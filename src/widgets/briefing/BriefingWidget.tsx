@@ -1,3 +1,4 @@
+import { llmName } from "../../lib/integrations";
 import { WidgetMenu } from "../../components/WidgetMenu";
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -87,7 +88,7 @@ export function BriefingWidget() {
           className="flex items-center gap-2 text-left text-[12.5px] text-fg-muted hover:text-fg disabled:opacity-60"
         >
           {busy && <Loader2 className="size-3.5 animate-spin" />}
-          {busy ? "LM Studio составляет брифинг…" : "Составить брифинг на сегодня: погода, события, задачи и почта →"}
+          {busy ? `${llmName()} составляет брифинг…` : "Составить брифинг на сегодня: погода, события, задачи и почта →"}
         </button>
       )}
       {error && <p className="mt-2 text-[12px] leading-relaxed text-warn">{error}</p>}

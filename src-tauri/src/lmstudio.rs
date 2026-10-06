@@ -14,8 +14,27 @@ use tauri::{AppHandle, Emitter};
 
 use crate::secrets;
 
-const MODEL_KEY: &str = "DockPanel/lmstudio-model";
-const BASE: &str = "http://127.0.0.1:1234";
+fn model_key() -> &'static str {
+    if crate::integrations::ollama() {
+        "DockPanel/ollama-model"
+    } else {
+        "DockPanel/lmstudio-model"
+    }
+}
+fn provider_name() -> &'static str {
+    if crate::integrations::ollama() {
+        "Ollama"
+    } else {
+        "LM Studio"
+    }
+}
+fn base() -> &'static str {
+    if crate::integrations::ollama() {
+        "http://127.0.0.1:11434"
+    } else {
+        "http://127.0.0.1:1234"
+    }
+}
 
 /// The question that may still report; 0 when none (a new one or a cancel resets it).
 static CURRENT: AtomicU64 = AtomicU64::new(0);
@@ -56,7 +75,11 @@ fn client(timeout: Duration) -> Result<reqwest::Client, String> {
 
 fn unreachable_message(e: &reqwest::Error) -> String {
     if e.is_connect() || e.is_timeout() {
-        "LM Studio не отвечает: запустите сервер (вкладка Developer → Start Server)".into()
+        if crate::integrations::ollama() {
+            "Ollama не отвечает: запустите Ollama на этом компьютере".into()
+        } else {
+            "LM Studio не отвечает: запустите сервер (вкладка Developer → Start Server)".into()
+        }
     } else {
         e.to_string()
     }
@@ -64,13 +87,20 @@ fn unreachable_message(e: &reqwest::Error) -> String {
 
 /// The models the server lists.
 async fn models() -> Result<Vec<String>, String> {
+    models_at(base()).await
+}
+async fn models_at(server: &str) -> Result<Vec<String>, String> {
     let res = client(Duration::from_secs(5))?
-        .get(format!("{BASE}/v1/models"))
+        .get(format!("{server}/v1/models"))
         .send()
         .await
         .map_err(|e| unreachable_message(&e))?;
     if !res.status().is_success() {
-        return Err(format!("LM Studio ответил {}", res.status().as_u16()));
+        return Err(format!(
+            "{} ответил {}",
+            provider_name(),
+            res.status().as_u16()
+        ));
     }
     let v: Value = res.json().await.map_err(|e| e.to_string())?;
     Ok(model_ids(&v))
@@ -96,20 +126,21 @@ pub async fn is_running() -> bool {
 }
 
 /// The saved model, or the first chat model the server lists.
-async fn pick_model() -> Result<String, String> {
-    match secrets::read(MODEL_KEY) {
+async fn pick_model(server: &str, key: &str) -> Result<String, String> {
+    match secrets::read(key) {
         Some(m) => Ok(m),
-        None => models()
-            .await?
-            .into_iter()
-            .next()
-            .ok_or_else(|| "В LM Studio нет моделей: скачайте и загрузите модель".into()),
+        None => models_at(server).await?.into_iter().next().ok_or_else(|| {
+            format!(
+                "В {} нет моделей: сначала установите модель",
+                provider_name()
+            )
+        }),
     }
 }
 
 #[tauri::command]
 pub async fn lmstudio_status() -> Status {
-    let model = secrets::read(MODEL_KEY);
+    let model = secrets::read(model_key());
     match models().await {
         Ok(models) => Status {
             reachable: true,
@@ -131,10 +162,10 @@ pub async fn lmstudio_status() -> Status {
 pub fn lmstudio_set_model(model: String) -> Result<(), String> {
     let model = model.trim();
     if model.is_empty() {
-        secrets::delete(MODEL_KEY);
+        secrets::delete(model_key());
         Ok(())
     } else {
-        secrets::write(MODEL_KEY, model)
+        secrets::write(model_key(), model)
     }
 }
 
@@ -149,7 +180,7 @@ pub fn ask(app: AppHandle, id: u64, prompt: String) -> Result<(), String> {
         }
         CURRENT.store(0, Ordering::SeqCst);
         let (text, error) = match outcome {
-            Ok(text) if text.is_empty() => ("LM Studio не ответил".to_string(), true),
+            Ok(text) if text.is_empty() => (format!("{} не ответил", provider_name()), true),
             Ok(text) => (text, false),
             Err(e) => (e, true),
         };
@@ -172,7 +203,9 @@ pub fn cancel() {
 }
 
 async fn stream(app: &AppHandle, id: u64, prompt: &str) -> Result<String, String> {
-    let model = pick_model().await?;
+    let server = base();
+    let key = model_key();
+    let model = pick_model(server, key).await?;
     let body = json!({
         "model": model,
         "stream": true,
@@ -183,7 +216,7 @@ async fn stream(app: &AppHandle, id: u64, prompt: &str) -> Result<String, String
     });
     // A model that is not loaded yet loads on the first request (JIT loading), so allow for that.
     let mut res = client(Duration::from_secs(300))?
-        .post(format!("{BASE}/v1/chat/completions"))
+        .post(format!("{server}/v1/chat/completions"))
         .json(&body)
         .send()
         .await
@@ -197,7 +230,7 @@ async fn stream(app: &AppHandle, id: u64, prompt: &str) -> Result<String, String
                 .or_else(|| v["error"].as_str())
                 .map(str::to_string)
         });
-        return Err(message.unwrap_or_else(|| format!("LM Studio ответил {code}")));
+        return Err(message.unwrap_or_else(|| format!("{} ответил {code}", provider_name())));
     }
 
     let mut full = String::new();
@@ -232,6 +265,8 @@ const BRIEFING_PROMPT: &str = "Ты составляешь утренний бр
 /// One-shot jobs with a fixed instruction: `mail` (a letter's text) or `briefing` (the day's data).
 #[tauri::command]
 pub async fn llm_run(task: String, text: String) -> Result<String, String> {
+    let server = base();
+    let key = model_key();
     let system = match task.as_str() {
         "mail" => MAIL_PROMPT,
         "briefing" => BRIEFING_PROMPT,
@@ -244,8 +279,8 @@ pub async fn llm_run(task: String, text: String) -> Result<String, String> {
     if text.trim().is_empty() {
         return Err("Нечего пересказывать".into());
     }
-    let body = json!({
-        "model": pick_model().await?,
+    let mut body = json!({
+        "model": pick_model(server,key).await?,
         "stream": false,
         "temperature": 0.3,
         // Summaries don't need the model's chain of thought: 2 s instead of 30 on Qwen 3.6.
@@ -255,9 +290,12 @@ pub async fn llm_run(task: String, text: String) -> Result<String, String> {
             { "role": "user", "content": text },
         ],
     });
+    if server.ends_with(":11434") {
+        body.as_object_mut().unwrap().remove("reasoning_effort");
+    }
     // The first request may load the model (JIT), and a thinking model takes a while.
     let res = client(Duration::from_secs(300))?
-        .post(format!("{BASE}/v1/chat/completions"))
+        .post(format!("{server}/v1/chat/completions"))
         .json(&body)
         .send()
         .await
@@ -268,7 +306,7 @@ pub async fn llm_run(task: String, text: String) -> Result<String, String> {
         return Err(v["error"]["message"]
             .as_str()
             .map(str::to_string)
-            .unwrap_or_else(|| format!("LM Studio ответил {code}")));
+            .unwrap_or_else(|| format!("{} ответил {code}", provider_name())));
     }
     let answer = strip_thinking(
         v["choices"][0]["message"]["content"]
@@ -276,7 +314,7 @@ pub async fn llm_run(task: String, text: String) -> Result<String, String> {
             .unwrap_or_default(),
     );
     if answer.is_empty() {
-        Err("LM Studio не ответил".into())
+        Err(format!("{} не ответил", provider_name()))
     } else {
         Ok(answer)
     }

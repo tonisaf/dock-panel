@@ -92,8 +92,10 @@ export async function activateItem(item: SearchItem, { admin = false } = {}) {
     case "app":
     case "file":
       if (admin) {
-        usePrefs.getState().recordLaunch(item.app.id);
-        await invoke("launch_app_admin", { id: item.app.id }).catch(console.error);
+        try {
+          await invoke("launch_app_admin", { id: item.app.id });
+          usePrefs.getState().recordLaunch(item.app.id);
+        } catch (e) { console.error(e); }
         panel.setOpen(false);
       } else {
         await launchApp(item.app.id);
